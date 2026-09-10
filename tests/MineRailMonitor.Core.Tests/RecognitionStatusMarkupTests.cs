@@ -1,0 +1,66 @@
+namespace MineRailMonitor.Core.Tests;
+
+public sealed class RecognitionStatusMarkupTests
+{
+    [Fact]
+    public void Settings_and_monitor_expose_vehicle_count_and_head_warning_copy()
+    {
+        var settingsMarkup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
+        var settingsCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "SettingsPage.xaml.cs"));
+        var monitorMarkup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));
+        var monitorCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml.cs"));
+        var deviceVisualCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Controls", "DeviceVisual.cs"));
+        var deviceLayerCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Controls", "DeviceLayer.xaml.cs"));
+        var mainWindowCode = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));
+        var simulatorMarkup = File.ReadAllText(Locate("src", "MineRailMonitor.Simulator", "MainWindow.xaml"));
+        var simulatorCode = File.ReadAllText(Locate("src", "MineRailMonitor.Simulator", "MainWindow.xaml.cs"));
+        var communicationCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "CommunicationPage.xaml.cs"));
+
+        Assert.Contains("标准列车节数（含车头）", settingsMarkup);
+        Assert.Contains("提示：包含车头", settingsMarkup);
+        Assert.Contains("ExpectedVehicleCount", settingsCode);
+        Assert.Contains("InterVehicleTimeoutSeconds", settingsCode);
+        Assert.Contains("RecognitionNotice", monitorMarkup);
+        Assert.Contains("RecognitionSnapshotText", monitorMarkup);
+        Assert.Contains("SetRecognitionSnapshot", monitorCode);
+        Assert.Contains("SetRecognitionStatus", monitorCode);
+        Assert.Contains("SetRfidRuntimeStates", monitorCode);
+        Assert.Contains("RfidStationVisualState", deviceVisualCode);
+        Assert.Contains("SetRuntimeStates", deviceLayerCode);
+        Assert.Contains("未检测到车头标签", mainWindowCode);
+        Assert.Contains("首个识别标签不是有效车头标签", mainWindowCode);
+        Assert.Contains("检测到多个车头标签", mainWindowCode);
+        Assert.Contains("协议数据告警", mainWindowCode);
+        Assert.Contains("脱节报警", mainWindowCode);
+        Assert.Contains("SetRfid(0, \"0001\")", simulatorCode);
+        Assert.Contains("0x10 + i", simulatorCode);
+        Assert.Contains("i <= 10", simulatorCode);
+        Assert.Contains("多车头 11 节", simulatorMarkup);
+        Assert.Contains("无车头 11 节", simulatorMarkup);
+        Assert.Contains("首位异常 11 节", simulatorMarkup);
+        Assert.Contains("ApplyMultiHeadPreset", simulatorCode);
+        Assert.Contains("ApplyNoHeadPreset", simulatorCode);
+        Assert.Contains("ApplyFirstNonHeadPreset", simulatorCode);
+        Assert.Contains("Slots", simulatorCode);
+        Assert.Contains("扫入下一张", simulatorMarkup);
+        Assert.Contains("RFID 槽位：", communicationCode);
+        Assert.Contains("ActualNonZeroSlotCount", communicationCode);
+    }
+
+    private static string Locate(params string[] segments)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = segments.Aggregate(directory.FullName, Path.Combine);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException($"Unable to locate {Path.Combine(segments)} from the test directory.");
+    }
+}

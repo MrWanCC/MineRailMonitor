@@ -1,0 +1,39 @@
+{
+  "Id": "Example",
+  "Name": "示例项目（无现场地图）",
+  "DefaultStationId": "560",
+  "RfidSettings": {
+    "PollIntervalMs": 200,
+    "ExpectedVehicleCount": 11,
+    "InterVehicleTimeoutSeconds": 30,
+    "EmptyRfidValue": 0
+  },
+  "RfidStations": [
+    {
+      "StationId": "RFID-01",
+      "Name": "示例基站01",
+      "IpAddress": "127.0.0.1",
+      "Port": 62101,
+      "ProtocolAddress": 1,
+      "Enabled": false
+    },
+    {
+      "StationId": "RFID-02",
+      "Name": "示例基站02",
+      "IpAddress": "127.0.0.1",
+      "Port": 62102,
+      "ProtocolAddress": 2,
+      "Enabled": false
+    }
+  ],
+  "Stations": [
+    {
+      "Id": "560",
+      "ConfigFile": "stations/560.json"
+    },
+    {
+      "Id": "620",
+      "ConfigFile": "stations/620.json"
+    }
+  ]
+}

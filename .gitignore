@@ -1,0 +1,43 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+TestResults/
+publish/
+.dotnet/
+
+# Runtime data, diagnostics, and generated acceptance output
+artifacts/
+**/artifacts/
+Data/
+**/Data/
+Logs/
+**/Logs/
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+*.log
+coverage/
+**/ui-screenshots/
+design-qa.md
+
+# Local configuration and credentials
+*.local.json
+*.secrets.json
+*.env
+*.secret
+*.token
+
+# Field project files and customer CAD/materials
+Projects/Default/
+Projects/*/maps/
+Projects/*/stations/
+!Projects/Example/stations/
+!Projects/Example/stations/*.json
+*.dwg
+*.dxf
+*.DWG
+*.DXF

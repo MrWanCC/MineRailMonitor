@@ -1,0 +1,110 @@
+<Window x:Class="MineRailMonitor.Pages.DeleteMapAnnotationDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="删除地图标注"
+        Width="460"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Foreground="{StaticResource TextPrimaryBrush}"
+        ShowInTaskbar="False">
+    <Border Background="{StaticResource CardBackgroundBrush}"
+            BorderBrush="{StaticResource PrimaryBlueBrush}"
+            BorderThickness="1"
+            CornerRadius="5">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="42" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="0,0,0,1">
+                <Grid>
+                    <TextBlock Text="删除地图标注"
+                               Margin="16,0,50,0"
+                               VerticalAlignment="Center"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               MouseLeftButtonDown="OnHeaderMouseLeftButtonDown" />
+                    <Button Content="×"
+                            Width="42"
+                            Height="32"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Margin="0,0,5,0"
+                            Padding="0"
+                            Background="Transparent"
+                            BorderBrush="Transparent"
+                            Click="OnCancelClick" />
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1" Padding="24,22,24,20">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Border Width="34"
+                                Height="34"
+                                CornerRadius="17"
+                                Background="#3A2630"
+                                BorderBrush="{StaticResource WarningBrush}"
+                                BorderThickness="1">
+                            <TextBlock Text="!"
+                                       Foreground="{StaticResource WarningBrush}"
+                                       FontSize="19"
+                                       FontWeight="Bold"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="确认删除地图标注"
+                                       Style="{StaticResource SectionTitleStyle}"
+                                       FontSize="16" />
+                            <TextBlock Text="保存前仍可使用 Ctrl+Z 撤销。"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontSize="11"
+                                       Margin="0,3,0,0" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Border Margin="0,18,0,20"
+                            Padding="12,10"
+                            Background="{StaticResource PanelBackgroundBrush}"
+                            BorderBrush="{StaticResource PanelBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="3">
+                        <StackPanel>
+                            <TextBlock Text="将删除："
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontSize="11" />
+                            <TextBlock x:Name="AnnotationNameText"
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Margin="0,4,0,0"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="取消"
+                                Width="82"
+                                IsCancel="True"
+                                Margin="0,0,10,0"
+                                Click="OnCancelClick" />
+                        <Button Content="删除"
+                                Width="82"
+                                Background="#6B2D38"
+                                BorderBrush="{StaticResource WarningBrush}"
+                                IsDefault="True"
+                                Click="OnDeleteClick" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

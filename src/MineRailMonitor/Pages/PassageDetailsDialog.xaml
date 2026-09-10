@@ -1,0 +1,133 @@
+<Window x:Class="MineRailMonitor.Pages.PassageDetailsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="记录详情"
+        Width="820"
+        Height="640"
+        MinWidth="700"
+        MinHeight="500"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Foreground="{StaticResource TextPrimaryBrush}"
+        ShowInTaskbar="False">
+    <Window.Resources>
+        <Style x:Key="DialogFieldLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource FieldLabelStyle}">
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+        <Style x:Key="DialogFieldValueStyle" TargetType="TextBlock" BasedOn="{StaticResource FieldValueStyle}">
+            <Setter Property="Margin" Value="0,0,12,0" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+        <Style x:Key="DialogCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="20" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+    </Window.Resources>
+
+    <Border Background="{StaticResource CardBackgroundBrush}"
+            BorderBrush="{StaticResource PrimaryBlueBrush}"
+            BorderThickness="1"
+            CornerRadius="6">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="48" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="42" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Background="#06233D" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1"
+                    CornerRadius="6,6,0,0" MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+                <Grid Margin="16,0,6,0">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border x:Name="HeaderAccent" Width="4" Height="24" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                        <TextBlock x:Name="DialogTitleText" Text="记录详情" Style="{StaticResource SectionTitleStyle}" />
+                    </StackPanel>
+                    <Button Content="×" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource DialogCloseButtonStyle}" Click="OnCloseClick" />
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="18,14">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="1.4*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="1.4*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="30" />
+                            <RowDefinition Height="30" />
+                            <RowDefinition Height="30" />
+                            <RowDefinition Height="30" />
+                            <RowDefinition Height="30" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Text="PassageId" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="PassageIdValue" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="基站" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="StationValue" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+
+                        <TextBlock Text="车头RFID" Grid.Row="1" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="HeadRfidValue" Grid.Row="1" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="开始时间" Grid.Row="1" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="StartedAtValue" Grid.Row="1" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+
+                        <TextBlock Text="完成时间" Grid.Row="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="CompletedAtValue" Grid.Row="2" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="标准节数" Grid.Row="2" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="ExpectedCountValue" Grid.Row="2" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+
+                        <TextBlock Text="实际节数" Grid.Row="3" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="DetectedCountValue" Grid.Row="3" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="结果" Grid.Row="3" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="OutcomeValue" Grid.Row="3" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+
+                        <TextBlock Text="清除状态" Grid.Row="4" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="ClearStateValue" Grid.Row="4" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="报警说明" Grid.Row="4" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="AlarmValue" Grid.Row="4" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+
+                        <TextBlock Text="Warning" Grid.Row="5" Style="{StaticResource DialogFieldLabelStyle}" Margin="0,7,8,0" />
+                        <TextBlock x:Name="WarningValue" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Style="{StaticResource DialogFieldValueStyle}"
+                                   Margin="0,7,0,0" TextWrapping="Wrap" />
+                    </Grid>
+
+                    <Grid Margin="0,14,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="4" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Background="{StaticResource PrimaryBlueBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                        <TextBlock Grid.Column="1" Text="RFID识别明细" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock x:Name="RfidCountText" Grid.Column="2" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="10,2,0,0" />
+                    </Grid>
+
+                    <DataGrid x:Name="RfidDetailsGrid" Height="260" MinHeight="180" Style="{StaticResource IndustrialDataGridStyle}"
+                              AutoGenerateColumns="False" HeadersVisibility="Column">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="序号" Binding="{Binding SequenceNo}" Width="0.55*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTextColumn Header="RFID" Binding="{Binding RfidText}" Width="0.9*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTextColumn Header="首次识别时间" Binding="{Binding FirstSeenAtText}" Width="1.6*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTextColumn Header="批次" Binding="{Binding BatchNo}" Width="0.7*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </StackPanel>
+            </ScrollViewer>
+
+            <Border Grid.Row="2" Background="#051A2C" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,1,0,0">
+                <Button Content="关闭" Width="76" Height="28" MinHeight="28" HorizontalAlignment="Right" Margin="0,0,16,0" Click="OnCloseClick" />
+            </Border>
+        </Grid>
+    </Border>
+</Window>

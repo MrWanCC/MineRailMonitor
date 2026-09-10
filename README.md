@@ -1,8 +1,67 @@
 # MineRailMonitor
 
-矿山轨道运输智能监控系统阶段 1.6，基于 .NET Framework 4.8 WPF。
+矿山轨道运输 RFID 车皮计数与脱节监控上位机。
 
-## 开发验证
+基于 .NET Framework 4.8 + WPF，围绕矿山轨道运输场景实现 RFID 多基站通信、车皮计数、脱节报警、历史记录、报警查询和模拟联调。
+
+> 个人实践项目。当前仓库用于版本管理和项目展示，仅包含脱敏源码与示例配置。
+
+## 已实现功能
+
+- 多 RFID 基站动态配置，数量不写死
+- `IP + Port + ProtocolAddress` 独立通信
+- 40 Byte RFID UDP 协议
+- 14 个 RFID 槽位解析
+- 稀疏槽位支持
+- Passage 识别
+- 默认 11 节，可配置
+- 脱节超时报警
+- `Clear + WaitForEmpty`
+- SQLite 历史持久化
+- `PendingClear` 恢复
+- `StationId` 稳定身份
+- 历史查询
+- 报警记录
+- 地图 RFID 运行态绑定
+- RFID Simulator
+- 8 个 Acceptance 场景
+
+RFID 统计页面暂不作为已完成能力宣称。
+
+## 技术栈
+
+- C# / .NET Framework 4.8
+- WPF
+- UDP RFID 通信
+- SQLite
+- PowerShell 自动验收
+- MSTest 核心与基础设施测试
+
+## 核心工作流程
+
+1. 在项目配置中维护每个 RFID 基站的 `StationId`、名称、IP、端口、协议地址和启用状态。
+2. 上位机按基站独立 Endpoint 发送 Read，并通过真实 40 Byte UDP 响应读取 14 个 RFID 槽位。
+3. 按非零 RFID 的首次出现顺序进行 Passage 识别和车皮计数。
+4. 达到标准节数时保存完成记录；超过脱节超时仍未达到标准时保存脱节报警记录。
+5. 发送 Clear，等待下位机缓存清空并连续确认空状态后回到 Idle。
+6. Passage 和 RFID 明细持久化到 SQLite，历史查询与报警记录页复用这些记录。
+
+## 项目结构
+
+```text
+MineRailMonitor.sln
+├─ src/MineRailMonitor.Core/             核心模型、协议、识别与运行时
+├─ src/MineRailMonitor.Infrastructure/   配置、SQLite 与日志基础设施
+├─ src/MineRailMonitor.Simulator/        人工 Simulator 与自动场景执行器
+├─ src/MineRailMonitor/                  WPF 上位机
+├─ tests/                                Core / Infrastructure 测试
+├─ scripts/                              自动验收脚本
+└─ Projects/Example/                     脱敏示例配置
+```
+
+## 快速开始
+
+在 Windows 上安装 .NET Framework 4.8 开发环境和可用的 .NET SDK 后执行：
 
 ```powershell
 dotnet restore MineRailMonitor.sln
@@ -10,41 +69,75 @@ dotnet build MineRailMonitor.sln -c Release
 dotnet test MineRailMonitor.sln -c Release --no-build
 ```
 
-启动程序：
+启动 WPF 上位机：
 
 ```powershell
-dotnet run --project src/MineRailMonitor/MineRailMonitor.csproj
+dotnet run --project src/MineRailMonitor/MineRailMonitor.csproj -c Release
 ```
 
-Framework-dependent 发布（依赖现场已安装的 .NET Framework 4.8；开发阶段保持 Any CPU）：
+仓库不包含现场项目、客户地图或生产数据库。没有本地现场配置时，程序使用 `Projects/Example`，缺少底图时显示未配置站场底图。
+
+## Example 配置
+
+`Projects/Example/project.json` 是可直接用于开发和测试的脱敏配置，包含两个禁用的示例 RFID 基站：
+
+- Endpoint 使用 `127.0.0.1`
+- 使用测试端口和示例协议地址
+- 默认轮询间隔为 200ms
+- 默认标准节数为 11
+- 默认脱节超时为 30 秒
+- 不包含现场地图、客户 CAD 坐标或生产设备参数
+
+现场配置应由部署环境单独提供，不要将 `Projects/Default` 或现场 `stations/*.json` 放入仓库。
+
+## RFID Simulator
+
+启动人工 Simulator：
 
 ```powershell
-msbuild MineRailMonitor.sln /t:Build /p:Configuration=Release /p:Platform="Any CPU"
+dotnet run --project src/MineRailMonitor.Simulator/MineRailMonitor.Simulator.csproj -c Release
 ```
 
-默认项目配置位于 `Projects/Example`。这是不含现场地图和客户 CAD 坐标的脱敏示例，缺少底图时程序显示“未配置站场底图”，不会生成或绘制示意轨道。现场项目资料放在本地 `Projects/Default`，该目录不进入 Git。
+人工模式保留扫入下一张、移除标签和清空等操作。Simulator 与上位机之间仍使用真实 RFID UDP 协议链路。
 
-当前阶段包含配置加载、真实图片底图承载、坐标转换、40 Byte RFID UDP 协议解析、查询应答 Simulator、可配置六基站轮询、基站独立车厢识别/脱节状态机，以及本机 SQLite PassageRecord 历史保存、PendingClear 恢复和历史查询。地图点位不自动视为 RFID 基站。
+## 自动验收
 
-## 本地管理员模式配置
-
-管理员口令不再写入源码。运行前可在本机设置环境变量 `MINE_RAIL_ADMIN_PASSWORD`，或在未提交的程序配置中设置 `appSettings` 的 `AdminPassword`；仓库中的 `src/MineRailMonitor/App.config` 只保留空值模板。未配置口令时，管理员模式会拒绝进入。不要把真实口令写回仓库。
-
-## RFID 自动验收（阶段 3.3A）
-
-一键运行 8 个业务场景：
+由 PowerShell 统一调度上位机和 Simulator：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-rfid-acceptance.ps1
 ```
 
-脚本由 PowerShell 统一调度；Simulator 只执行单个场景。验收模式强制将上位机和 Simulator 固定到 `127.0.0.1` 及测试 UDP 端口（默认 `62102`/`62101`），不会读取或使用正式 `RfidStations` 地址，也不会向现场 IP 发送 Read/Clear。上位机仍通过真实 40 Byte UDP 请求/响应完成端到端链路，人工 Simulator 模式和“扫入下一张/移除标签/清空”功能保持不变。
+自动验收包含：
 
-每个场景使用独立目录：`artifacts/acceptance/<run-id>/<scenario>/`，其中包含独立 SQLite 数据库、原子写入的 `runtime-state.json`、Simulator 请求/响应日志和进程日志。总报告为 `phase33a-result.json`；失败场景目录会保留，便于查看当时的 Runtime、Slots、Read/Clear 日志和 SQLite。成功场景默认清理，可使用 `-KeepSuccessfulArtifacts` 保留全部场景文件。
+```text
+Normal11
+Uncoupling10
+TwoConsecutiveTrains
+TwoStationsConcurrent
+ClearReappearingTags
+SparseSlots
+MultipleHeads
+NoHead
+```
 
-可选择场景或配置 Debug 构建：
+Acceptance 模式强制使用 `127.0.0.1` 和测试 UDP 端口，不读取或访问正式 RFID 基站地址。每次运行使用独立的 SQLite、Runtime 快照、Simulator 日志和结果目录；生成物位于 `artifacts/`，不会进入 Git。
+
+可选参数示例：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-rfid-acceptance.ps1 -Scenario Normal11,SparseSlots
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-rfid-acceptance.ps1 -Configuration Debug -KeepSuccessfulArtifacts
 ```
+
+## 管理员模式
+
+管理员口令不写入源码。运行前可在本机设置环境变量 `MINE_RAIL_ADMIN_PASSWORD`，或在未提交的本地配置中设置 `AdminPassword`。仓库中的 `src/MineRailMonitor/App.config` 只保留空值模板。
+
+不要将真实口令、Token、Secret 或本地配置文件提交到仓库。
+
+## 后续计划
+
+- 完善 RFID 统计页面
+- 根据实际部署环境补充独立的现场配置和地图资源
+- 持续完善发布、部署和运维文档

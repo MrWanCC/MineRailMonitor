@@ -20,6 +20,10 @@ public sealed class TableAlignmentMarkupTests
         var cards = File.ReadAllText(Locate("src", "MineRailMonitor", "Styles", "Cards.xaml"));
         var monitor = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));
 
+        Assert.Contains("HorizontalAlignment=\"Stretch\"", cards);
+        Assert.Contains("HorizontalContentAlignment=\"Right\"", cards);
+        Assert.Contains("OverridesDefaultStyle=\"True\"", cards);
+        Assert.DoesNotContain("Width=\"28\"", cards);
         Assert.Contains("HorizontalContentAlignment\" Value=\"Center\"", cards);
         Assert.Contains("VerticalContentAlignment\" Value=\"Center\"", cards);
         Assert.Contains("x:Name=\"RfidTaskItemsControl\"", monitor);

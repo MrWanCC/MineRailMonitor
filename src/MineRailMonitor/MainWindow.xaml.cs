@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     private SettingsPage? _settingsPage;
     private HistoryPage? _historyPage;
     private AlarmHistoryPage? _alarmHistoryPage;
+    private RfidStatisticsPage? _statisticsPage;
     private RfidRuntimeCoordinator? _rfidRuntimeCoordinator;
     private readonly SqlitePassageRecordStore _passageRecordStore;
     private AcceptanceRuntimeStateWriter? _acceptanceRuntimeStateWriter;
@@ -210,6 +211,10 @@ public partial class MainWindow : Window
         _alarmHistoryPage = new AlarmHistoryPage(
             _passageRecordStore,
             _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations);
+        _statisticsPage = new RfidStatisticsPage(
+            _passageRecordStore,
+            _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations);
+        _communicationPage.ConfigureStations(settingsStations, SendCommunicationTestAsync);
         StartRfidPoller(result.Project, runtimeSettings);
         StationButtonsPanel.Children.Clear();
         foreach (var station in result.Project.Stations)
@@ -253,6 +258,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (page != "Settings" && _settingsPage is not null &&
+            !await _settingsPage.TryLeaveAsync("离开系统设置"))
+        {
+            return;
+        }
+
         SelectNavigationButton(button);
 
         if (page == "Monitor" && _monitorPage is not null)
@@ -264,6 +275,13 @@ public partial class MainWindow : Window
         if (page == "Communication")
         {
             PageContent.Content = _communicationPage;
+            return;
+        }
+
+        if (page == "Rfid" && _statisticsPage is not null)
+        {
+            _statisticsPage.Refresh();
+            PageContent.Content = _statisticsPage;
             return;
         }
 
@@ -301,17 +319,17 @@ public partial class MainWindow : Window
         PageContent.Content = new PlaceholderPage(title, "本阶段仅提供页面骨架，业务功能将在后续阶段实现。");
     }
 
-    private async Task SaveRfidSettingsAsync(RfidSettings settings)
+    private async Task<bool> SaveRfidSettingsAsync(RfidSettings settings)
     {
         if (_loadedProject is null || _settingsPage is null)
         {
-            return;
+            return false;
         }
         var result = await _configService.SaveRfidSettingsAsync(_projectDirectory, settings);
         if (!result.Succeeded)
         {
             _settingsPage.SetSaveResult(string.Join(Environment.NewLine, result.Errors), true);
-            return;
+            return false;
         }
         _loadedProject.RfidSettings = settings;
         _rfidFrameParser = new RfidFrameParser(new RfidFrameParserOptions { EmptyRfidValue = settings.EmptyRfidValue });
@@ -319,25 +337,26 @@ public partial class MainWindow : Window
         StopRfidPoller();
         StartRfidPoller(_loadedProject);
         _settingsPage.SetSaveResult("设置已保存。", false);
+        return true;
     }
 
-    private async Task SaveRfidStationsAsync(IReadOnlyList<RfidStationConfig> stations)
+    private async Task<bool> SaveRfidStationsAsync(IReadOnlyList<RfidStationConfig> stations)
     {
         if (_loadedProject is null || _settingsPage is null)
         {
-            return;
+            return false;
         }
         if (_acceptanceOptions.Enabled)
         {
             _settingsPage.SetSaveResult("验收模式禁止保存正式基站配置。", true);
-            return;
+            return false;
         }
 
         var result = await _configService.SaveRfidStationsAsync(_projectDirectory, stations);
         if (!result.Succeeded)
         {
             _settingsPage.SetSaveResult(string.Join(Environment.NewLine, result.Errors), true);
-            return;
+            return false;
         }
 
         _loadedProject.RfidStations = stations.ToArray();
@@ -353,6 +372,7 @@ public partial class MainWindow : Window
         StartRfidPoller(_loadedProject);
         UpdateRfidRuntimeUi();
         _settingsPage.SetSaveResult("设置与RFID基站配置已保存。", false);
+        return true;
     }
 
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -533,24 +553,44 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_settingsPage is not null && !await _settingsPage.TryLeaveAsync("退出管理员模式"))
+        {
+            return;
+        }
+
         _adminModeService.ExitAdminMode();
     }
 
     private async void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_allowWindowClose || _monitorPage is null || !(_monitorPage.HasUnsavedMapChanges))
+        if (_allowWindowClose || (_monitorPage is null && _settingsPage is null))
         {
             return;
         }
 
-        e.Cancel = true;
-        if (!await _monitorPage.TryLeaveMapEditingAsync("关闭程序"))
+        if (_monitorPage is not null && _monitorPage.HasUnsavedMapChanges)
         {
-            return;
+            e.Cancel = true;
+            if (!await _monitorPage.TryLeaveMapEditingAsync("关闭程序"))
+            {
+                return;
+            }
         }
 
-        _allowWindowClose = true;
-        Close();
+        if (_settingsPage is not null && _settingsPage.HasUnsavedChanges)
+        {
+            e.Cancel = true;
+            if (!await _settingsPage.TryLeaveAsync("关闭程序"))
+            {
+                return;
+            }
+        }
+
+        if (e.Cancel)
+        {
+            _allowWindowClose = true;
+            Close();
+        }
     }
 
     private static ushort ReadEmptyRfidValue()
@@ -669,6 +709,11 @@ public partial class MainWindow : Window
         if (sender is Button button && button.Tag is string stationId && _loadedProject is not null && _monitorPage is not null)
         {
             if (!await _monitorPage.TryLeaveMapEditingAsync("切换站场"))
+            {
+                return;
+            }
+
+            if (_settingsPage is not null && !await _settingsPage.TryLeaveAsync("切换站场"))
             {
                 return;
             }
@@ -800,8 +845,27 @@ public partial class MainWindow : Window
         _monitorPage.SetRfidPollingInfo(
             _loadedProject?.RfidSettings.PollIntervalMs ?? 200,
             _rfidPoller?.EndpointStatuses.Values ?? Array.Empty<RfidStationPollingStatus>());
+        _communicationPage.SetStationStatuses(
+            _rfidPoller?.EndpointStatuses.Values ?? Array.Empty<RfidStationPollingStatus>());
+        _statisticsPage?.SetRuntimeStates(_rfidRuntimeCoordinator?.States.Values ?? Array.Empty<StationRuntimeState>());
         _monitorPage.SetSystemRfidStatus(_rfidListenerHealthy);
         UpdateHeaderStatusIndicators();
+    }
+
+    private async Task SendCommunicationTestAsync(RfidStationConfig station, RfidPollCommand command)
+    {
+        if (_rfidUdpTransport is null)
+        {
+            throw new InvalidOperationException("RFID UDP 监听通道尚未就绪。");
+        }
+
+        if (!station.TryResolveEndpoint(out var endpoint))
+        {
+            throw new InvalidOperationException($"RFID基站端点配置无效：{station.StationId}。");
+        }
+
+        var request = RfidRequestFrameBuilder.Build(station, command);
+        await _rfidUdpTransport.SendAsync(request, endpoint, CancellationToken.None);
     }
 
     private void RefreshHistoricalStatistics()

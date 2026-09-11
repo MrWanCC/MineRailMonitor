@@ -77,11 +77,15 @@
                 </Grid.RowDefinitions>
                 <WrapPanel VerticalAlignment="Center">
                     <TextBlock Text="开始时间" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <TextBox x:Name="FromDateTextBox" Width="168" Height="30" Margin="0,0,14,0"
-                             ToolTip="格式：yyyy-MM-dd HH:mm:ss" />
+                    <DatePicker x:Name="FromDatePicker" Width="168" Height="30" Margin="0,0,14,0"
+                                Style="{StaticResource HmiDatePickerStyle}"
+                                SelectedDateFormat="Short"
+                                ToolTip="点击选择开始日期" PreviewMouseLeftButtonDown="OnDatePickerPreviewMouseLeftButtonDown" />
                     <TextBlock Text="结束时间" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <TextBox x:Name="ToDateTextBox" Width="168" Height="30" Margin="0,0,14,0"
-                             ToolTip="格式：yyyy-MM-dd HH:mm:ss" />
+                    <DatePicker x:Name="ToDatePicker" Width="168" Height="30" Margin="0,0,14,0"
+                                Style="{StaticResource HmiDatePickerStyle}"
+                                SelectedDateFormat="Short"
+                                ToolTip="点击选择结束日期" PreviewMouseLeftButtonDown="OnDatePickerPreviewMouseLeftButtonDown" />
                     <TextBlock Text="基站" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <ComboBox x:Name="StationFilter" Width="190" Height="30" Margin="0,0,14,0" />
                     <TextBlock Text="车头RFID" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />

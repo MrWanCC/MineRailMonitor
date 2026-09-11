@@ -399,7 +399,7 @@
                     <Border Grid.Row="0" Style="{StaticResource RightCardHeaderStyle}" Padding="12,0">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Margin="0,0,8,0" Foreground="#39CEFF" FontSize="18" />
-                            <TextBlock Text="RFID基站详情" Style="{StaticResource SectionTitleStyle}" FontSize="15" VerticalAlignment="Center" />
+                            <TextBlock x:Name="RfidDetailHeaderText" Text="RFID基站详情" Style="{StaticResource SectionTitleStyle}" FontSize="15" VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
 
@@ -479,6 +479,30 @@
                             </Grid>
                         </Grid>
                         </Border>
+                        <StackPanel x:Name="AnnotationEditEmptyState"
+                                    Grid.Row="0"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Margin="18"
+                                    Visibility="Collapsed">
+                            <TextBlock Text="&#xE70F;"
+                                       Style="{StaticResource SegoeFluentIconStyle}"
+                                       Foreground="{StaticResource AccentBrush}"
+                                       FontSize="34"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="地图标注编辑"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,10,0,0" />
+                            <TextBlock Text="请选择编辑工具，然后在地图上新增或选择标注。"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontSize="12"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center"
+                                       Margin="0,7,0,0" />
+                        </StackPanel>
                         <Border x:Name="AnnotationEditor"
                                 Grid.Row="0"
                                 Padding="4,0,4,4"

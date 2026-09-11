@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 using MineRailMonitor.Core.Services;
 
 namespace MineRailMonitor.Pages;
@@ -31,5 +32,18 @@ public partial class AdminPasswordDialog : Window
     private void OnCancelClick(object sender, RoutedEventArgs e)
     {
         DialogResult = false;
+    }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e)
+    {
+        DialogResult = false;
+    }
+
+    private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton == MouseButton.Left)
+        {
+            DragMove();
+        }
     }
 }

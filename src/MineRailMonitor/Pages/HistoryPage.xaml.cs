@@ -2,6 +2,9 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
 
@@ -122,8 +125,8 @@ public partial class HistoryPage : UserControl
         var stationTag = (StationFilter.SelectedItem as ComboBoxItem)?.Tag as string;
         return new PassageQuery
         {
-            From = ParseFilterDateTime(FromDateTextBox, "开始时间"),
-            To = ParseFilterDateTime(ToDateTextBox, "结束时间")?.AddSeconds(1),
+            From = ParseFilterDateTime(FromDatePicker, "开始时间"),
+            To = ParseFilterDateTime(ToDatePicker, "结束时间", endOfDay: true)?.AddSeconds(1),
             StationId = stationTag,
             HeadRfid = headRfid,
             Outcome = GetSelectedOutcome(),
@@ -163,7 +166,7 @@ public partial class HistoryPage : UserControl
         StationFilter.Items.Add(new ComboBoxItem { Content = "全部", Tag = null });
         StationFilter.Items.Add(new ComboBoxItem
         {
-            Content = "Legacy / 历史未识别基站",
+            Content = "历史未识别基站",
             Tag = PassageRecord.LegacyStationId
         });
         foreach (var station in (stations ?? Array.Empty<RfidStationConfig>())
@@ -195,7 +198,7 @@ public partial class HistoryPage : UserControl
         if (normalized.Length == 0 ||
             string.Equals(normalized, PassageRecord.LegacyStationId, StringComparison.OrdinalIgnoreCase))
         {
-            return "Legacy / 历史未识别基站";
+            return "历史未识别基站";
         }
 
         return stationNames.TryGetValue(normalized, out var name) && name.Length > 0
@@ -205,26 +208,55 @@ public partial class HistoryPage : UserControl
 
     private void SetDefaultDateTimeFilter()
     {
-        FromDateTextBox.Text = FormatFilterDateTime(DateTime.Today);
-        ToDateTextBox.Text = FormatFilterDateTime(DateTime.Today.AddDays(1).AddSeconds(-1));
+        FromDatePicker.SelectedDate = DateTime.Today;
+        ToDatePicker.SelectedDate = DateTime.Today;
     }
 
-    private static DateTimeOffset? ParseFilterDateTime(TextBox textBox, string fieldName)
+    private void OnDatePickerPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        var text = textBox.Text.Trim();
-        if (text.Length == 0) return null;
-
-        if (!DateTime.TryParseExact(text, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture,
-                DateTimeStyles.None, out var value) &&
-            !DateTime.TryParse(text, CultureInfo.CurrentCulture, DateTimeStyles.AllowWhiteSpaces, out value))
+        if (sender is not DatePicker picker || IsInsideButton(e.OriginalSource))
         {
-            throw new FormatException($"{fieldName}格式为 yyyy-MM-dd HH:mm:ss。");
+            return;
         }
 
+        e.Handled = true;
+        picker.Dispatcher.BeginInvoke(
+            DispatcherPriority.Input,
+            new Action(() => picker.IsDropDownOpen = true));
+    }
+
+    private static bool IsInsideButton(object source)
+    {
+        var current = source as DependencyObject;
+        while (current is not null)
+        {
+            if (current is Button)
+            {
+                return true;
+            }
+
+            current = current is Visual visual ? VisualTreeHelper.GetParent(visual) : null;
+        }
+
+        return false;
+    }
+
+    private static DateTimeOffset? ParseFilterDateTime(DatePicker picker, string fieldName, bool endOfDay = false)
+    {
+        if (!picker.SelectedDate.HasValue)
+        {
+            return null;
+        }
+
+        var value = StartOfDay(picker.SelectedDate.Value);
+        if (endOfDay)
+        {
+            value = value.AddDays(1).AddSeconds(-1);
+        }
         return new DateTimeOffset(value, TimeZoneInfo.Local.GetUtcOffset(value));
     }
 
-    private static string FormatFilterDateTime(DateTime value) => value.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+    private static DateTime StartOfDay(DateTime value) => value.Date;
 
     private static string FormatTime(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
 

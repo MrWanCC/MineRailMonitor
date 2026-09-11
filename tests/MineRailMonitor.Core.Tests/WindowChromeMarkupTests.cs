@@ -88,6 +88,20 @@ public sealed class WindowChromeMarkupTests
     }
 
     [Fact]
+    public void Administrator_password_dialog_uses_a_custom_dark_title_bar()
+    {
+        var xaml = File.ReadAllText(LocateSourceFile("Pages", "AdminPasswordDialog.xaml"));
+        var code = File.ReadAllText(LocateSourceFile("Pages", "AdminPasswordDialog.xaml.cs"));
+
+        Assert.Contains("WindowStyle=\"None\"", xaml);
+        Assert.Contains("AllowsTransparency=\"True\"", xaml);
+        Assert.Contains("MouseLeftButtonDown=\"OnHeaderMouseLeftButtonDown\"", xaml);
+        Assert.Contains("Click=\"OnCloseClick\"", xaml);
+        Assert.Contains("OnHeaderMouseLeftButtonDown", code);
+        Assert.Contains("DragMove", code);
+    }
+
+    [Fact]
     public void MainWindow_exposes_an_administrator_banner_and_exit_entry()
     {
         var xaml = File.ReadAllText(LocateMainWindowXaml());
@@ -98,6 +112,7 @@ public sealed class WindowChromeMarkupTests
         Assert.Contains("Click=\"OnExitAdminModeClick\"", xaml);
         Assert.Contains("OnExitAdminModeClick", code);
         Assert.Contains("ExitAdminMode()", code);
+        Assert.Contains("_settingsPage.TryLeaveAsync", code);
     }
 
     [Fact]
@@ -113,6 +128,16 @@ public sealed class WindowChromeMarkupTests
         Assert.Contains("UnsavedMapChangesResult.SaveAndExit", code);
         Assert.Contains("UnsavedMapChangesResult.Discard", code);
         Assert.Contains("UnsavedMapChangesResult.Cancel", code);
+    }
+
+    [Fact]
+    public void MainWindow_checks_unsaved_settings_before_navigation_and_close()
+    {
+        var code = File.ReadAllText(LocateMainWindowCode());
+
+        Assert.Contains("_settingsPage.TryLeaveAsync", code);
+        Assert.Contains("关闭程序", code);
+        Assert.Contains("离开系统设置", code);
     }
 
     [Fact]

@@ -158,7 +158,10 @@ public sealed class SystemStatusMarkupTests
         Assert.Contains("RfidOverviewContent.Visibility = Visibility.Visible;", monitorCode);
         Assert.Contains("OverviewEmptyState.Visibility = hasRfidSelection ? Visibility.Collapsed : Visibility.Visible;", monitorCode);
         Assert.Contains("RfidDetailView.Visibility = hasRfidSelection ? Visibility.Visible : Visibility.Collapsed;", monitorCode);
-        Assert.DoesNotContain("RfidOverviewCard.Visibility =", monitorCode);
+        var selectionStart = monitorCode.IndexOf("private void UpdateRfidSelectionLayout", StringComparison.Ordinal);
+        var selectionEnd = monitorCode.IndexOf("private void ApplyDashboardSnapshot", selectionStart, StringComparison.Ordinal);
+        Assert.True(selectionStart >= 0 && selectionEnd > selectionStart, "RFID selection layout method is missing.");
+        Assert.DoesNotContain("RfidOverviewCard.Visibility", monitorCode.Substring(selectionStart, selectionEnd - selectionStart));
         Assert.Contains("Margin=\"0,310,0,0\"", monitorMarkup);
         Assert.Contains("Text=\"RFID基站详情\"", monitorMarkup);
         Assert.DoesNotContain("UpdateRfidTabStyles", monitorCode);

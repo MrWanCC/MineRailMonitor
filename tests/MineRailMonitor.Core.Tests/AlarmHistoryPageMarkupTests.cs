@@ -7,8 +7,10 @@ public sealed class AlarmHistoryPageMarkupTests
     {
         var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "AlarmHistoryPage.xaml"));
 
-        Assert.Contains("FromDateTextBox", markup, StringComparison.Ordinal);
-        Assert.Contains("ToDateTextBox", markup, StringComparison.Ordinal);
+        Assert.Contains("FromDatePicker", markup, StringComparison.Ordinal);
+        Assert.Contains("ToDatePicker", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("<TextBox x:Name=\"FromDate", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("<TextBox x:Name=\"ToDate", markup, StringComparison.Ordinal);
         Assert.Contains("StationFilter", markup, StringComparison.Ordinal);
         Assert.Contains("HeadRfidFilter", markup, StringComparison.Ordinal);
         Assert.Contains("QueryButton", markup, StringComparison.Ordinal);
@@ -20,6 +22,7 @@ public sealed class AlarmHistoryPageMarkupTests
         Assert.Contains("缺少节数", markup, StringComparison.Ordinal);
         Assert.Contains("报警原因", markup, StringComparison.Ordinal);
         Assert.Contains("清除状态", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Legacy / 历史未识别基站", File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "AlarmHistoryPage.xaml.cs")), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -33,6 +36,9 @@ public sealed class AlarmHistoryPageMarkupTests
         Assert.Contains("ToString(\"X4\")", code, StringComparison.Ordinal);
         Assert.DoesNotContain("已处理", code, StringComparison.Ordinal);
         Assert.DoesNotContain("未处理", code, StringComparison.Ordinal);
+        Assert.Contains("FromDatePicker.SelectedDate", code, StringComparison.Ordinal);
+        Assert.Contains("ToDatePicker.SelectedDate", code, StringComparison.Ordinal);
+        Assert.Contains("StartOfDay", code, StringComparison.Ordinal);
     }
 
     [Fact]

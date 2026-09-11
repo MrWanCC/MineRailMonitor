@@ -241,6 +241,20 @@ public sealed class MapLayerMarkupTests
     }
 
     [Fact]
+    public void Map_edit_mode_replaces_the_runtime_right_panel_until_editing_ends()
+    {
+        var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));
+        var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml.cs"));
+
+        Assert.Contains("RfidDetailHeaderText", markup);
+        Assert.Contains("AnnotationEditEmptyState", markup);
+        Assert.Contains("RfidOverviewCard.Visibility = Visibility.Collapsed", code);
+        Assert.Contains("RfidAlarmCard.Visibility = Visibility.Collapsed", code);
+        Assert.Contains("Grid.SetRowSpan(RfidDetailView, 2)", code);
+        Assert.Contains("地图标注编辑", code);
+    }
+
+    [Fact]
     public void Main_window_declares_closing_protection_hook_for_unsaved_map_annotations()
     {
         var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml"));

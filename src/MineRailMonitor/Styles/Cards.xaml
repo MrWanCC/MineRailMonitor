@@ -96,19 +96,32 @@
                                                   TextElement.FontFamily="{TemplateBinding FontFamily}"
                                                   TextElement.FontSize="{TemplateBinding FontSize}" />
                                 <ToggleButton x:Name="DropDownButton"
-                                              Width="28"
-                                              HorizontalAlignment="Right"
+                                              HorizontalAlignment="Stretch"
+                                              HorizontalContentAlignment="Right"
+                                              VerticalContentAlignment="Center"
+                                              Padding="0,0,8,0"
                                               Focusable="False"
+                                              OverridesDefaultStyle="True"
                                               IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
                                               ClickMode="Press"
                                               Background="Transparent"
-                                              BorderThickness="0">
-                                    <Path Width="8"
-                                          Height="5"
-                                          HorizontalAlignment="Center"
-                                          VerticalAlignment="Center"
-                                          Fill="{StaticResource TextSecondaryBrush}"
-                                          Data="M 0,0 L 8,0 L 4,5 Z" />
+                                              BorderThickness="0"
+                                              Foreground="{StaticResource TextSecondaryBrush}">
+                                    <ToggleButton.Template>
+                                        <ControlTemplate TargetType="ToggleButton">
+                                            <Border Background="{TemplateBinding Background}"
+                                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                                    BorderThickness="{TemplateBinding BorderThickness}">
+                                                <Path Width="8"
+                                                      Height="5"
+                                                      HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                                      Margin="{TemplateBinding Padding}"
+                                                      Fill="{TemplateBinding Foreground}"
+                                                      Data="M 0,0 L 8,0 L 4,5 Z" />
+                                            </Border>
+                                        </ControlTemplate>
+                                    </ToggleButton.Template>
                                 </ToggleButton>
                             </Grid>
                         </Border>
@@ -147,6 +160,133 @@
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="ComboBorder" Property="Opacity" Value="0.45" />
+                            <Setter TargetName="DropDownButton" Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="HmiCalendarStyle" TargetType="{x:Type Calendar}">
+        <Setter Property="Background" Value="#041B31" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="6" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <Style x:Key="HmiDatePickerTextBoxStyle" TargetType="{x:Type DatePickerTextBox}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="8,0,38,0" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type DatePickerTextBox}">
+                    <Border Background="Transparent"
+                            BorderBrush="Transparent"
+                            BorderThickness="0"
+                            Padding="{TemplateBinding Padding}">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="HmiDatePickerStyle" TargetType="{x:Type DatePicker}">
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Background" Value="#0B2A43" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="SelectedDateFormat" Value="Short" />
+        <Setter Property="CalendarStyle" Value="{StaticResource HmiCalendarStyle}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type DatePicker}">
+                    <Grid>
+                        <Border x:Name="DatePickerBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3"
+                                SnapsToDevicePixels="True">
+                            <Grid>
+                                <DatePickerTextBox x:Name="PART_TextBox"
+                                                   Style="{StaticResource HmiDatePickerTextBoxStyle}"
+                                                   Background="Transparent"
+                                                   BorderThickness="0"
+                                                   Padding="8,0,38,0"
+                                                   Foreground="{TemplateBinding Foreground}"
+                                                   FontFamily="{TemplateBinding FontFamily}"
+                                                   FontSize="{TemplateBinding FontSize}"
+                                                   IsReadOnly="True"
+                                                   VerticalContentAlignment="Center" />
+                                <Button x:Name="PART_Button"
+                                        Width="30"
+                                        HorizontalAlignment="Right"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Foreground="{StaticResource PrimaryBlueBrush}"
+                                        Focusable="False"
+                                        OverridesDefaultStyle="True"
+                                        IsTabStop="False">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{TemplateBinding Background}"
+                                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                                    BorderThickness="{TemplateBinding BorderThickness}">
+                                                <Path Width="14" Height="14" Stretch="Uniform"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                      Fill="{TemplateBinding Foreground}"
+                                                      Data="M2,1 L4,1 L4,3 L10,3 L10,1 L12,1 L12,3 L14,3 L14,14 L0,14 L0,3 L2,3 Z M2,5 L2,7 L12,7 L12,5 Z" />
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                            </Grid>
+                        </Border>
+                        <Popup x:Name="PART_Popup"
+                               AllowsTransparency="True"
+                               Focusable="False"
+                               Placement="Bottom"
+                               PlacementTarget="{Binding ElementName=PART_TextBox}"
+                               StaysOpen="False"
+                               IsOpen="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                            <Border Margin="0,3,0,0"
+                                    Background="#041B31"
+                                    BorderBrush="{StaticResource PanelBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="3">
+                                <Calendar x:Name="PART_Calendar"
+                                          Style="{StaticResource HmiCalendarStyle}"
+                                          IsTodayHighlighted="{TemplateBinding IsTodayHighlighted}"
+                                          SelectedDate="{Binding SelectedDate, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          DisplayDate="{Binding DisplayDate, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          DisplayDateStart="{TemplateBinding DisplayDateStart}"
+                                          DisplayDateEnd="{TemplateBinding DisplayDateEnd}" />
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="DatePickerBorder" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="DatePickerBorder" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="DatePickerBorder" Property="Opacity" Value="0.45" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

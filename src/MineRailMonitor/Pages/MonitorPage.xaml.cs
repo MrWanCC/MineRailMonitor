@@ -1063,18 +1063,35 @@ public partial class MonitorPage : UserControl
         AnnotationToolbar.Visibility = _adminModeService.IsAdmin && _isMapAnnotationEditing ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    private void UpdateRightPanelMode()
+    {
+        if (_isMapAnnotationEditing)
+        {
+            RfidOverviewCard.Visibility = Visibility.Collapsed;
+            RfidAlarmCard.Visibility = Visibility.Collapsed;
+            RfidDetailView.Visibility = Visibility.Visible;
+            RfidDetailView.Margin = new Thickness(0);
+            Grid.SetRow(RfidDetailView, 0);
+            Grid.SetRowSpan(RfidDetailView, 2);
+            RfidDetailHeaderText.Text = "地图标注编辑";
+            return;
+        }
+
+        RfidOverviewCard.Visibility = Visibility.Visible;
+        RfidAlarmCard.Visibility = Visibility.Visible;
+        RfidDetailView.Margin = new Thickness(0, 310, 0, 0);
+        Grid.SetRow(RfidDetailView, 0);
+        Grid.SetRowSpan(RfidDetailView, 1);
+        RfidDetailHeaderText.Text = "RFID基站详情";
+    }
+
     private void SetAnnotationEditorVisibility(bool visible)
     {
         AnnotationEditor.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        SelectedDeviceInfo.Visibility = visible ? Visibility.Collapsed : Visibility.Visible;
-        if (_isMapAnnotationEditing)
-        {
-            RfidOverviewContent.Visibility = Visibility.Visible;
-            OverviewEmptyState.Visibility = Visibility.Collapsed;
-            RfidDetailView.Visibility = Visibility.Visible;
-            RfidStationStatusCard.Visibility = Visibility.Visible;
-        }
-        else
+        SelectedDeviceInfo.Visibility = _isMapAnnotationEditing || visible ? Visibility.Collapsed : Visibility.Visible;
+        AnnotationEditEmptyState.Visibility = _isMapAnnotationEditing && !visible ? Visibility.Visible : Visibility.Collapsed;
+        UpdateRightPanelMode();
+        if (!_isMapAnnotationEditing)
         {
             UpdateRfidSelectionLayout(_selectedDevice?.Type == DeviceType.RfidStation || !string.IsNullOrWhiteSpace(_selectedRfidStationId));
         }
@@ -1302,13 +1319,11 @@ public partial class MonitorPage : UserControl
     {
         if (_isMapAnnotationEditing)
         {
-            RfidOverviewContent.Visibility = Visibility.Visible;
-            OverviewEmptyState.Visibility = Visibility.Collapsed;
-            RfidDetailView.Visibility = Visibility.Visible;
-            RfidStationStatusCard.Visibility = Visibility.Visible;
+            UpdateRightPanelMode();
             return;
         }
 
+        UpdateRightPanelMode();
         RfidOverviewContent.Visibility = Visibility.Visible;
         OverviewEmptyState.Visibility = hasRfidSelection ? Visibility.Collapsed : Visibility.Visible;
         RfidDetailView.Visibility = hasRfidSelection ? Visibility.Visible : Visibility.Collapsed;

@@ -17,6 +17,8 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("ConfigureStations", code, StringComparison.Ordinal);
         Assert.Contains("_sendTestAsync", code, StringComparison.Ordinal);
         Assert.Contains("ClearLog", code, StringComparison.Ordinal);
+        Assert.Contains("MatchesStation", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("item.StationAddress == station.ProtocolAddress", code, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -46,6 +48,8 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("GetStatistics", code, StringComparison.Ordinal);
         Assert.Contains("SetRuntimeStates", code, StringComparison.Ordinal);
         Assert.Contains("CompletedAt", code, StringComparison.Ordinal);
+        Assert.Contains("RfidTrendAggregator.Build", code, StringComparison.Ordinal);
+        Assert.Contains("_rangeDays", code, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -60,6 +64,7 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("_communicationPage.SetStationStatuses", code, StringComparison.Ordinal);
         Assert.Contains("SendCommunicationTestAsync", code, StringComparison.Ordinal);
         Assert.Contains("page == \"Rfid\"", code, StringComparison.Ordinal);
+        Assert.Contains("_statisticsPage?.Refresh()", code, StringComparison.Ordinal);
     }
 
     private static string Locate(params string[] parts)

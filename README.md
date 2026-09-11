@@ -132,7 +132,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-rfid-acceptanc
 
 ## 管理员模式
 
-本地演示默认管理员口令为 `admin123`。部署环境建议通过环境变量 `MINE_RAIL_ADMIN_PASSWORD` 或未提交的本地配置覆盖 `AdminPassword`，不要继续使用默认口令。
+管理员模式需要通过环境变量 `MINE_RAIL_ADMIN_PASSWORD` 提供口令，仓库不保存默认口令。
 
 不要将真实口令、Token、Secret 或本地配置文件提交到仓库。
 

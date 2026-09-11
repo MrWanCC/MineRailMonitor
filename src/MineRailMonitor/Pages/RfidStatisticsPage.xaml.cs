@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
+using MineRailMonitor.Core.Statistics;
 
 namespace MineRailMonitor.Pages;
 
@@ -277,12 +278,9 @@ public partial class RfidStatisticsPage : UserControl
         const double bottom = 28;
         var plotWidth = Math.Max(30, width - left - right);
         var plotHeight = Math.Max(30, height - top - bottom);
-        var totals = Enumerable.Range(0, 24)
-            .Select(hour => _currentRecords.Count(record => record.CompletedAt.ToLocalTime().Hour == hour))
-            .ToArray();
-        var normals = Enumerable.Range(0, 24)
-            .Select(hour => _currentRecords.Count(record => record.CompletedAt.ToLocalTime().Hour == hour && record.Outcome == PassageOutcome.Completed))
-            .ToArray();
+        var trendPoints = RfidTrendAggregator.Build(_currentRecords, DateTimeOffset.Now, _rangeDays);
+        var totals = trendPoints.Select(point => point.TotalCount).ToArray();
+        var normals = trendPoints.Select(point => point.NormalCount).ToArray();
         var maxValue = Math.Max(5d, totals.DefaultIfEmpty(0).Max());
         maxValue = Math.Ceiling(maxValue / 5d) * 5d;
 
@@ -301,9 +299,16 @@ public partial class RfidStatisticsPage : UserControl
             AddCanvasText(maxValue - maxValue * index / 4d, left - 28, y - 8, 24, TextAlignment.Right);
         }
 
-        for (var hour = 0; hour < 24; hour += 2)
+        var pointDenominator = Math.Max(1, trendPoints.Count - 1);
+        var labelStep = _rangeDays == 1 ? 2 : _rangeDays == 7 ? 1 : 5;
+        for (var index = 0; index < trendPoints.Count; index++)
         {
-            var x = left + plotWidth * hour / 23d;
+            if (index % labelStep != 0 && index != trendPoints.Count - 1)
+            {
+                continue;
+            }
+
+            var x = left + plotWidth * index / (double)pointDenominator;
             TrendCanvas.Children.Add(new Line
             {
                 X1 = x,
@@ -313,7 +318,7 @@ public partial class RfidStatisticsPage : UserControl
                 Stroke = new SolidColorBrush(Color.FromRgb(10, 51, 80)),
                 StrokeThickness = 1
             });
-            AddCanvasText($"{hour:00}:00", x - 22, top + plotHeight + 6, 44, TextAlignment.Center);
+            AddCanvasText(trendPoints[index].Label, x - 22, top + plotHeight + 6, 44, TextAlignment.Center);
         }
 
         TrendCanvas.Children.Add(CreateTrendPolyline(totals, left, top, plotWidth, plotHeight, maxValue, Color.FromRgb(22, 142, 220)));
@@ -335,10 +340,11 @@ public partial class RfidStatisticsPage : UserControl
             StrokeThickness = 2,
             Fill = Brushes.Transparent
         };
+        var denominator = Math.Max(1, values.Count - 1);
         for (var index = 0; index < values.Count; index++)
         {
             line.Points.Add(new Point(
-                left + width * index / 23d,
+                left + width * index / denominator,
                 top + height - height * values[index] / maxValue));
         }
 

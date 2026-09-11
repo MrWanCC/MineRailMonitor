@@ -134,6 +134,37 @@ public sealed class RfidStationEndpointTests
     }
 
     [Fact]
+    public void Polling_status_preserves_station_identity_when_protocol_addresses_repeat()
+    {
+        var stations = new[]
+        {
+            CreateStation("RFID-01", "一号站", 0x41, 62301),
+            CreateStation("RFID-02", "二号站", 0x41, 62302)
+        };
+        var poller = new RfidStationPoller(stations, 200, new RecordingSender(), new ImmediateTimeProvider());
+        var statuses = poller.EndpointStatuses.Values.ToArray();
+        var stationIdProperty = typeof(RfidStationPollingStatus).GetProperty("StationId");
+        var endpointKeyProperty = typeof(RfidStationPollingStatus).GetProperty("EndpointKey");
+
+        Assert.NotNull(stationIdProperty);
+        Assert.NotNull(endpointKeyProperty);
+        Assert.Contains(statuses, status =>
+            string.Equals(stationIdProperty!.GetValue(status) as string, "RFID-01", StringComparison.Ordinal) &&
+            GetEndpointPort(endpointKeyProperty!.GetValue(status)) == 62301);
+        Assert.Contains(statuses, status =>
+            string.Equals(stationIdProperty!.GetValue(status) as string, "RFID-02", StringComparison.Ordinal) &&
+            GetEndpointPort(endpointKeyProperty!.GetValue(status)) == 62302);
+    }
+
+    private static int GetEndpointPort(object? endpointKey)
+    {
+        Assert.NotNull(endpointKey);
+        var endpoint = endpointKey!.GetType().GetProperty("Endpoint")?.GetValue(endpointKey);
+        Assert.NotNull(endpoint);
+        return (int)endpoint!.GetType().GetProperty("Port")!.GetValue(endpoint)!;
+    }
+
+    [Fact]
     public void Runtime_coordinator_allows_same_protocol_address_when_endpoints_are_different()
     {
         var stations = new[]

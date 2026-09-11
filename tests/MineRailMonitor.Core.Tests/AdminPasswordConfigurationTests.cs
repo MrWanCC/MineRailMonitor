@@ -3,12 +3,14 @@ namespace MineRailMonitor.Core.Tests;
 public sealed class AdminPasswordConfigurationTests
 {
     [Fact]
-    public void Application_configuration_uses_the_requested_default_admin_password()
+    public void Application_configuration_does_not_store_a_default_admin_password()
     {
         var configPath = LocateSourceFile("src", "MineRailMonitor", "App.config");
         var config = File.ReadAllText(configPath);
+        var appCode = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "App.xaml.cs"));
 
-        Assert.Contains("<add key=\"AdminPassword\" value=\"admin123\" />", config, StringComparison.Ordinal);
+        Assert.DoesNotContain("AdminPassword", config, StringComparison.Ordinal);
+        Assert.Contains("MINE_RAIL_ADMIN_PASSWORD", appCode, StringComparison.Ordinal);
     }
 
     [Fact]

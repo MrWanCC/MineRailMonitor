@@ -42,9 +42,15 @@ public sealed class RfidStationPoller : IRfidStationPoller
         _statuses = new Dictionary<RfidStationEndpointKey, RfidStationPollingStatus>();
         for (var index = 0; index < _stations.Count; index++)
         {
+            var stationKey = _stationKeys[index];
             _statuses.Add(
-                _stationKeys[index],
-                new RfidStationPollingStatus { StationAddress = _stations[index].ProtocolAddress });
+                stationKey,
+                new RfidStationPollingStatus
+                {
+                    StationId = _stations[index].StationId,
+                    EndpointKey = stationKey,
+                    StationAddress = _stations[index].ProtocolAddress
+                });
         }
         _statusView = new RfidProtocolAddressCollectionView<RfidStationPollingStatus>(_statuses.Values, status => status.StationAddress);
     }

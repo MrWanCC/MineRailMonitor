@@ -878,6 +878,7 @@ public partial class MainWindow : Window
         try
         {
             _monitorPage.SetHistoricalStatistics(_passageRecordStore.GetStatistics(DateTimeOffset.Now));
+            _statisticsPage?.Refresh();
             _lastStatisticsRefresh = DateTimeOffset.Now;
         }
         catch (Exception exception)

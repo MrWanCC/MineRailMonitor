@@ -145,12 +145,27 @@ public partial class CommunicationPage : UserControl
     {
         var rows = _stations.Select(station =>
         {
-            var status = _stationStatuses.FirstOrDefault(item => item.StationAddress == station.ProtocolAddress);
+            var status = _stationStatuses.FirstOrDefault(item => MatchesStation(item, station));
             return new StationStatusRow(station, status);
         }).ToArray();
 
         StationStatusGrid.ItemsSource = rows;
         NoStationText.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private static bool MatchesStation(RfidStationPollingStatus status, RfidStationConfig station)
+    {
+        if (!string.IsNullOrWhiteSpace(status.StationId))
+        {
+            return string.Equals(status.StationId, station.StationId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!status.EndpointKey.HasValue || !station.TryResolveEndpoint(out var endpoint))
+        {
+            return false;
+        }
+
+        return status.EndpointKey.Value == new RfidStationEndpointKey(endpoint, station.ProtocolAddress);
     }
 
     private void AddLog(string line)

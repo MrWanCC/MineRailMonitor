@@ -57,6 +57,51 @@ public sealed class PassageLifecycleTests
     }
 
     [Fact]
+    public void Uncoupling_alarm_stays_red_until_the_alarm_passage_is_cleared()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var coordinator = CreateCoordinator(store);
+        var values = new ushort[] { 0x0001, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x0019 };
+
+        coordinator.ProcessFrame(CreateFrame(0x01, Start, values));
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(29.9), values));
+        coordinator.Evaluate(Start.AddSeconds(30));
+
+        var state = coordinator.States[0x01];
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
+
+        coordinator.MarkCommandSent(0x01, RfidPollCommand.Clear, Start.AddSeconds(30.1));
+        coordinator.Evaluate(Start.AddSeconds(35.1));
+
+        Assert.Equal(PassageLifecycleState.Clearing, state.LifecycleState);
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
+    }
+
+    [Fact]
+    public void Cleared_uncoupling_alarm_keeps_the_red_prompt_until_the_next_passage_starts()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var coordinator = CreateCoordinator(store);
+        var alarmValues = new ushort[] { 0x0001, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x0019 };
+
+        coordinator.ProcessFrame(CreateFrame(0x01, Start, alarmValues));
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(29.9), alarmValues));
+        coordinator.Evaluate(Start.AddSeconds(30));
+        coordinator.MarkCommandSent(0x01, RfidPollCommand.Clear, Start.AddSeconds(30.1));
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(30.2), Array.Empty<ushort>()));
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(30.4), Array.Empty<ushort>()));
+
+        var state = coordinator.States[0x01];
+        Assert.Equal(PassageLifecycleState.Idle, state.LifecycleState);
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
+
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(31), new ushort[] { 0x0002 }));
+
+        Assert.Equal(PassageLifecycleState.Recognizing, state.LifecycleState);
+        Assert.Equal(RfidStationVisualState.Recognizing, state.VisualState);
+    }
+
+    [Fact]
     public void Waiting_for_empty_never_starts_a_second_passage_when_old_tags_reappear()
     {
         var store = new InMemoryPassageRecordStore();

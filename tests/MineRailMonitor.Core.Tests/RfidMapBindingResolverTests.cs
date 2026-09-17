@@ -95,6 +95,69 @@ public sealed class RfidMapBindingResolverTests
         Assert.Equal(RfidMapBindingState.Offline, Resolve("RFID-01", stations).State);
     }
 
+    [Fact]
+    public void Finds_map_references_to_removed_station_ids()
+    {
+        var stations = new[]
+        {
+            new StationConfig
+            {
+                Devices = new List<DeviceConfig>
+                {
+                    new() { Type = DeviceType.RfidStation, RfidStationId = "RFID-01" },
+                    new() { Type = DeviceType.RfidStation, RfidStationId = "RFID-02" }
+                }
+            }
+        };
+        var remainingConfigurations = new[]
+        {
+            CreateStation("RFID-02", "二号读卡站", 10002, 0x01)
+        };
+
+        var method = typeof(RfidMapBindingResolver).GetMethod("FindRemovedReferencedStationIds");
+        Assert.NotNull(method);
+        var removed = (IReadOnlyList<string>)method!.Invoke(
+            null,
+            new object[] { stations, remainingConfigurations })!;
+
+        Assert.Equal(new[] { "RFID-01" }, removed);
+    }
+
+    [Fact]
+    public void Changing_station_endpoint_fields_does_not_break_map_binding()
+    {
+        var stations = new[]
+        {
+            new StationConfig
+            {
+                Devices = new List<DeviceConfig>
+                {
+                    new() { Type = DeviceType.RfidStation, RfidStationId = "RFID-01" }
+                }
+            }
+        };
+        var remainingConfigurations = new[]
+        {
+            new RfidStationConfig
+            {
+                StationId = "RFID-01",
+                Name = "修改后的名称",
+                IpAddress = "192.0.2.20",
+                Port = 1234,
+                ProtocolAddress = 0x20,
+                Enabled = false
+            }
+        };
+
+        var method = typeof(RfidMapBindingResolver).GetMethod("FindRemovedReferencedStationIds");
+        Assert.NotNull(method);
+        var removed = (IReadOnlyList<string>)method!.Invoke(
+            null,
+            new object[] { stations, remainingConfigurations })!;
+
+        Assert.Empty(removed);
+    }
+
     private static RfidMapBindingResolution Resolve(string? stationId, IEnumerable<RfidStationConfig> stations) =>
         RfidMapBindingResolver.Resolve(new DeviceConfig
         {

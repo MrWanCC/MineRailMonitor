@@ -37,6 +37,31 @@ public sealed class RfidLegacyBindingMigrationResult
 
 public static class RfidMapBindingResolver
 {
+    public static IReadOnlyList<string> FindRemovedReferencedStationIds(
+        IEnumerable<StationConfig> stations,
+        IEnumerable<RfidStationConfig> remainingConfigurations)
+    {
+        if (stations is null) throw new ArgumentNullException(nameof(stations));
+        if (remainingConfigurations is null) throw new ArgumentNullException(nameof(remainingConfigurations));
+
+        var remainingIds = new HashSet<string>(
+            remainingConfigurations
+                .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.StationId))
+                .Select(item => item.StationId.Trim()),
+            StringComparer.OrdinalIgnoreCase);
+
+        return stations
+            .Where(station => station is not null)
+            .SelectMany(station => station.Devices ?? Array.Empty<DeviceConfig>())
+            .Where(device => device is not null &&
+                            !string.IsNullOrWhiteSpace(device.RfidStationId) &&
+                            !remainingIds.Contains(device.RfidStationId!.Trim()))
+            .Select(device => device.RfidStationId!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(stationId => stationId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     public static RfidMapBindingResolution Resolve(
         DeviceConfig device,
         IEnumerable<RfidStationConfig> configurations)

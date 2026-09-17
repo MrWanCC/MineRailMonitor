@@ -16,7 +16,7 @@ public partial class PassageDetailsDialog : Window
 
     private void LoadRecord(PassageRecord record, string stationText, bool alarmMode)
     {
-        DialogTitleText.Text = alarmMode ? "报警详情" : "记录详情";
+        DialogTitleText.Text = alarmMode ? "告警详情" : "记录详情";
         HeaderAccent.Background = alarmMode ? FindResource("AlarmBrush") as System.Windows.Media.Brush : FindResource("PrimaryBlueBrush") as System.Windows.Media.Brush;
 
         PassageIdValue.Text = record.PassageId.ToString("D");

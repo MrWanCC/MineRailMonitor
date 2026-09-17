@@ -76,6 +76,15 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <WrapPanel VerticalAlignment="Center">
+                    <TextBlock Text="站场范围" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox x:Name="YardFilter" Width="150" Height="30" Margin="0,0,14,0"
+                              SelectionChanged="OnYardFilterChanged">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayName}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
                     <TextBlock Text="开始时间" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <DatePicker x:Name="FromDatePicker" Width="168" Height="30" Margin="0,0,14,0"
                                 Style="{StaticResource HmiDatePickerStyle}"

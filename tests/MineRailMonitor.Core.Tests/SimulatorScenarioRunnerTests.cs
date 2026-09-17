@@ -22,12 +22,28 @@ public sealed class SimulatorScenarioRunnerTests
 
         Assert.True(options.TestMode);
         Assert.Equal(IPAddress.Loopback, options.ListenAddress);
+        Assert.Equal(62111, options.Port620);
         Assert.Throws<ArgumentException>(() => SimulatorCommandLineOptions.Parse(new[]
         {
             "simulator.exe", "--test-mode", "--scenario", "Normal11", "--port", "62001",
             "--result", "artifacts/acceptance/test/result.json",
             "--ready-file", "artifacts/acceptance/test/ready.json"
         }));
+    }
+
+    [Fact]
+    public void Simulator_acceptance_options_support_a_second_yard_listener()
+    {
+        var options = SimulatorCommandLineOptions.Parse(new[]
+        {
+            "simulator.exe", "--test-mode", "--scenario", "Normal11", "--port", "63101",
+            "--port-620", "63111",
+            "--result", "artifacts/acceptance/test/result.json",
+            "--ready-file", "artifacts/acceptance/test/ready.json"
+        });
+
+        Assert.Equal(63101, options.Port);
+        Assert.Equal(63111, options.Port620);
     }
 
     [Fact]

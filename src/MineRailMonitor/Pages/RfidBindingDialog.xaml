@@ -1,0 +1,35 @@
+<Window x:Class="MineRailMonitor.Pages.RfidBindingDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="绑定地图点位"
+        Width="520"
+        Height="270"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#041B30"
+        Foreground="#E7F4FF"
+        ShowInTaskbar="False">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock x:Name="TitleText" FontSize="20" FontWeight="SemiBold" />
+        <TextBlock Grid.Row="1" Text="选择一个未绑定的 RFID 地图点位。保存后该基站与点位将严格一对一绑定。" Foreground="#9FB8CC" TextWrapping="Wrap" Margin="0,10,0,12" />
+        <ComboBox x:Name="PointComboBox"
+                  Grid.Row="2"
+                  Height="34"
+                  Padding="8,0"
+                  DisplayMemberPath="DisplayName"
+                  VerticalContentAlignment="Center"
+                  Background="#082A45"
+                  BorderBrush="#168DCA"
+                  Foreground="#E7F4FF" />
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button Content="取消" Width="86" Height="32" Margin="0,0,10,0" Click="OnCancelClick" />
+            <Button Content="确认绑定" Width="100" Height="32" Background="#087FBA" BorderBrush="#15B9F0" Click="OnConfirmClick" />
+        </StackPanel>
+    </Grid>
+</Window>

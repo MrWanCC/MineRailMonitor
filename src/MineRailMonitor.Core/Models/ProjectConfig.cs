@@ -13,4 +13,11 @@ public sealed class ProjectConfig
     public RfidSettings RfidSettings { get; set; } = new();
 
     public IReadOnlyList<RfidStationConfig> RfidStations { get; set; } = new List<RfidStationConfig>();
+
+    public IReadOnlyList<YardCommunicationConfig> YardCommunications { get; set; } = new List<YardCommunicationConfig>();
+
+    /// <summary>
+    /// True when the project manifest predates per-yard communication interfaces.
+    /// </summary>
+    public bool UsesLegacySharedListener { get; set; }
 }

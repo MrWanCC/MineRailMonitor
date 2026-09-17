@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using MineRailMonitor.Core.Interfaces;
@@ -110,6 +111,11 @@ public sealed class RfidUdpTransport : IRfidUdpTransport, IRfidRequestSender
                 catch (SocketException) when (cancellationToken.IsCancellationRequested)
                 {
                     break;
+                }
+                catch (SocketException exception) when (exception.SocketErrorCode == SocketError.ConnectionReset)
+                {
+                    Trace.TraceWarning("RFID UDP 接收遇到 ConnectionReset，继续监听：{0}", exception.Message);
+                    continue;
                 }
 
                 var args = new RfidUdpDatagramEventArgs(

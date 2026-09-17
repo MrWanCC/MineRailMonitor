@@ -13,10 +13,16 @@ public sealed class MapAnnotationEditor
 {
     private readonly AdminModeService _session;
     private readonly Stack<StationConfig> _history = new();
+    private readonly IReadOnlyList<StationConfig> _allYards;
+    private readonly IReadOnlyList<RfidStationConfig>? _rfidStations;
     private StationConfig _originalSnapshot;
     private StationConfig _workingCopy;
 
-    public MapAnnotationEditor(StationConfig source, AdminModeService session)
+    public MapAnnotationEditor(
+        StationConfig source,
+        AdminModeService session,
+        IEnumerable<StationConfig>? allYards = null,
+        IEnumerable<RfidStationConfig>? rfidStations = null)
     {
         if (source is null)
         {
@@ -31,11 +37,21 @@ public sealed class MapAnnotationEditor
         _session = session;
         _originalSnapshot = Clone(source);
         _workingCopy = Clone(_originalSnapshot);
+        _allYards = (allYards ?? new[] { source })
+            .Where(item => item is not null)
+            .ToArray();
+        if (!_allYards.Any(item => string.Equals(item.Id, source.Id, StringComparison.OrdinalIgnoreCase)))
+        {
+            _allYards = _allYards.Concat(new[] { source }).ToArray();
+        }
+        _rfidStations = rfidStations?.Where(item => item is not null).ToArray();
     }
 
     public StationConfig WorkingCopy => Clone(_workingCopy);
 
     public bool HasUnsavedChanges => _history.Count > 0;
+
+    public string? LastBindingError { get; private set; }
 
     public bool TryAddMapPoint(MapPoint point)
     {
@@ -55,14 +71,26 @@ public sealed class MapAnnotationEditor
 
     public bool TryAddRfidStation(DeviceConfig station)
     {
+        LastBindingError = null;
         if (!_session.IsAdmin || station is null || HasId(_workingCopy.Devices, station.Id))
         {
             return false;
         }
 
-        PushHistory();
         var copy = Clone(station);
         copy.Type = DeviceType.RfidStation;
+        if (!string.IsNullOrWhiteSpace(copy.RfidStationId))
+        {
+            var candidate = Clone(_workingCopy);
+            candidate.Devices = new List<DeviceConfig>(candidate.Devices) { copy };
+            if (!CanApplyRfidBinding(candidate, copy.Id, copy.RfidStationId, out var error))
+            {
+                LastBindingError = error;
+                return false;
+            }
+        }
+
+        PushHistory();
         var devices = new List<DeviceConfig>(_workingCopy.Devices)
         {
             copy
@@ -116,6 +144,7 @@ public sealed class MapAnnotationEditor
         string? rfidStationId,
         bool enabled)
     {
+        LastBindingError = null;
         if (!_session.IsAdmin)
         {
             return false;
@@ -127,12 +156,30 @@ public sealed class MapAnnotationEditor
             return false;
         }
 
+        var normalizedRfidStationId = rfidStationId?.Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedRfidStationId))
+        {
+            var candidate = Clone(_workingCopy);
+            var candidateStation = Find(candidate.Devices, id, device => device.Type == DeviceType.RfidStation);
+            if (candidateStation is null)
+            {
+                return false;
+            }
+
+            candidateStation.RfidStationId = normalizedRfidStationId;
+            if (!CanApplyRfidBinding(candidate, id, normalizedRfidStationId, out var error))
+            {
+                LastBindingError = error;
+                return false;
+            }
+        }
+
         PushHistory();
         station.Type = DeviceType.RfidStation;
         station.Name = name;
         station.CadX = cadX;
         station.CadY = cadY;
-        station.RfidStationId = rfidStationId;
+        station.RfidStationId = normalizedRfidStationId;
         station.Enabled = enabled;
         return true;
     }
@@ -306,6 +353,33 @@ public sealed class MapAnnotationEditor
     private void PushHistory()
     {
         _history.Push(Clone(_workingCopy));
+    }
+
+    private bool CanApplyRfidBinding(
+        StationConfig candidate,
+        string deviceId,
+        string? rfidStationId,
+        out string? error)
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(rfidStationId))
+        {
+            return true;
+        }
+
+        var yards = _allYards
+            .Select(yard => string.Equals(yard.Id, candidate.Id, StringComparison.OrdinalIgnoreCase)
+                ? candidate
+                : yard)
+            .ToArray();
+        var validation = RfidStationBindingRules.ValidateBinding(
+            yards,
+            _rfidStations,
+            candidate.Id,
+            deviceId,
+            rfidStationId);
+        error = validation.Message;
+        return validation.Succeeded;
     }
 
     private object? FindAnnotation(MapAnnotationKind kind, string id)

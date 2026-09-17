@@ -3,23 +3,34 @@ using System.Globalization;
 using System.Net;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using MineRailMonitor.Core.Communication;
 using MineRailMonitor.Core.Models;
 using MineRailMonitor.Core.Recognition;
+using MineRailMonitor.Core.Services;
 
 namespace MineRailMonitor.Pages;
 
 public partial class CommunicationPage : UserControl
 {
     private readonly ObservableCollection<string> _packetLog = new();
+    private readonly ObservableCollection<string> _frameRfidSlots = new();
     private IReadOnlyList<RfidStationConfig> _stations = Array.Empty<RfidStationConfig>();
+    private IReadOnlyList<StationConfig> _yardConfigs = Array.Empty<StationConfig>();
+    private IReadOnlyList<RfidStationYardOption> _yardFilterOptions;
     private IReadOnlyList<RfidStationPollingStatus> _stationStatuses = Array.Empty<RfidStationPollingStatus>();
+    private HashSet<string>? _displayScopeStationIds;
+    private bool _isYardFilterSync;
     private Func<RfidStationConfig, RfidPollCommand, Task>? _sendTestAsync;
 
     public CommunicationPage()
     {
         InitializeComponent();
+        _yardFilterOptions = RfidYardFilter.BuildOptions(null, _stations);
+        YardFilter.ItemsSource = _yardFilterOptions;
+        YardFilter.SelectedIndex = 0;
         RxListBox.ItemsSource = _packetLog;
+        FrameRfidSlotsItemsControl.ItemsSource = _frameRfidSlots;
         SetListenerStatus("监听尚未启动");
         LatestRxText.Text = "暂无报文";
         NoStationText.Visibility = Visibility.Visible;
@@ -35,18 +46,78 @@ public partial class CommunicationPage : UserControl
             .Where(station => station is not null && !string.IsNullOrWhiteSpace(station.StationId))
             .ToArray();
         _sendTestAsync = sendTestAsync;
+        _yardFilterOptions = RfidYardFilter.BuildOptions(_yardConfigs, _stations);
+        SetYardFilterSelection(GetSelectedYardId());
+        RebuildTestStationSelector();
+        RefreshStationRows();
+    }
+
+    public void SetYardOptions(IEnumerable<StationConfig>? yards)
+    {
+        _yardConfigs = (yards ?? Array.Empty<StationConfig>())
+            .Where(yard => yard is not null)
+            .ToArray();
+        _yardFilterOptions = RfidYardFilter.BuildOptions(_yardConfigs, _stations);
+        SetYardFilterSelection(GetSelectedYardId());
+        _displayScopeStationIds = RfidYardFilter.ResolveStationIds(GetSelectedYardId(), _stations);
+        RebuildTestStationSelector();
+        RefreshStationRows();
+    }
+
+    public void SetDisplayScope(IEnumerable<string>? stationIds, string? yardId = null)
+    {
+        var nextScope = stationIds is null
+            ? null
+            : new HashSet<string>(
+                stationIds.Where(stationId => !string.IsNullOrWhiteSpace(stationId)),
+                StringComparer.OrdinalIgnoreCase);
+        SetYardFilterSelection(yardId ?? RfidYardFilter.ResolveYardId(stationIds, _stations) ?? RfidStationYardOption.AllId);
+        if (!AreScopesEqual(_displayScopeStationIds, nextScope))
+        {
+            ResetScopePresentation();
+        }
+
+        _displayScopeStationIds = nextScope;
+
+        RebuildTestStationSelector();
+        RefreshStationRows();
+    }
+
+    private void RebuildTestStationSelector()
+    {
+        var selectedStationId = (TestStationSelector.SelectedItem as ComboBoxItem)?.Tag is RfidStationConfig selectedStation
+            ? selectedStation.StationId
+            : null;
+        var visibleStations = GetVisibleStations();
+
         TestStationSelector.Items.Clear();
-        foreach (var station in _stations)
+        foreach (var visibleStation in visibleStations)
         {
             TestStationSelector.Items.Add(new ComboBoxItem
             {
-                Content = FormatStation(station),
-                Tag = station
+                Content = FormatStation(visibleStation),
+                Tag = visibleStation
             });
         }
 
-        TestStationSelector.SelectedIndex = _stations.Count == 0 ? -1 : 0;
-        RefreshStationRows();
+        var selectedItem = TestStationSelector.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(item => item.Tag is RfidStationConfig station &&
+                string.Equals(station.StationId, selectedStationId, StringComparison.OrdinalIgnoreCase));
+        TestStationSelector.SelectedItem = selectedItem ?? TestStationSelector.Items.Cast<object>().FirstOrDefault();
+        ConfiguredStationCountText.Text = visibleStations.Count.ToString(CultureInfo.InvariantCulture);
+        SelectedStationText.Text = TestStationSelector.SelectedItem is ComboBoxItem { Tag: RfidStationConfig station }
+            ? FormatStation(station)
+            : "-";
+    }
+
+    private void ResetScopePresentation()
+    {
+        ClearLog();
+        LatestTxTimeText.Text = "-";
+        LatestTxSummaryText.Text = "暂无发送报文";
+        LatestTxLengthText.Text = "-";
+        LatestTxHexText.Text = "-";
     }
 
     public void SetStationStatuses(IEnumerable<RfidStationPollingStatus> statuses)
@@ -57,17 +128,57 @@ public partial class CommunicationPage : UserControl
         RefreshStationRows();
     }
 
-    public void SetListenerStatus(string status) => ListenerStatusText.Text = status;
+    public void SetListenerStatus(string status, string? yardId = null)
+    {
+        if (!string.IsNullOrWhiteSpace(yardId) &&
+            !string.Equals(GetSelectedYardId(), RfidStationYardOption.AllId, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(GetSelectedYardId(), yardId!.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        ListenerStatusText.Text = status;
+        ListenerStatusDot.Fill = status.IndexOf("异常", StringComparison.Ordinal) >= 0
+            ? (Brush)FindResource("AlarmBrush")
+            : (Brush)FindResource("SuccessBrush");
+    }
+
+    public void SetAdminMode(bool isAdmin)
+    {
+        ClearTestButton.IsEnabled = isAdmin;
+        ClearTestButton.ToolTip = isAdmin
+            ? "发送清空命令前需要确认"
+            : "进入管理员模式后可发送清空命令";
+    }
 
     public void AddDatagram(
         RfidUdpDatagramEventArgs datagram,
         RfidStationFrame? parsedFrame = null,
         StationRecognitionSession? recognitionSession = null)
+        => AddDatagram(null, datagram, parsedFrame, recognitionSession);
+
+    public void AddDatagram(
+        string? yardId,
+        RfidUdpDatagramEventArgs datagram,
+        RfidStationFrame? parsedFrame = null,
+        StationRecognitionSession? recognitionSession = null)
     {
+        if (!IsDatagramInDisplayScope(yardId, parsedFrame))
+        {
+            return;
+        }
+
         var hex = BitConverter.ToString(datagram.Data).Replace('-', ' ');
+        LatestRxTimeText.Text = FormatTime(datagram.ReceivedAt);
+        LatestPacketTimeText.Text = datagram.IsValid ? FormatTime(datagram.ReceivedAt) : "-";
+        LatestRxSummaryText.Text = $"{FormatYard(yardId)}来源：{FormatEndpoint(datagram.RemoteEndPoint)}";
+        LatestRxLengthText.Text = $"长度：{datagram.Data.Length} 字节 · {(datagram.IsValid ? "合法帧" : "非法帧")}";
+        LatestRxHexText.Text = hex;
+        UpdateCurrentFrameDisplay(datagram, parsedFrame, recognitionSession);
+
         var lines = new List<string>
         {
-            $"RX {datagram.ReceivedAt:HH:mm:ss.fff}    {FormatEndpoint(datagram.RemoteEndPoint)}    {datagram.Data.Length} Bytes    {(datagram.IsValid ? "合法帧" : "非法帧")}",
+            $"RX {datagram.ReceivedAt:HH:mm:ss.fff}    {FormatYard(yardId)}{FormatEndpoint(datagram.RemoteEndPoint)}    {datagram.Data.Length} Bytes    {(datagram.IsValid ? "合法帧" : "非法帧")}",
             hex
         };
 
@@ -102,17 +213,75 @@ public partial class CommunicationPage : UserControl
     public void ClearLog()
     {
         _packetLog.Clear();
+        PacketLogCountText.Text = "0 / 50";
         LatestRxText.Text = "暂无报文";
+        LatestRxTimeText.Text = "-";
+        LatestRxSummaryText.Text = "暂无接收报文";
+        LatestRxLengthText.Text = "-";
+        LatestRxHexText.Text = "-";
+        LatestPacketTimeText.Text = "-";
+        ResetCurrentFrameDisplay();
     }
 
-    public void SetError(Exception exception) =>
-        SetListenerStatus($"监听异常：{exception.Message}");
+    public void SetError(Exception exception, string? yardId = null) =>
+        SetListenerStatus($"监听异常：{exception.Message}", yardId);
 
     private async void OnReadTestClick(object sender, RoutedEventArgs e) => await SendSelectedAsync(RfidPollCommand.Read);
 
     private async void OnClearTestClick(object sender, RoutedEventArgs e) => await SendSelectedAsync(RfidPollCommand.Clear);
 
     private void OnClearLogClick(object sender, RoutedEventArgs e) => ClearLog();
+
+    private void OnYardFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isYardFilterSync)
+        {
+            return;
+        }
+
+        var nextScope = RfidYardFilter.ResolveStationIds(GetSelectedYardId(), _stations);
+        if (!AreScopesEqual(_displayScopeStationIds, nextScope))
+        {
+            ResetScopePresentation();
+        }
+
+        _displayScopeStationIds = nextScope;
+        RebuildTestStationSelector();
+        RefreshStationRows();
+    }
+
+    private void OnTestStationSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (TestStationSelector.SelectedItem is ComboBoxItem { Tag: RfidStationConfig station })
+        {
+            SelectedStationText.Text = FormatStation(station);
+        }
+    }
+
+    private string GetSelectedYardId() =>
+        (YardFilter.SelectedItem as RfidStationYardOption)?.Id ?? RfidStationYardOption.AllId;
+
+    private void SetYardFilterSelection(string selectedYardId)
+    {
+        var selectedItem = _yardFilterOptions.FirstOrDefault(option =>
+            string.Equals(option.Id, selectedYardId, StringComparison.OrdinalIgnoreCase))
+            ?? _yardFilterOptions.FirstOrDefault();
+        if (selectedItem is null)
+        {
+            return;
+        }
+
+        _isYardFilterSync = true;
+        try
+        {
+            YardFilter.ItemsSource = _yardFilterOptions;
+            YardFilter.SelectedItem = selectedItem;
+        }
+        finally
+        {
+            _isYardFilterSync = false;
+        }
+    }
 
     private async Task SendSelectedAsync(RfidPollCommand command)
     {
@@ -128,10 +297,21 @@ public partial class CommunicationPage : UserControl
             return;
         }
 
+        if (command == RfidPollCommand.Clear && !ConfirmClearCommand(station))
+        {
+            return;
+        }
+
         try
         {
             await _sendTestAsync(station, command);
             var commandText = command == RfidPollCommand.Read ? "读取" : "清空";
+            var sentAt = DateTimeOffset.Now;
+            SelectedStationText.Text = FormatStation(station);
+            LatestTxTimeText.Text = FormatTime(sentAt);
+            LatestTxSummaryText.Text = $"发送至：{FormatEndpoint(station.TryResolveEndpoint(out var endpoint) ? endpoint : new IPEndPoint(IPAddress.None, 0))}";
+            LatestTxLengthText.Text = $"命令：{commandText} · 协议地址 {station.ProtocolAddress:X2}";
+            LatestTxHexText.Text = $"TX {commandText} 请求已发送";
             AddLog($"TX {DateTime.Now:HH:mm:ss.fff}    {FormatStation(station)}    {commandText} 请求已发送");
             SetListenerStatus($"测试报文已发送：{FormatStation(station)}");
         }
@@ -141,9 +321,21 @@ public partial class CommunicationPage : UserControl
         }
     }
 
+    private bool ConfirmClearCommand(RfidStationConfig station)
+    {
+        var dialog = new StyledMessageDialog(
+            "确认发送清空命令",
+            $"即将向 {FormatStation(station)} 发送清空命令。\n该操作会清除设备当前缓存数据，请确认站场和基站无误。",
+            MessageDialogKind.Warning)
+        {
+            Owner = Window.GetWindow(this)
+        };
+        return dialog.ShowDialog() == true;
+    }
+
     private void RefreshStationRows()
     {
-        var rows = _stations.Select(station =>
+        var rows = GetVisibleStations().Select(station =>
         {
             var status = _stationStatuses.FirstOrDefault(item => MatchesStation(item, station));
             return new StationStatusRow(station, status);
@@ -151,6 +343,37 @@ public partial class CommunicationPage : UserControl
 
         StationStatusGrid.ItemsSource = rows;
         NoStationText.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private IReadOnlyList<RfidStationConfig> GetVisibleStations()
+    {
+        var scopeStationIds = _displayScopeStationIds;
+        return scopeStationIds is null
+            ? _stations
+            : _stations
+                .Where(station => scopeStationIds.Contains(station.StationId))
+                .ToArray();
+    }
+
+    private bool IsDatagramInDisplayScope(string? yardId, RfidStationFrame? parsedFrame)
+    {
+        var scopeStationIds = _displayScopeStationIds;
+        if (scopeStationIds is null || string.IsNullOrWhiteSpace(yardId))
+        {
+            return true;
+        }
+
+        var normalizedYardId = yardId!.Trim();
+        var yardStations = _stations.Where(station =>
+            string.Equals(station.YardId?.Trim(), normalizedYardId, StringComparison.OrdinalIgnoreCase));
+        if (parsedFrame is null)
+        {
+            return yardStations.Any(station => scopeStationIds.Contains(station.StationId));
+        }
+
+        return yardStations.Any(station =>
+            station.ProtocolAddress == parsedFrame.StationAddress &&
+            scopeStationIds.Contains(station.StationId));
     }
 
     private static bool MatchesStation(RfidStationPollingStatus status, RfidStationConfig station)
@@ -176,14 +399,76 @@ public partial class CommunicationPage : UserControl
         {
             _packetLog.RemoveAt(_packetLog.Count - 1);
         }
+
+        PacketLogCountText.Text = $"{_packetLog.Count.ToString(CultureInfo.InvariantCulture)} / 50";
+    }
+
+    private void UpdateCurrentFrameDisplay(
+        RfidUdpDatagramEventArgs datagram,
+        RfidStationFrame? parsedFrame,
+        StationRecognitionSession? recognitionSession)
+    {
+        _frameRfidSlots.Clear();
+
+        if (parsedFrame is null)
+        {
+            FrameAddressText.Text = "-";
+            FrameModeText.Text = "-";
+            FrameLengthText.Text = "-";
+            FrameCountText.Text = "-";
+            FrameCrcText.Text = "-";
+            FrameParseResultText.Text = datagram.IsValid ? "待解析" : "帧无效";
+            FrameParseResultText.Foreground = datagram.IsValid
+                ? (Brush)FindResource("WarningBrush")
+                : (Brush)FindResource("AlarmBrush");
+            FrameDescriptionText.Text = datagram.ValidationError ?? "当前报文未解析为 RFID 数据帧";
+            return;
+        }
+
+        FrameAddressText.Text = $"0x{parsedFrame.StationAddress:X2}";
+        FrameModeText.Text = $"0x{parsedFrame.Mode:X2}";
+        FrameLengthText.Text = $"{(parsedFrame.RawData.Length > 0 ? parsedFrame.RawData.Length : datagram.Data.Length)} 字节";
+        FrameCountText.Text = parsedFrame.ActualNonZeroSlotCount.ToString(CultureInfo.InvariantCulture);
+        FrameCrcText.Text = $"{parsedFrame.CrcHigh:X2} {parsedFrame.CrcLow:X2}";
+        FrameParseResultText.Text = parsedFrame.ProtocolDataWarning ? "数据告警" : "解析成功";
+        FrameParseResultText.Foreground = parsedFrame.ProtocolDataWarning
+            ? (Brush)FindResource("WarningBrush")
+            : (Brush)FindResource("SuccessBrush");
+        FrameDescriptionText.Text = recognitionSession is null
+            ? $"读取到 {parsedFrame.ActualNonZeroSlotCount} 个 RFID 标签"
+            : $"当前列车：{recognitionSession.DetectedVehicleCount} / {recognitionSession.ExpectedVehicleCount}";
+
+        foreach (var (value, index) in parsedFrame.RawRfidSlots.Select((value, index) => (value, index)))
+        {
+            _frameRfidSlots.Add($"RFID{index + 1:00}  {(value == 0 ? "----" : value.ToString("X4", CultureInfo.InvariantCulture))}");
+        }
+    }
+
+    private void ResetCurrentFrameDisplay()
+    {
+        _frameRfidSlots.Clear();
+        FrameAddressText.Text = "-";
+        FrameModeText.Text = "-";
+        FrameLengthText.Text = "-";
+        FrameCountText.Text = "-";
+        FrameCrcText.Text = "-";
+        FrameParseResultText.Text = "-";
+        FrameParseResultText.Foreground = (Brush)FindResource("SuccessBrush");
+        FrameDescriptionText.Text = "暂无报文";
     }
 
     private static string FormatStation(RfidStationConfig station) =>
         string.IsNullOrWhiteSpace(station.Name)
-            ? station.StationId
-            : $"{station.StationId} · {station.Name}";
+            ? RfidStationIdentity.GetDisplayId(station.StationId, station.YardId)
+            : $"{RfidStationIdentity.GetDisplayId(station.StationId, station.YardId)} · {station.Name}";
 
     private static string FormatEndpoint(IPEndPoint endpoint) => $"{endpoint.Address}:{endpoint.Port}";
+
+    private static string FormatYard(string? yardId) =>
+        string.IsNullOrWhiteSpace(yardId) ? string.Empty : $"[{yardId!.Trim()}] ";
+
+    private static bool AreScopesEqual(HashSet<string>? left, HashSet<string>? right) =>
+        left is null ? right is null : right is not null && left.SetEquals(right);
 
     private static string FormatTime(DateTimeOffset? value) =>
         value.HasValue ? value.Value.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture) : "-";

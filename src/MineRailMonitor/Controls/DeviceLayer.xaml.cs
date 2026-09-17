@@ -52,7 +52,8 @@ public partial class DeviceLayer : UserControl
         foreach (var device in station.Devices.Where(device => device.Enabled && device.Type == DeviceType.RfidStation))
         {
             var binding = RfidMapBindingResolver.Resolve(device, _rfidStations.Values);
-            var visual = new DeviceVisual(device, binding.EffectiveName);
+            var displayName = string.IsNullOrWhiteSpace(device.Name) ? binding.EffectiveName : device.Name;
+            var visual = new DeviceVisual(device, displayName);
             visual.Click += OnDeviceClicked;
             visual.SetAnnotationEditMode(_isAnnotationEditMode);
             _visuals[device.Id] = visual;

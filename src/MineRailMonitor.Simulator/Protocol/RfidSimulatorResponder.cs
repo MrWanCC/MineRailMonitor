@@ -81,6 +81,33 @@ public sealed class RfidSimulatorResponder
         return response;
     }
 
+    /// <summary>
+    /// Updates the simulated station cache from the manual scene player.
+    /// This only changes the values returned by future Read frames.
+    /// </summary>
+    public bool UpdateSlots(byte address, IReadOnlyList<ushort> slots)
+    {
+        if (slots is null)
+        {
+            throw new ArgumentNullException(nameof(slots));
+        }
+        if (slots.Count != ScenarioPlaybackState.SlotCapacity)
+        {
+            throw new ArgumentException($"A simulator station must contain {ScenarioPlaybackState.SlotCapacity} slots.", nameof(slots));
+        }
+        if (!_stations.TryGetValue(address, out var station))
+        {
+            return false;
+        }
+
+        lock (station)
+        {
+            station.Slots = slots.ToArray();
+        }
+
+        return true;
+    }
+
     public event Action<byte>? UnknownAddressReceived;
 
     public IReadOnlyList<SimulatorRequestLog> RequestLogs

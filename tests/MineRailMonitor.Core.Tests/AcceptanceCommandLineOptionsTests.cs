@@ -22,8 +22,30 @@ public sealed class AcceptanceCommandLineOptionsTests
         Assert.Equal(IPAddress.Loopback, options.ListenAddress);
         Assert.Equal(IPAddress.Loopback, options.SimulatorAddress);
         Assert.Equal(62102, options.ListenPort);
+        Assert.Equal(62112, options.ListenPort620);
         Assert.Equal(62101, options.SimulatorPort);
+        Assert.Equal(62111, options.SimulatorPort620);
         Assert.Equal(2, options.InterVehicleTimeoutSeconds);
+    }
+
+    [Fact]
+    public void Acceptance_options_support_two_independent_yard_endpoints()
+    {
+        var options = AcceptanceCommandLineOptions.Parse(new[]
+        {
+            "--acceptance", "--database", "artifacts/acceptance/run/a.db",
+            "--runtime-state", "artifacts/acceptance/run/runtime.json",
+            "--log-dir", "artifacts/acceptance/run/logs",
+            "--ready-file", "artifacts/acceptance/run/ready",
+            "--stop-file", "artifacts/acceptance/run/stop",
+            "--listen-port-560", "63102", "--listen-port-620", "63112",
+            "--simulator-port-560", "63101", "--simulator-port-620", "63111"
+        });
+
+        Assert.Equal(63102, options.ListenPort);
+        Assert.Equal(63112, options.ListenPort620);
+        Assert.Equal(63101, options.SimulatorPort);
+        Assert.Equal(63111, options.SimulatorPort620);
     }
 
     [Fact]

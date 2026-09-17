@@ -121,6 +121,67 @@ public sealed class PassageRecordStoreTests
         Assert.Equal(1, statistics.ByStation["RFID-02"]);
     }
 
+    [Fact]
+    public void Query_can_filter_multiple_station_ids_for_a_yard_scope()
+    {
+        var store = new InMemoryPassageRecordStore();
+        store.Save(CreateRecordWithStation(
+            Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+            "RFID-01",
+            0x01,
+            Today.AddMinutes(-3)));
+        store.Save(CreateRecordWithStation(
+            Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+            "RFID-02",
+            0x02,
+            Today.AddMinutes(-2)));
+        store.Save(CreateRecordWithStation(
+            Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+            "RFID-03",
+            0x03,
+            Today.AddMinutes(-1)));
+
+        var result = store.Query(new PassageQuery
+        {
+            StationIds = new[] { "RFID-01", "RFID-03" },
+            PageSize = 20
+        });
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(new[] { "RFID-03", "RFID-01" }, result.Items.Select(record => record.StationId));
+    }
+
+    [Fact]
+    public void Query_can_include_warning_records_without_including_normal_passages()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var normal = CreateRecordWithStation(
+            Guid.Parse("b1111111-1111-1111-1111-111111111111"),
+            "RFID-01",
+            0x01,
+            Today.AddMinutes(-3));
+        var warning = CreateRecordWithStation(
+            Guid.Parse("b2222222-2222-2222-2222-222222222222"),
+            "RFID-01",
+            0x01,
+            Today.AddMinutes(-2),
+            warningMessages: new[] { "识别不完整：已识别10/11，缺少1个RFID" });
+        var alarm = CreateRecord(
+            Guid.Parse("b3333333-3333-3333-3333-333333333333"),
+            0x01,
+            Today.AddMinutes(-1),
+            PassageOutcome.UncouplingAlarm);
+
+        store.Save(normal);
+        store.Save(warning);
+        store.Save(alarm);
+
+        var result = store.Query(new PassageQuery { IncludeWarnings = true, PageSize = 20 });
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(new[] { alarm.PassageId, warning.PassageId }, result.Items.Select(record => record.PassageId));
+    }
+
     private static PassageRecord CreateRecord(
         Guid passageId,
         byte stationAddress,
@@ -152,7 +213,8 @@ public sealed class PassageRecordStoreTests
         Guid passageId,
         string stationId,
         byte stationAddress,
-        DateTimeOffset completedAt)
+        DateTimeOffset completedAt,
+        IEnumerable<string>? warningMessages = null)
     {
         var startedAt = completedAt.AddSeconds(-10);
         var details = new[]
@@ -169,6 +231,7 @@ public sealed class PassageRecordStoreTests
             PassageOutcome.Completed,
             startedAt,
             completedAt,
+            warningMessages: warningMessages,
             rfidObservations: details);
     }
 }

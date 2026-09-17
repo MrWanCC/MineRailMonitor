@@ -8,11 +8,18 @@ public sealed class PassageQuery
 
     public string? StationId { get; set; }
 
+    public IReadOnlyList<string>? StationIds { get; set; }
+
     public byte? StationAddress { get; set; }
 
     public ushort? HeadRfid { get; set; }
 
     public PassageOutcome? Outcome { get; set; }
+
+    /// <summary>
+    /// Includes both uncoupling alarms and completed passages that contain recognition warnings.
+    /// </summary>
+    public bool IncludeWarnings { get; set; }
 
     public int PageIndex { get; set; }
 

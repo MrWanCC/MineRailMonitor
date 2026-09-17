@@ -3,14 +3,12 @@ namespace MineRailMonitor.Core.Tests;
 public sealed class AdminPasswordConfigurationTests
 {
     [Fact]
-    public void Application_configuration_does_not_store_a_default_admin_password()
+    public void Application_configuration_uses_the_local_default_admin_password()
     {
         var configPath = LocateSourceFile("src", "MineRailMonitor", "App.config");
         var config = File.ReadAllText(configPath);
-        var appCode = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "App.xaml.cs"));
 
-        Assert.DoesNotContain("AdminPassword", config, StringComparison.Ordinal);
-        Assert.Contains("MINE_RAIL_ADMIN_PASSWORD", appCode, StringComparison.Ordinal);
+        Assert.Contains("<add key=\"AdminPassword\" value=\"admin123\" />", config, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -21,6 +19,18 @@ public sealed class AdminPasswordConfigurationTests
 
         Assert.Contains("<PasswordBox x:Name=\"PasswordInput\"", dialogMarkup, StringComparison.Ordinal);
         Assert.Contains("HorizontalContentAlignment=\"Center\"", dialogMarkup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Environment_admin_password_is_checked_before_local_configuration()
+    {
+        var appCode = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "App.xaml.cs"));
+        var environmentLookup = appCode.IndexOf("Environment.GetEnvironmentVariable", StringComparison.Ordinal);
+        var configurationLookup = appCode.IndexOf("ConfigurationManager.AppSettings", StringComparison.Ordinal);
+
+        Assert.True(environmentLookup >= 0);
+        Assert.True(configurationLookup >= 0);
+        Assert.True(environmentLookup < configurationLookup);
     }
 
     private static string LocateSourceFile(params string[] segments)

@@ -30,13 +30,13 @@ public partial class App : Application
 
     private static string? ReadAdminPassword()
     {
-        var configuredPassword = ConfigurationManager.AppSettings["AdminPassword"];
-        if (!string.IsNullOrWhiteSpace(configuredPassword))
+        var environmentPassword = Environment.GetEnvironmentVariable("MINE_RAIL_ADMIN_PASSWORD");
+        if (!string.IsNullOrWhiteSpace(environmentPassword))
         {
-            return configuredPassword;
+            return environmentPassword;
         }
 
-        return Environment.GetEnvironmentVariable("MINE_RAIL_ADMIN_PASSWORD");
+        return ConfigurationManager.AppSettings["AdminPassword"];
     }
 
     protected override void OnStartup(StartupEventArgs e)

@@ -6,11 +6,12 @@ namespace MineRailMonitor.Simulator.Acceptance;
 
 public sealed class SimulatorCommandLineOptions
 {
-    private SimulatorCommandLineOptions(bool testMode, string? scenario, int port, string? resultPath, string? readyFile)
+    private SimulatorCommandLineOptions(bool testMode, string? scenario, int port, int port620, string? resultPath, string? readyFile)
     {
         TestMode = testMode;
         Scenario = scenario;
         Port = port;
+        Port620 = port620;
         ResultPath = resultPath;
         ReadyFile = readyFile;
     }
@@ -20,6 +21,8 @@ public sealed class SimulatorCommandLineOptions
     public string? Scenario { get; }
 
     public int Port { get; }
+
+    public int Port620 { get; }
 
     public string? ResultPath { get; }
 
@@ -37,6 +40,7 @@ public sealed class SimulatorCommandLineOptions
         var resultPath = (string?)null;
         var readyFile = (string?)null;
         var port = 62101;
+        var port620 = 62111;
 
         for (var index = 0; index < values.Length; index++)
         {
@@ -71,6 +75,13 @@ public sealed class SimulatorCommandLineOptions
                         throw new ArgumentException("Simulator test port must be from 1024 to 65535.", nameof(args));
                     }
                     break;
+                case "--port-620":
+                    var port620Text = ReadValue(values, ref index, argument);
+                    if (!int.TryParse(port620Text, NumberStyles.None, CultureInfo.InvariantCulture, out port620) || port620 < 1024 || port620 > 65535)
+                    {
+                        throw new ArgumentException("Simulator test port for yard 620 must be from 1024 to 65535.", nameof(args));
+                    }
+                    break;
                 default:
                     throw new ArgumentException($"Unknown Simulator argument: {argument}", nameof(args));
             }
@@ -78,10 +89,10 @@ public sealed class SimulatorCommandLineOptions
 
         if (!testMode)
         {
-            return new SimulatorCommandLineOptions(false, null, 0, null, null);
+            return new SimulatorCommandLineOptions(false, null, 0, 0, null, null);
         }
 
-        if (port == 62001 || port == 62002)
+        if (port == 62001 || port == 62002 || port620 == 62001 || port620 == 62002)
         {
             throw new ArgumentException("Simulator acceptance mode cannot use production UDP ports.", nameof(args));
         }
@@ -91,7 +102,12 @@ public sealed class SimulatorCommandLineOptions
         }
 
         _ = AcceptanceScenario.Parse(scenario!);
-        return new SimulatorCommandLineOptions(true, scenario, port, Path.GetFullPath(resultPath), Path.GetFullPath(readyFile));
+        if (port == port620)
+        {
+            throw new ArgumentException("Simulator yard listeners must use different UDP ports.", nameof(args));
+        }
+
+        return new SimulatorCommandLineOptions(true, scenario, port, port620, Path.GetFullPath(resultPath), Path.GetFullPath(readyFile));
     }
 
     private static string ReadValue(IReadOnlyList<string> values, ref int index, string option)

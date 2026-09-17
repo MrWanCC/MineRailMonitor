@@ -34,7 +34,7 @@ public sealed class WindowChromeMarkupTests
         Assert.Contains("x:Name=\"HeaderSystemStatusDot\"", xaml);
         Assert.Contains("x:Name=\"HeaderRfidStatusDot\"", xaml);
         Assert.Contains("x:Name=\"HeaderExternalStatusDot\"", xaml);
-        Assert.Contains("Text=\"外部接口未接入\"", xaml);
+        Assert.Contains("Text=\"外部接口未配置\"", xaml);
         Assert.DoesNotContain("系统正常 · 演示模式", xaml);
         Assert.DoesNotContain("读卡分站 · 未接入", xaml);
 

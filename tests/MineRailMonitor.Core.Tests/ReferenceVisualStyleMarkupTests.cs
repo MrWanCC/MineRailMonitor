@@ -32,7 +32,7 @@ public sealed class ReferenceVisualStyleMarkupTests
         Assert.Contains("<Setter Property=\"FontSize\" Value=\"12\" />", monitor);
         Assert.Contains("<Setter Property=\"FontSize\" Value=\"13\" />", monitor);
         Assert.Contains("<Setter Property=\"BorderThickness\" Value=\"0\" />", cards);
-        Assert.Contains("<RowDefinition Height=\"30\" />", monitor);
+        Assert.Contains("<RowDefinition Height=\"42\" />", monitor);
         Assert.Contains("x:Name=\"SystemStatusCard\"", monitor);
     }
 

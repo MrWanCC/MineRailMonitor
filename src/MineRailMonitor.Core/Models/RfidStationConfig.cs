@@ -7,10 +7,13 @@ namespace MineRailMonitor.Core.Models;
 public sealed class RfidStationConfig
 {
     /// <summary>Administrator-defined stable identifier for this station.</summary>
-    public string StationId { get; set; } = string.Empty;
+    public string StationId { get; init; } = string.Empty;
 
     /// <summary>Administrator-visible station name.</summary>
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>Optional project yard that owns this communication station.</summary>
+    public string? YardId { get; set; }
 
     /// <summary>The station's independent UDP destination IP address.</summary>
     public string IpAddress { get; set; } = string.Empty;

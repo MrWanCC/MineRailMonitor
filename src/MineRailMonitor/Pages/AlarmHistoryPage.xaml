@@ -62,8 +62,8 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Border Background="{StaticResource AlarmBrush}" CornerRadius="2" Margin="0,8,12,8" />
-                <TextBlock Grid.Column="1" Text="报警记录" Style="{StaticResource PageTitleStyle}" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="2" Text="聚焦脱节报警，查看真实识别结果与清除状态"
+                <TextBlock Grid.Column="1" Text="告警记录" Style="{StaticResource PageTitleStyle}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="记录识别告警与脱节报警，查看真实识别结果与清除状态"
                            Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
                            VerticalAlignment="Center" Margin="18,0,0,0" />
             </Grid>
@@ -76,6 +76,15 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <WrapPanel VerticalAlignment="Center">
+                    <TextBlock Text="站场范围" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox x:Name="YardFilter" Width="150" Height="30" Margin="0,0,14,0"
+                              SelectionChanged="OnYardFilterChanged">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayName}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
                     <TextBlock Text="开始时间" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <DatePicker x:Name="FromDatePicker" Width="168" Height="30" Margin="0,0,14,0"
                                 Style="{StaticResource HmiDatePickerStyle}"
@@ -110,7 +119,7 @@
                           Stroke="{StaticResource AlarmBrush}" StrokeThickness="1.8" VerticalAlignment="Center" />
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                         <TextBlock x:Name="TodayAlarmValue" Text="0" Style="{StaticResource AlarmSummaryNumberStyle}" Foreground="{StaticResource AlarmBrush}" />
-                        <TextBlock Text="今日报警" Style="{StaticResource AlarmSummaryLabelStyle}" />
+                        <TextBlock Text="今日告警" Style="{StaticResource AlarmSummaryLabelStyle}" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -168,7 +177,7 @@
                 <Grid Margin="6,0,6,4">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <Border Width="4" Height="22" Background="{StaticResource AlarmBrush}" CornerRadius="2" Margin="0,0,10,0" />
-                        <TextBlock Text="报警记录列表" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="告警记录列表" Style="{StaticResource SectionTitleStyle}" />
                     </StackPanel>
                     <TextBlock x:Name="ListSummaryText" HorizontalAlignment="Right" VerticalAlignment="Center"
                                Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
@@ -183,6 +192,7 @@
                             <DataGridTextColumn Header="车头RFID" Binding="{Binding HeadRfidText}" Width="0.8*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                             <DataGridTextColumn Header="识别进度" Binding="{Binding ProgressText}" Width="0.85*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                             <DataGridTextColumn Header="缺少节数" Binding="{Binding MissingCountText}" Width="0.75*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTextColumn Header="告警级别" Binding="{Binding AlertLevelText}" Width="0.75*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                             <DataGridTextColumn Header="报警原因" Binding="{Binding AlarmReasonText}" Width="1.15*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                             <DataGridTextColumn Header="清除状态" Binding="{Binding ClearStateText}" Width="0.9*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                             <DataGridTemplateColumn Header="详情" Width="0.65*">
@@ -194,11 +204,11 @@
                             </DataGridTemplateColumn>
                         </DataGrid.Columns>
                     </DataGrid>
-                    <TextBlock x:Name="NoDataText" Text="暂无报警记录" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    <TextBlock x:Name="NoDataText" Text="暂无告警记录" HorizontalAlignment="Center" VerticalAlignment="Center"
                                Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" IsHitTestVisible="False" />
                 </Grid>
                 <DockPanel Grid.Row="2" LastChildFill="False" Margin="6,8,6,0">
-                    <TextBlock Text="仅显示脱节报警 · 每页 20 条" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" VerticalAlignment="Center" />
+                    <TextBlock Text="显示识别告警与脱节报警 · 每页 20 条" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" VerticalAlignment="Center" />
                     <Button x:Name="NextPageButton" DockPanel.Dock="Right" Content="下一页 ›" Style="{StaticResource AlarmFooterButtonStyle}" Click="OnNextPageClick" />
                     <Button x:Name="PreviousPageButton" DockPanel.Dock="Right" Content="‹ 上一页" Style="{StaticResource AlarmFooterButtonStyle}" Margin="8,0,0,0" Click="OnPreviousPageClick" />
                 </DockPanel>

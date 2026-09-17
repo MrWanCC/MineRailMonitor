@@ -14,6 +14,7 @@ public sealed class RecognitionStatusMarkupTests
         var mainWindowCode = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));
         var simulatorMarkup = File.ReadAllText(Locate("src", "MineRailMonitor.Simulator", "MainWindow.xaml"));
         var simulatorCode = File.ReadAllText(Locate("src", "MineRailMonitor.Simulator", "MainWindow.xaml.cs"));
+        var simulatorContextCode = File.ReadAllText(Locate("src", "MineRailMonitor.Simulator", "Models", "SimulatorStationContext.cs"));
         var communicationCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "CommunicationPage.xaml.cs"));
 
         Assert.Contains("标准列车节数（含车头）", settingsMarkup);
@@ -32,12 +33,13 @@ public sealed class RecognitionStatusMarkupTests
         Assert.Contains("检测到多个车头标签", mainWindowCode);
         Assert.Contains("协议数据告警", mainWindowCode);
         Assert.Contains("脱节报警", mainWindowCode);
-        Assert.Contains("SetRfid(0, \"0001\")", simulatorCode);
-        Assert.Contains("0x10 + i", simulatorCode);
-        Assert.Contains("i <= 10", simulatorCode);
-        Assert.Contains("多车头 11 节", simulatorMarkup);
-        Assert.Contains("无车头 11 节", simulatorMarkup);
-        Assert.Contains("首位异常 11 节", simulatorMarkup);
+        Assert.Contains("LoadScenario(\"正常11节\"", simulatorCode);
+        Assert.Contains("0x0011", simulatorCode);
+        Assert.Contains("SimulatorStationContext", simulatorCode);
+        Assert.Contains("ScenarioPlaybackState", simulatorContextCode);
+        Assert.Contains("多车头11节", simulatorMarkup);
+        Assert.Contains("无车头11节", simulatorMarkup);
+        Assert.Contains("首位异常11节", simulatorMarkup);
         Assert.Contains("ApplyMultiHeadPreset", simulatorCode);
         Assert.Contains("ApplyNoHeadPreset", simulatorCode);
         Assert.Contains("ApplyFirstNonHeadPreset", simulatorCode);

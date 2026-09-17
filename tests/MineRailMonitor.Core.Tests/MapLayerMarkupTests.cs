@@ -133,6 +133,45 @@ public sealed class MapLayerMarkupTests
     }
 
     [Fact]
+    public void Map_station_visual_preserves_explicit_legacy_device_name()
+    {
+        var deviceLayer = File.ReadAllText(Locate("src", "MineRailMonitor", "Controls", "DeviceLayer.xaml.cs"));
+
+        Assert.Contains(
+            "string.IsNullOrWhiteSpace(device.Name) ? binding.EffectiveName : device.Name",
+            deviceLayer);
+    }
+
+    [Fact]
+    public void Rfid_station_choice_exposes_a_wpf_display_fallback()
+    {
+        var monitorCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml.cs"));
+
+        Assert.Contains("public sealed class RfidStationChoice", monitorCode);
+        Assert.Contains("public override string ToString() => DisplayName;", monitorCode);
+    }
+
+    [Fact]
+    public void Rfid_map_editor_preserves_explicit_device_name()
+    {
+        var monitorCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml.cs"));
+
+        Assert.Contains(
+            "string.IsNullOrWhiteSpace(device.Name) ? binding.EffectiveName : device.Name",
+            monitorCode);
+    }
+
+    [Fact]
+    public void Rfid_map_editor_saves_the_entered_device_name()
+    {
+        var monitorCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml.cs"));
+
+        Assert.Contains(
+            "MapAnnotationKind.RfidStation => _annotationEditor!.TryUpdateRfidStation(\n                id,\n                name,\n                cadX,\n                cadY,\n                rfidStationId,\n                enabled),",
+            monitorCode);
+    }
+
+    [Fact]
     public void Rfid_map_editor_selects_station_identity_instead_of_editing_protocol_address()
     {
         var monitorMarkup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));

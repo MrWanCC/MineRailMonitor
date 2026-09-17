@@ -93,6 +93,12 @@ public sealed class PassageRecord
 
     public IReadOnlyList<string> WarningMessages { get; }
 
+    public bool HasWarnings => WarningMessages.Count > 0;
+
+    public bool IsAlert => Outcome == PassageOutcome.UncouplingAlarm || HasWarnings;
+
+    public bool IsWarningOnly => HasWarnings && Outcome != PassageOutcome.UncouplingAlarm;
+
     public string? AlarmMessage { get; }
 
     public PassageClearState ClearState { get; }

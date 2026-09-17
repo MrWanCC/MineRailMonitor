@@ -18,6 +18,11 @@ public interface IProjectConfigService
         RfidSettings settings,
         CancellationToken cancellationToken = default);
 
+    Task<ProjectConfigSaveResult> SaveYardCommunicationsAsync(
+        string projectDirectory,
+        IEnumerable<YardCommunicationConfig> configurations,
+        CancellationToken cancellationToken = default);
+
     Task<ProjectConfigSaveResult> SaveRfidStationsAsync(
         string projectDirectory,
         IEnumerable<RfidStationConfig> stations,

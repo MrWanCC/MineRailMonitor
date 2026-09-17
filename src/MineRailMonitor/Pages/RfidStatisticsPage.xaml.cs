@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
+using MineRailMonitor.Core.Services;
 using MineRailMonitor.Core.Statistics;
 
 namespace MineRailMonitor.Pages;
@@ -14,12 +15,16 @@ public partial class RfidStatisticsPage : UserControl
 {
     private const int RecentRecordCount = 10;
     private readonly IPassageRecordStore _recordStore;
-    private readonly IReadOnlyList<RfidStationConfig> _stations;
-    private readonly IReadOnlyDictionary<string, string> _stationNames;
+    private IReadOnlyList<RfidStationConfig> _stations;
+    private IReadOnlyDictionary<string, string> _stationNames;
+    private IReadOnlyList<StationConfig> _yardConfigs = Array.Empty<StationConfig>();
+    private IReadOnlyList<RfidStationYardOption> _yardFilterOptions;
     private readonly ObservableCollection<RankingRow> _rankingRows = new();
     private readonly ObservableCollection<RecentRow> _recentRows = new();
     private IReadOnlyList<StationRuntimeState> _runtimeStates = Array.Empty<StationRuntimeState>();
     private IReadOnlyList<PassageRecord> _currentRecords = Array.Empty<PassageRecord>();
+    private HashSet<string>? _displayScopeStationIds;
+    private bool _isYardFilterSync;
     private int _rangeDays = 1;
 
     public RfidStatisticsPage(IPassageRecordStore recordStore, IEnumerable<RfidStationConfig>? stations = null)
@@ -27,11 +32,14 @@ public partial class RfidStatisticsPage : UserControl
         _recordStore = recordStore ?? throw new ArgumentNullException(nameof(recordStore));
         _stations = (stations ?? Array.Empty<RfidStationConfig>()).Where(station => station is not null).ToArray();
         _stationNames = BuildStationNames(_stations);
+        _yardFilterOptions = RfidYardFilter.BuildOptions(null, _stations);
 
         InitializeComponent();
         RankingItemsControl.ItemsSource = _rankingRows;
         RecentPassageGrid.ItemsSource = _recentRows;
-        PopulateStationFilter();
+        YardFilter.ItemsSource = _yardFilterOptions;
+        YardFilter.SelectedIndex = 0;
+        RebuildStationFilter();
         StationFilter.SelectedIndex = 0;
         OutcomeFilter.SelectedIndex = 0;
         Loaded += (_, _) => Refresh();
@@ -42,8 +50,46 @@ public partial class RfidStatisticsPage : UserControl
     {
         if (states is null) throw new ArgumentNullException(nameof(states));
 
-        _runtimeStates = states.Where(state => state is not null).ToArray();
+        _runtimeStates = states
+            .Where(state => state is not null)
+            .ToArray();
         UpdateRuntimeMetrics();
+    }
+
+    public void SetRfidStations(IEnumerable<RfidStationConfig>? stations)
+    {
+        var selectedStationId = (StationFilter.SelectedItem as ComboBoxItem)?.Tag as string;
+        _stations = (stations ?? Array.Empty<RfidStationConfig>())
+            .Where(station => station is not null)
+            .ToArray();
+        _stationNames = BuildStationNames(_stations);
+        _yardFilterOptions = RfidYardFilter.BuildOptions(_yardConfigs, _stations);
+        SetYardFilterSelection(GetSelectedYardId());
+        RebuildStationFilter(selectedStationId);
+        Refresh();
+    }
+
+    public void SetYardOptions(IEnumerable<StationConfig>? yards)
+    {
+        _yardConfigs = (yards ?? Array.Empty<StationConfig>())
+            .Where(yard => yard is not null)
+            .ToArray();
+        _yardFilterOptions = RfidYardFilter.BuildOptions(_yardConfigs, _stations);
+        SetYardFilterSelection(GetSelectedYardId());
+        RebuildStationFilter();
+        Refresh();
+    }
+
+    public void SetDisplayScope(IEnumerable<string>? stationIds, string? yardId = null)
+    {
+        _displayScopeStationIds = stationIds is null
+            ? null
+            : new HashSet<string>(
+                stationIds.Where(stationId => !string.IsNullOrWhiteSpace(stationId)).Select(stationId => stationId.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+        SetYardFilterSelection(yardId ?? RfidYardFilter.ResolveYardId(stationIds, _stations) ?? RfidStationYardOption.AllId);
+        RebuildStationFilter((StationFilter.SelectedItem as ComboBoxItem)?.Tag as string);
+        Refresh();
     }
 
     public void Refresh()
@@ -53,10 +99,9 @@ public partial class RfidStatisticsPage : UserControl
             _currentRecords = BuildFilteredRecords();
             var hasNoFilters = GetStationFilter() is null && GetOutcomeFilter() is null && string.IsNullOrWhiteSpace(HeadRfidFilter.Text);
             var todayStatistics = _rangeDays == 1 && hasNoFilters
-                ? _recordStore.GetStatistics(DateTimeOffset.Now)
+                ? YardPassageFilter.BuildStatistics(_recordStore.Records, DateTimeOffset.Now, _displayScopeStationIds)
                 : null;
             UpdateMetrics(todayStatistics);
-            UpdateDistribution();
             UpdateRanking();
             UpdateRecentRows();
             UpdateInsights();
@@ -68,7 +113,6 @@ public partial class RfidStatisticsPage : UserControl
             QueryErrorText.Text = exception.Message;
             _currentRecords = Array.Empty<PassageRecord>();
             UpdateMetrics(null);
-            UpdateDistribution();
             UpdateRanking();
             UpdateRecentRows();
             UpdateInsights();
@@ -77,6 +121,18 @@ public partial class RfidStatisticsPage : UserControl
     }
 
     private void OnQueryClick(object sender, RoutedEventArgs e) => Refresh();
+
+    private void OnYardFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isYardFilterSync)
+        {
+            return;
+        }
+
+        _displayScopeStationIds = RfidYardFilter.ResolveStationIds(GetSelectedYardId(), _stations);
+        RebuildStationFilter();
+        Refresh();
+    }
 
     private void OnResetClick(object sender, RoutedEventArgs e)
     {
@@ -112,7 +168,7 @@ public partial class RfidStatisticsPage : UserControl
         var outcome = GetOutcomeFilter();
         var headRfid = ParseHeadRfid();
 
-        return _recordStore.Records
+        return YardPassageFilter.Filter(_recordStore.Records, _displayScopeStationIds)
             .Where(record =>
             {
                 var localCompletedAt = record.CompletedAt.ToLocalTime().DateTime;
@@ -148,6 +204,31 @@ public partial class RfidStatisticsPage : UserControl
 
     private string? GetStationFilter() => (StationFilter.SelectedItem as ComboBoxItem)?.Tag as string;
 
+    private string GetSelectedYardId() =>
+        (YardFilter.SelectedItem as RfidStationYardOption)?.Id ?? RfidStationYardOption.AllId;
+
+    private void SetYardFilterSelection(string selectedYardId)
+    {
+        var selectedItem = _yardFilterOptions.FirstOrDefault(option =>
+            string.Equals(option.Id, selectedYardId, StringComparison.OrdinalIgnoreCase))
+            ?? _yardFilterOptions.FirstOrDefault();
+        if (selectedItem is null)
+        {
+            return;
+        }
+
+        _isYardFilterSync = true;
+        try
+        {
+            YardFilter.ItemsSource = _yardFilterOptions;
+            YardFilter.SelectedItem = selectedItem;
+        }
+        finally
+        {
+            _isYardFilterSync = false;
+        }
+    }
+
     private PassageOutcome? GetOutcomeFilter()
     {
         var tag = (OutcomeFilter.SelectedItem as ComboBoxItem)?.Tag as string;
@@ -176,39 +257,48 @@ public partial class RfidStatisticsPage : UserControl
 
     private void UpdateRuntimeMetrics()
     {
-        var enabledCount = _stations.Count(station => station.Enabled);
-        var onlineCount = _runtimeStates.Count(state => state.CommunicationState == StationCommunicationState.Online);
-        var recognizingCount = _runtimeStates.Count(state => state.LifecycleState == PassageLifecycleState.Recognizing);
+        var visibleStations = _displayScopeStationIds is null
+            ? _stations
+            : _stations.Where(station => _displayScopeStationIds.Contains(station.StationId)).ToArray();
+        var visibleStationIds = visibleStations
+            .Select(station => station.StationId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var visibleStates = _runtimeStates.Where(state => visibleStationIds.Contains(state.StationId)).ToArray();
+        var enabledCount = visibleStations.Count(station => station.Enabled);
+        var onlineCount = visibleStates.Count(state => state.CommunicationState == StationCommunicationState.Online);
+        var recognizingCount = visibleStates.Count(state => state.LifecycleState == PassageLifecycleState.Recognizing);
         OnlineMetricValue.Text = $"{onlineCount} / {enabledCount}";
         RecognizingMetricValue.Text = recognizingCount.ToString(CultureInfo.InvariantCulture);
     }
 
-    private void UpdateDistribution()
-    {
-        var total = _currentRecords.Count;
-        var normal = _currentRecords.Count(record => record.Outcome == PassageOutcome.Completed);
-        var alarm = _currentRecords.Count(record => record.Outcome == PassageOutcome.UncouplingAlarm);
-        var normalRate = total == 0 ? 0 : normal * 100d / total;
-        var alarmRate = total == 0 ? 0 : alarm * 100d / total;
-
-        ResultTotalText.Text = total.ToString(CultureInfo.InvariantCulture);
-        NormalRateText.Text = $"{normalRate:0.0}%";
-        AlarmRateText.Text = $"{alarmRate:0.0}%";
-        ResultDonutPath.Data = CreateArcGeometry(-90, normalRate / 100d * 360d);
-        AlarmDonutPath.Data = CreateArcGeometry(-90 + normalRate / 100d * 360d, alarmRate / 100d * 360d);
-        ResultDonutPath.Visibility = normal == 0 ? Visibility.Collapsed : Visibility.Visible;
-        AlarmDonutPath.Visibility = alarm == 0 ? Visibility.Collapsed : Visibility.Visible;
-    }
-
     private void UpdateRanking()
     {
-        var groups = _currentRecords
+        var recordGroups = _currentRecords
             .GroupBy(record => record.StationId, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new { StationId = group.Key, Count = group.Count() })
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        var configuredStations = _stations
+            .Where(station => station.Enabled &&
+                              !string.IsNullOrWhiteSpace(station.StationId) &&
+                              (_displayScopeStationIds is null || _displayScopeStationIds.Contains(station.StationId.Trim())))
+            .Select(station => station.StationId.Trim())
+            .ToArray();
+        var stationIds = configuredStations
+            .Concat(recordGroups.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var groups = stationIds
+            .Select(stationId => new
+            {
+                StationId = stationId,
+                Count = recordGroups.TryGetValue(stationId, out var count) ? count : 0
+            })
             .OrderByDescending(item => item.Count)
             .ThenBy(item => item.StationId, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var max = groups.Length == 0 ? 1 : groups.Max(item => item.Count);
+        RankingScopeText.Text = _displayScopeStationIds is null
+            ? $"全部基站（{stationIds.Length.ToString(CultureInfo.InvariantCulture)}）"
+            : $"当前站场基站（{stationIds.Length.ToString(CultureInfo.InvariantCulture)}）";
 
         _rankingRows.Clear();
         for (var index = 0; index < groups.Length; index++)
@@ -218,7 +308,7 @@ public partial class RfidStatisticsPage : UserControl
                 index + 1,
                 FormatStation(group.StationId),
                 group.Count,
-                Math.Max(4, 160d * group.Count / max)));
+                Math.Max(0, 160d * group.Count / max)));
         }
     }
 
@@ -375,12 +465,19 @@ public partial class RfidStatisticsPage : UserControl
         Last30DaysButton.Background = _rangeDays == 30 ? activeBrush : inactiveBrush;
     }
 
-    private void PopulateStationFilter()
+    private void RebuildStationFilter(string? selectedStationId = null)
     {
+        selectedStationId ??= (StationFilter.SelectedItem as ComboBoxItem)?.Tag as string;
+        StationFilter.Items.Clear();
         StationFilter.Items.Add(new ComboBoxItem { Content = "全部基站", Tag = null });
-        StationFilter.Items.Add(new ComboBoxItem { Content = "历史未识别基站", Tag = PassageRecord.LegacyStationId });
+        if (_displayScopeStationIds is null || _displayScopeStationIds.Contains(PassageRecord.LegacyStationId))
+        {
+            StationFilter.Items.Add(new ComboBoxItem { Content = "历史未识别基站", Tag = PassageRecord.LegacyStationId });
+        }
+
         foreach (var station in _stations
                      .Where(item => !string.IsNullOrWhiteSpace(item.StationId))
+                     .Where(item => _displayScopeStationIds is null || _displayScopeStationIds.Contains(item.StationId.Trim()))
                      .GroupBy(item => item.StationId.Trim(), StringComparer.OrdinalIgnoreCase)
                      .Select(group => group.First())
                      .OrderBy(item => item.StationId, StringComparer.OrdinalIgnoreCase))
@@ -391,6 +488,14 @@ public partial class RfidStatisticsPage : UserControl
                 Tag = station.StationId.Trim()
             });
         }
+
+        StationFilter.SelectedItem = StationFilter.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(
+                item.Tag as string,
+                selectedStationId,
+                StringComparison.OrdinalIgnoreCase))
+            ?? StationFilter.Items[0];
     }
 
     private static IReadOnlyDictionary<string, string> BuildStationNames(IEnumerable<RfidStationConfig> stations) =>
@@ -407,9 +512,14 @@ public partial class RfidStatisticsPage : UserControl
             return "历史未识别基站";
         }
 
+        var station = _stations.FirstOrDefault(item =>
+            string.Equals(item.StationId.Trim(), normalized, StringComparison.OrdinalIgnoreCase));
+        var displayId = station is null
+            ? normalized
+            : RfidStationIdentity.GetDisplayId(station.StationId, station.YardId);
         return _stationNames.TryGetValue(normalized, out var name) && name.Length > 0
-            ? $"{normalized} · {name}"
-            : normalized;
+            ? $"{displayId} · {name}"
+            : displayId;
     }
 
     private static Geometry? CreateArcGeometry(double startAngle, double sweepAngle)
@@ -420,7 +530,7 @@ public partial class RfidStatisticsPage : UserControl
         }
 
         const double center = 56;
-        const double radius = 56;
+        const double radius = 49;
         if (sweepAngle >= 359.9)
         {
             return new EllipseGeometry(new Point(center, center), radius, radius);
@@ -452,12 +562,16 @@ public partial class RfidStatisticsPage : UserControl
         public RankingRow(int rank, string stationText, int count, double barWidth)
         {
             Rank = rank;
+            RankText = rank == 1 ? string.Empty : rank.ToString(CultureInfo.InvariantCulture);
+            IsTopRank = rank == 1;
             StationText = stationText;
             Count = count;
             BarWidth = barWidth;
         }
 
         public int Rank { get; }
+        public string RankText { get; }
+        public bool IsTopRank { get; }
         public string StationText { get; }
         public int Count { get; }
         public double BarWidth { get; }

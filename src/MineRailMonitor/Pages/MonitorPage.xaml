@@ -2,6 +2,7 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:MineRailMonitor.Controls"
+             xmlns:converters="clr-namespace:MineRailMonitor.Converters"
              Focusable="True"
              PreviewKeyDown="OnPreviewKeyDown"
              Background="{StaticResource AppBackgroundBrush}">
@@ -57,6 +58,14 @@
             <Style.Triggers>
                 <DataTrigger Binding="{Binding Type}" Value="报警">
                     <Setter Property="Foreground" Value="{StaticResource AlarmBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="RfidAlarmTypeTextStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource AlarmBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding AlarmType}" Value="警告">
+                    <Setter Property="Foreground" Value="{StaticResource WarningBrush}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -126,7 +135,7 @@
                 <DataTrigger Binding="{Binding RelativeSource={RelativeSource Self}, Path=Text}" Value="脱节报警">
                     <Setter Property="Foreground" Value="{StaticResource AlarmBrush}" />
                 </DataTrigger>
-                <DataTrigger Binding="{Binding RelativeSource={RelativeSource Self}, Path=Text}" Value="黄色提示">
+                <DataTrigger Binding="{Binding RelativeSource={RelativeSource Self}, Path=Text}" Value="识别不完整">
                     <Setter Property="Foreground" Value="{StaticResource WarningBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding RelativeSource={RelativeSource Self}, Path=Text}" Value="清除/等待空槽">
@@ -135,13 +144,13 @@
             </Style.Triggers>
         </Style>
         <Style x:Key="TaskCardBorderStyle" TargetType="Border" BasedOn="{StaticResource PanelBorderStyle}">
-            <Setter Property="Width" Value="168" />
-            <Setter Property="Height" Value="156" />
+            <Setter Property="Width" Value="205" />
+            <Setter Property="Height" Value="110" />
             <Setter Property="Margin" Value="0,0,8,0" />
-            <Setter Property="Padding" Value="9,8" />
-            <Setter Property="CornerRadius" Value="4" />
-            <Setter Property="Background" Value="#0B263B" />
-            <Setter Property="BorderBrush" Value="#315C76" />
+            <Setter Property="Padding" Value="8" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="Background" Value="#0A253A" />
+            <Setter Property="BorderBrush" Value="#0D6286" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
@@ -151,7 +160,7 @@
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
         <Style x:Key="TaskCardLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource FieldLabelStyle}">
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
         <Style x:Key="TaskCardValueStyle" TargetType="TextBlock" BasedOn="{StaticResource FieldValueStyle}">
@@ -159,26 +168,39 @@
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
+        <Style x:Key="TaskCardStationNameStyle" TargetType="TextBlock" BasedOn="{StaticResource FieldLabelStyle}">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="TaskCardPercentageStyle" TargetType="TextBlock" BasedOn="{StaticResource FieldValueStyle}">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
         <Style x:Key="TaskCardStatusBadgeStyle" TargetType="Border">
-            <Setter Property="CornerRadius" Value="3" />
-            <Setter Property="Padding" Value="7,3" />
+            <Setter Property="Height" Value="21" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="8,2" />
             <Setter Property="MinWidth" Value="52" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
-        <Style x:Key="TaskCardStatusAccentStyle" TargetType="Border">
-            <Setter Property="Width" Value="3" />
-            <Setter Property="Margin" Value="0,1,8,1" />
-            <Setter Property="CornerRadius" Value="2" />
-            <Setter Property="VerticalAlignment" Value="Stretch" />
-            <Setter Property="HorizontalAlignment" Value="Left" />
+        <Style x:Key="RfidTaskPageButtonStyle" TargetType="Button" BasedOn="{StaticResource MapToolButtonStyle}">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Margin" Value="4,0,0,0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="11" />
         </Style>
+        <converters:RfidTaskCardWidthConverter x:Key="RfidTaskCardWidthConverter" />
     </UserControl.Resources>
 
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
-            <RowDefinition Height="190" />
+            <RowDefinition x:Name="RfidTaskRowDefinition" Height="176" />
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
@@ -375,10 +397,10 @@
                             <Grid Grid.Row="2" Grid.Column="1" Margin="6,0,0,0">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                 <TextBlock Text="外部接口" Style="{StaticResource InfoRowLabelStyle}" />
-                                <TextBlock x:Name="OverviewExternalDisplayText" Grid.Column="1" Text="未接入" Style="{StaticResource InfoRowValueStyle}" Foreground="{StaticResource OfflineBrush}" HorizontalAlignment="Right" />
+                                <TextBlock x:Name="OverviewExternalDisplayText" Grid.Column="1" Text="未配置" Style="{StaticResource InfoRowValueStyle}" Foreground="{StaticResource OfflineBrush}" HorizontalAlignment="Right" />
                             </Grid>
                             <TextBlock x:Name="OverviewDatabaseText" Text="正常" Visibility="Collapsed" />
-                            <TextBlock x:Name="OverviewExternalText" Text="未接入" Visibility="Collapsed" />
+                            <TextBlock x:Name="OverviewExternalText" Text="未配置" Visibility="Collapsed" />
                         </Grid>
                         <StackPanel x:Name="OverviewEmptyState" Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="8,0">
                             <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource AccentBrush}" FontSize="38" HorizontalAlignment="Center" />
@@ -390,20 +412,43 @@
                     </Grid>
                 </Border>
 
-                <Grid x:Name="RfidDetailView" Grid.Row="0" Margin="0,310,0,0" Visibility="Collapsed">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="30" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
+                <Border x:Name="RfidDetailView"
+                        Grid.Row="0"
+                        Margin="0,318,0,8"
+                        Visibility="Collapsed"
+                        Style="{StaticResource RightInfoCardStyle}"
+                        Padding="0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="42" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
 
-                    <Border Grid.Row="0" Style="{StaticResource RightCardHeaderStyle}" Padding="12,0">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Margin="0,0,8,0" Foreground="#39CEFF" FontSize="18" />
-                            <TextBlock x:Name="RfidDetailHeaderText" Text="RFID基站详情" Style="{StaticResource SectionTitleStyle}" FontSize="15" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Border>
+                        <Border Grid.Row="0" Height="42" Style="{StaticResource RightCardHeaderStyle}" Padding="12,0">
+                            <DockPanel LastChildFill="False">
+                                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Margin="0,0,8,0" Foreground="#39CEFF" FontSize="20" />
+                                    <TextBlock x:Name="RfidDetailHeaderText" Text="RFID基站详情" Style="{StaticResource SectionTitleStyle}" FontSize="16" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <Border x:Name="RfidDetailStationBadge"
+                                        DockPanel.Dock="Right"
+                                        Padding="8,2"
+                                        Background="#0A2D48"
+                                        BorderBrush="{StaticResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="9"
+                                        VerticalAlignment="Center"
+                                        Visibility="Collapsed">
+                                    <TextBlock x:Name="RfidDetailStationBadgeText"
+                                               Text="-"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               FontSize="11"
+                                               FontFamily="Consolas" />
+                                </Border>
+                            </DockPanel>
+                        </Border>
 
-                <Border x:Name="RfidStationStatusCard" Grid.Row="1" Style="{StaticResource RightInfoCardStyle}" BorderThickness="0" Background="Transparent">
+                <Border x:Name="RfidStationStatusCard" Grid.Row="1" Style="{StaticResource RightInfoCardStyle}" Margin="0" BorderThickness="0" Background="Transparent">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="*" />
@@ -570,7 +615,8 @@
                     </Grid>
                 </Border>
 
-                </Grid>
+                    </Grid>
+                </Border>
 
                 <Border x:Name="SystemStatusCard" Grid.Row="2" MinHeight="150" Style="{StaticResource RightInfoCardStyle}" Margin="0" Visibility="Collapsed">
                     <Grid>
@@ -593,7 +639,7 @@
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="4,1,4,1">
                                     <Ellipse x:Name="SystemExternalStatusDot" Width="10" Height="10" Fill="{StaticResource OfflineBrush}" Margin="0,0,6,0" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="SystemExternalStatusText" Text="外部接口 未接入" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" />
+                                    <TextBlock x:Name="SystemExternalStatusText" Text="外部接口 未配置" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" />
                                 </StackPanel>
                             </UniformGrid>
                             <TextBlock x:Name="RecognitionSnapshotText" Text="当前列车：-" Foreground="{StaticResource TextSecondaryBrush}"
@@ -641,7 +687,10 @@
                                         <TextBlock x:Name="RfidAlarmCountText" Text="0" Foreground="{StaticResource TextPrimaryBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
                                 </StackPanel>
-                                <TextBlock Text="更多  ›" DockPanel.Dock="Right" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" VerticalAlignment="Center" />
+                                <Button x:Name="RfidAlarmMoreButton" Content="更多  ›" DockPanel.Dock="Right"
+                                        Background="Transparent" BorderThickness="0" Padding="4,0"
+                                        Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
+                                        VerticalAlignment="Center" Click="OnRfidAlarmMoreClick" />
                             </DockPanel>
                         </Border>
                         <Grid Grid.Row="1" Margin="8,3,8,7">
@@ -676,7 +725,7 @@
                                                     <Border Grid.ColumnSpan="4" Style="{StaticResource RightInfoRowStyle}" />
                                                     <TextBlock Text="{Binding Time}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
                                                     <TextBlock Grid.Column="1" Text="{Binding Station}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                                    <TextBlock Grid.Column="2" Text="{Binding AlarmType}" Foreground="{StaticResource AlarmBrush}" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="2" Text="{Binding AlarmType}" Style="{StaticResource RfidAlarmTypeTextStyle}" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                                     <TextBlock Grid.Column="3" Text="{Binding AlarmDescription}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                                 </Grid>
                                             </DataTemplate>
@@ -690,20 +739,102 @@
                 </Border>
         </Grid>
 
-        <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource MonitorPanelBorderStyle}" Margin="0,0,10,0" Padding="10,8">
+        <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource MonitorPanelBorderStyle}" Margin="0,0,10,0" Padding="0">
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="32" />
+                    <RowDefinition Height="44" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <DockPanel VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-                        <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Margin="0,0,9,0" Foreground="#39CEFF" FontSize="21" />
-                        <TextBlock Text="当前识别任务" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
-                        <TextBlock x:Name="RfidTaskSummaryText" Text="当前活动数量 0" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="12,2,0,0" VerticalAlignment="Center" />
-                    </StackPanel>
-                </DockPanel>
-                <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Padding="0,2,0,0">
+                <Border Grid.Row="0"
+                        BorderBrush="#0E6B94"
+                        BorderThickness="0,0,0,1"
+                        Padding="12,0">
+                    <Grid Height="44">
+                        <Grid.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                <GradientStop Color="#0B3555" Offset="0" />
+                                <GradientStop Color="#062A47" Offset="0.52" />
+                                <GradientStop Color="#041A2C" Offset="1" />
+                            </LinearGradientBrush>
+                        </Grid.Background>
+                        <Path Data="M 0,44 L 26,0 L 42,0 L 16,44 Z" Fill="#0871A6" Opacity="0.55" />
+                        <Path Data="M 13,44 L 35,0 L 41,0 L 19,44 Z" Fill="{StaticResource AccentBrush}" Opacity="0.42" />
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="36,0,0,0">
+                            <TextBlock Text="实时运输任务"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       FontSize="24"
+                                       FontWeight="Bold"
+                                       VerticalAlignment="Center" />
+                            <Border Width="42"
+                                    Height="30"
+                                    Margin="12,0,0,0"
+                                    Background="#092F4B"
+                                    BorderBrush="{StaticResource AccentBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="5">
+                                <TextBlock x:Name="RfidTaskSummaryText"
+                                           Text="0"
+                                           Foreground="{StaticResource AccentBrush}"
+                                           FontSize="18"
+                                           FontWeight="Bold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Border>
+                            <Border Width="1" Height="24" Background="#3B6983" Margin="12,0,12,0" />
+                            <TextBlock Text="矿井轨道运输 · RFID基站监控"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontSize="13"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0" Orientation="Horizontal">
+                            <StackPanel x:Name="RfidTaskPaginationPanel"
+                                        Orientation="Horizontal"
+                                        VerticalAlignment="Center"
+                                        Visibility="Collapsed">
+                                <TextBlock x:Name="RfidTaskPageText"
+                                           Text="1 / 1"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,4,0" />
+                                <Button x:Name="RfidTaskPreviousPageButton"
+                                        Content="▲"
+                                        ToolTip="上一页"
+                                        Style="{StaticResource RfidTaskPageButtonStyle}"
+                                        Click="OnRfidTaskPreviousPageClick" />
+                                <Button x:Name="RfidTaskNextPageButton"
+                                        Content="▼"
+                                        ToolTip="下一页"
+                                        Style="{StaticResource RfidTaskPageButtonStyle}"
+                                        Click="OnRfidTaskNextPageClick" />
+                            </StackPanel>
+                            <StackPanel VerticalAlignment="Center" Margin="12,0,0,0">
+                                <TextBlock Text="安全 · 高效 · 智能"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontSize="13"
+                                           HorizontalAlignment="Right" />
+                                <Border Width="48"
+                                        Height="4"
+                                        Margin="0,4,0,0"
+                                        Background="{StaticResource AccentBrush}"
+                                        CornerRadius="2"
+                                        HorizontalAlignment="Right" />
+                            </StackPanel>
+                        </StackPanel>
+                        <StackPanel Visibility="Collapsed">
+                            <TextBlock x:Name="RfidTaskRunningCountText" Text="0" />
+                            <TextBlock x:Name="RfidTaskPendingCountText" Text="0" />
+                            <TextBlock x:Name="RfidTaskAlarmCountText" Text="0" />
+                            <TextBlock x:Name="RfidTaskOfflineCountText" Text="0" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <ScrollViewer x:Name="RfidTaskScrollViewer"
+                              Grid.Row="1"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Disabled"
+                              Padding="8,4,0,0"
+                              CanContentScroll="True">
                     <ItemsControl x:Name="RfidTaskItemsControl">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -714,49 +845,102 @@
                             <DataTemplate>
                                 <Border Style="{StaticResource TaskCardBorderStyle}"
                                         BorderBrush="{Binding BorderBrush}"
+                                        HorizontalAlignment="Left"
                                         MouseLeftButtonUp="OnRfidTaskCardClick">
+                                    <Border.Width>
+                                        <MultiBinding Converter="{StaticResource RfidTaskCardWidthConverter}">
+                                            <Binding RelativeSource="{RelativeSource AncestorType={x:Type ScrollViewer}}"
+                                                     Path="ActualWidth" />
+                                            <Binding RelativeSource="{RelativeSource AncestorType={x:Type ItemsControl}}"
+                                                     Path="Tag" />
+                                        </MultiBinding>
+                                    </Border.Width>
                                     <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="3" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Border Grid.Column="0"
-                                                Style="{StaticResource TaskCardStatusAccentStyle}"
-                                                Background="{Binding StatusForeground}" />
-                                        <Grid Grid.Column="1">
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="30" />
-                                                <RowDefinition Height="27" />
-                                                <RowDefinition Height="27" />
-                                                <RowDefinition Height="12" />
-                                                <RowDefinition Height="28" />
-                                            </Grid.RowDefinitions>
-                                            <Border Grid.Row="0" BorderBrush="#1C425A" BorderThickness="0,0,0,1" Padding="0,0,0,3">
-                                                <DockPanel>
-                                                    <TextBlock Text="{Binding StationId}" Style="{StaticResource TaskCardStationIdStyle}" />
-                                                    <Border DockPanel.Dock="Right"
-                                                            Style="{StaticResource TaskCardStatusBadgeStyle}"
-                                                            Background="{Binding StatusBackground}"
-                                                            BorderBrush="{Binding StatusForeground}">
-                                                        <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusForeground}" FontSize="10" HorizontalAlignment="Center" />
-                                                    </Border>
-                                                </DockPanel>
-                                            </Border>
-                                            <Grid Grid.Row="1">
-                                                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                                <TextBlock Text="当前车头" Style="{StaticResource TaskCardLabelStyle}" />
-                                                <TextBlock Grid.Column="1" Text="{Binding HeadRfid}" Style="{StaticResource TaskCardValueStyle}" FontFamily="Consolas" />
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="60" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <Grid Grid.Row="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="68" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Image Grid.Column="0"
+                                                   Source="/MineRailMonitor;component/Assets/Icons/rfid-station.png"
+                                                   Width="48"
+                                                   Height="48"
+                                                   Stretch="Uniform"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                                            <Grid Grid.Column="1" Margin="8,0,0,0">
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding MapPointName}"
+                                                               Style="{StaticResource TaskCardStationNameStyle}"
+                                                               FontSize="14"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource TextPrimaryBrush}" />
+                                                    <TextBlock Text="{Binding StationDisplayId}" Style="{StaticResource TaskCardStationIdStyle}"
+                                                               FontSize="11"
+                                                               FontWeight="Normal"
+                                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                                               Margin="0,4,0,0"
+                                                               ToolTip="RFID 基站编号" />
+                                                </StackPanel>
+                                                <Border HorizontalAlignment="Right"
+                                                        VerticalAlignment="Top"
+                                                        Style="{StaticResource TaskCardStatusBadgeStyle}"
+                                                        Background="{Binding StatusBackground}"
+                                                        BorderBrush="{Binding StatusForeground}">
+                                                    <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusForeground}" FontSize="10" HorizontalAlignment="Center" />
+                                                </Border>
                                             </Grid>
-                                            <Grid Grid.Row="2">
-                                                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                                <TextBlock Text="识别进度" Style="{StaticResource TaskCardLabelStyle}" />
-                                                <TextBlock Grid.Column="1" Text="{Binding ProgressText}" Style="{StaticResource TaskCardValueStyle}" FontSize="12" />
-                                            </Grid>
-                                            <ProgressBar Grid.Row="3" Value="{Binding ProgressValue, Mode=OneWay}" Maximum="100" Height="7" Background="#163A54" Foreground="{Binding ProgressBrush}" BorderThickness="0" VerticalAlignment="Center" />
-                                            <Grid Grid.Row="4">
-                                                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                                <TextBlock Text="最新识别" Style="{StaticResource TaskCardLabelStyle}" />
-                                                <TextBlock Grid.Column="1" Text="{Binding LatestRecognitionTime}" Style="{StaticResource TaskCardValueStyle}" FontSize="11" />
+                                        </Grid>
+                                        <Grid x:Name="TaskCardStatusGrid" Grid.Row="1" Margin="0,2,0,0">
+                                            <Border BorderBrush="#1C4B62" BorderThickness="0,1,0,0" />
+                                            <Grid Margin="0,4,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="1" />
+                                                    <ColumnDefinition Width="72" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Path Data="{StaticResource TrainIconGeometry}"
+                                                          Width="15"
+                                                          Height="15"
+                                                          Stretch="Uniform"
+                                                          Fill="{StaticResource AccentBrush}"
+                                                          Margin="0,0,5,0" />
+                                                    <TextBlock Text="车头" Style="{StaticResource TaskCardLabelStyle}" />
+                                                    <TextBlock Text="{Binding HeadRfid}"
+                                                               Style="{StaticResource TaskCardLabelStyle}"
+                                                               Foreground="{StaticResource TextPrimaryBrush}"
+                                                               FontFamily="Consolas"
+                                                               Margin="4,0,0,0" />
+                                                </StackPanel>
+                                                <Border Grid.Column="1"
+                                                        Width="1"
+                                                        Height="24"
+                                                        Background="#1C4B62"
+                                                        VerticalAlignment="Center" />
+                                                <Grid Grid.Column="2"
+                                                      Margin="8,0,0,0"
+                                                      VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding ProgressText}"
+                                                               Style="{StaticResource TaskCardValueStyle}"
+                                                               FontSize="11"
+                                                               HorizontalAlignment="Left"
+                                                               TextAlignment="Left" />
+                                                    <ProgressBar Value="{Binding ProgressValue, Mode=OneWay}"
+                                                                 Maximum="100"
+                                                                 Height="4"
+                                                                 Margin="0,16,0,0"
+                                                                 Visibility="{Binding ProgressVisibility}"
+                                                                 Background="#163A54"
+                                                                 Foreground="{Binding ProgressBrush}"
+                                                                 BorderThickness="0"
+                                                                 VerticalAlignment="Center" />
+                                                </Grid>
                                             </Grid>
                                         </Grid>
                                     </Grid>

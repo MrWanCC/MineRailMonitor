@@ -162,6 +162,33 @@ public sealed class MapAnnotationEditorTests
     }
 
     [Fact]
+    public void Rejects_a_new_map_binding_when_the_station_is_bound_in_another_yard()
+    {
+        var source = CreateSource();
+        source.Devices[0].RfidStationId = null;
+        var otherYard = new StationConfig
+        {
+            Id = "620",
+            Name = "-620 站场",
+            Devices = new[]
+            {
+                new DeviceConfig
+                {
+                    Id = "point-2",
+                    Name = "Point 2",
+                    Type = DeviceType.RfidStation,
+                    RfidStationId = "RFID-01"
+                }
+            }
+        };
+        var editor = new MapAnnotationEditor(source, CreateAdminSession(), new[] { source, otherYard });
+
+        Assert.False(editor.TryUpdateRfidStation("rfid-1", "RFID 1", 3, 4, "RFID-01", true));
+        Assert.Null(editor.WorkingCopy.Devices[0].RfidStationId);
+        Assert.False(editor.HasUnsavedChanges);
+    }
+
+    [Fact]
     public void Moves_and_deletes_annotations_by_kind_and_id()
     {
         var editor = CreateAdminEditor();

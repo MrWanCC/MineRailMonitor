@@ -126,6 +126,37 @@ public sealed class SqlitePassageRecordStoreTests
     }
 
     [Fact]
+    public void Query_filters_multiple_station_ids_without_mixing_yards()
+    {
+        using var database = new TemporaryDatabase();
+        database.Store.Save(CreateRecordWithStation(
+            Guid.Parse("f4444444-4444-4444-4444-444444444444"),
+            "RFID-01",
+            0x01,
+            Today.AddMinutes(-3)));
+        database.Store.Save(CreateRecordWithStation(
+            Guid.Parse("f5555555-5555-5555-5555-555555555555"),
+            "RFID-02",
+            0x02,
+            Today.AddMinutes(-2)));
+        database.Store.Save(CreateRecordWithStation(
+            Guid.Parse("f6666666-6666-6666-6666-666666666666"),
+            "RFID-03",
+            0x03,
+            Today.AddMinutes(-1)));
+
+        var result = database.Store.Query(new PassageQuery
+        {
+            StationIds = new[] { "RFID-01", "RFID-03" },
+            PageIndex = 0,
+            PageSize = 20
+        });
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(new[] { "RFID-03", "RFID-01" }, result.Items.Select(record => record.StationId));
+    }
+
+    [Fact]
     public void Save_persists_distinct_station_ids_when_protocol_addresses_repeat()
     {
         using var database = new TemporaryDatabase();
@@ -155,6 +186,34 @@ public sealed class SqlitePassageRecordStoreTests
         Assert.Equal(new[] { "RFID-01", "RFID-02" }, stationIds);
         Assert.Equal(1, statistics.ByStation["RFID-01"]);
         Assert.Equal(1, statistics.ByStation["RFID-02"]);
+    }
+
+    [Fact]
+    public void MigrateStationIds_preserves_historical_records_under_new_scoped_ids()
+    {
+        using var database = new TemporaryDatabase();
+        database.Store.Save(CreateRecordWithStation(
+            Guid.Parse("a4444444-4444-4444-4444-444444444444"),
+            "RFID-01",
+            0x01,
+            Today));
+
+        var migrated = database.Store.MigrateStationIds(new Dictionary<string, string>
+        {
+            ["RFID-01"] = "RFID-560-01"
+        });
+
+        Assert.Equal(1, migrated);
+        Assert.Empty(database.Store.Query(new PassageQuery
+        {
+            StationIds = new[] { "RFID-01" },
+            PageSize = 20
+        }).Items);
+        Assert.Equal("RFID-560-01", Assert.Single(database.Store.Query(new PassageQuery
+        {
+            StationIds = new[] { "RFID-560-01" },
+            PageSize = 20
+        }).Items).StationId);
     }
 
     [Fact]
@@ -269,6 +328,38 @@ PRAGMA user_version=1;";
         Assert.Equal(1, result.TotalCount);
     }
 
+    [Fact]
+    public void Alert_query_includes_persisted_warning_records_and_uncoupling_alarms()
+    {
+        using var database = new TemporaryDatabase();
+        var normal = CreateRecordWithStation(
+            Guid.Parse("a7777777-7777-7777-7777-777777777777"),
+            "RFID-01",
+            0x01,
+            Today.AddMinutes(-3));
+        var warning = CreateRecordWithStation(
+            Guid.Parse("a8888888-8888-8888-8888-888888888888"),
+            "RFID-01",
+            0x01,
+            Today.AddMinutes(-2),
+            warningMessages: new[] { "识别不完整：已识别10/11，缺少1个RFID" });
+        var alarm = CreateRecordWithStation(
+            Guid.Parse("a9999999-9999-9999-9999-999999999999"),
+            "RFID-01",
+            0x01,
+            Today.AddMinutes(-1),
+            PassageOutcome.UncouplingAlarm);
+
+        database.Store.Save(normal);
+        database.Store.Save(warning);
+        database.Store.Save(alarm);
+
+        var result = database.Store.Query(new PassageQuery { IncludeWarnings = true, PageSize = 20 });
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(new[] { alarm.PassageId, warning.PassageId }, result.Items.Select(record => record.PassageId));
+    }
+
     private static PassageRecord CreateRecord(
         Guid passageId,
         byte stationAddress,
@@ -301,7 +392,8 @@ PRAGMA user_version=1;";
         string stationId,
         byte stationAddress,
         DateTimeOffset completedAt,
-        PassageOutcome outcome = PassageOutcome.Completed)
+        PassageOutcome outcome = PassageOutcome.Completed,
+        IEnumerable<string>? warningMessages = null)
     {
         var startedAt = completedAt.AddSeconds(-10);
         var details = new[]
@@ -318,7 +410,7 @@ PRAGMA user_version=1;";
             outcome,
             startedAt,
             completedAt,
-            warningMessages: outcome == PassageOutcome.Completed ? Array.Empty<string>() : new[] { "脱节报警" },
+            warningMessages: warningMessages ?? (outcome == PassageOutcome.Completed ? Array.Empty<string>() : new[] { "脱节报警" }),
             alarmMessage: outcome == PassageOutcome.Completed ? null : "脱节报警",
             rfidObservations: details);
     }

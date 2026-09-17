@@ -10,7 +10,7 @@ public sealed class AcceptanceRuntimeStateWriter : IDisposable
     private const int MaxHistoryEntries = 512;
     private readonly object _syncRoot = new();
     private readonly string _path;
-    private readonly RfidRuntimeCoordinator _coordinator;
+    private readonly IReadOnlyList<RfidRuntimeCoordinator> _coordinators;
     private readonly List<AcceptanceRuntimeHistoryEntry> _history = new();
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -18,9 +18,16 @@ public sealed class AcceptanceRuntimeStateWriter : IDisposable
     };
 
     public AcceptanceRuntimeStateWriter(string path, RfidRuntimeCoordinator coordinator)
+        : this(path, new[] { coordinator })
+    {
+    }
+
+    public AcceptanceRuntimeStateWriter(string path, IEnumerable<RfidRuntimeCoordinator> coordinators)
     {
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Runtime state path must not be empty.", nameof(path));
-        _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
+        if (coordinators is null) throw new ArgumentNullException(nameof(coordinators));
+        _coordinators = coordinators.Where(coordinator => coordinator is not null).ToArray();
+        if (_coordinators.Count == 0) throw new ArgumentException("At least one runtime coordinator is required.", nameof(coordinators));
         _path = Path.GetFullPath(path);
         _jsonOptions.Converters.Add(new JsonStringEnumConverter());
     }
@@ -61,7 +68,7 @@ public sealed class AcceptanceRuntimeStateWriter : IDisposable
     }
 
     private IReadOnlyList<AcceptanceRuntimeStationSnapshot> SnapshotStations() =>
-        _coordinator.States.Values
+        _coordinators.SelectMany(coordinator => coordinator.States.Values)
             .OrderBy(state => state.StationAddress)
             .Select(state => new AcceptanceRuntimeStationSnapshot
             {

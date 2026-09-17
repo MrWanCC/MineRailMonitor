@@ -36,7 +36,12 @@ public partial class App : Application
         var exitCode = 0;
         try
         {
-            var runner = new SimulatorScenarioRunner(scenario, options.Port, options.ResultPath!, options.ReadyFile!);
+            var runner = new SimulatorScenarioRunner(
+                scenario,
+                options.Port,
+                options.Port620,
+                options.ResultPath!,
+                options.ReadyFile!);
             await runner.RunAsync(CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception)

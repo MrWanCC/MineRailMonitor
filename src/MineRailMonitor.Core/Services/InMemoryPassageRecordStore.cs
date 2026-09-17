@@ -117,6 +117,15 @@ public sealed class InMemoryPassageRecordStore : IPassageRecordStore
         var filtered = records;
         if (query.From.HasValue) filtered = filtered.Where(record => record.CompletedAt >= query.From.Value);
         if (query.To.HasValue) filtered = filtered.Where(record => record.CompletedAt < query.To.Value);
+        if (query.StationIds is not null)
+        {
+            var stationIds = new HashSet<string>(
+                query.StationIds
+                    .Where(stationId => !string.IsNullOrWhiteSpace(stationId))
+                    .Select(NormalizeStationId),
+                StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(record => stationIds.Contains(NormalizeStationId(record.StationId)));
+        }
         if (!string.IsNullOrWhiteSpace(query.StationId))
         {
             var stationId = NormalizeStationId(query.StationId);
@@ -128,6 +137,10 @@ public sealed class InMemoryPassageRecordStore : IPassageRecordStore
         }
         if (query.HeadRfid.HasValue) filtered = filtered.Where(record => record.HeadRfid == query.HeadRfid.Value);
         if (query.Outcome.HasValue) filtered = filtered.Where(record => record.Outcome == query.Outcome.Value);
+        if (query.IncludeWarnings)
+        {
+            filtered = filtered.Where(record => record.IsAlert);
+        }
         return filtered;
     }
 

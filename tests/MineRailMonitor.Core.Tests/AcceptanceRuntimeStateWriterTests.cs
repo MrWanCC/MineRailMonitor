@@ -80,6 +80,51 @@ public sealed class AcceptanceRuntimeStateWriterTests
         }
     }
 
+    [Fact]
+    public void Write_aggregates_runtime_states_from_both_yards()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "MineRailMonitor", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "runtime-state.json");
+        var store = new InMemoryPassageRecordStore();
+        var settings = new RfidSettings { ExpectedVehicleCount = 11, InterVehicleTimeoutSeconds = 2 };
+        var first = new RfidRuntimeCoordinator(new byte[] { 0x01 }, settings, store);
+        var second = new RfidRuntimeCoordinator(new byte[] { 0x04 }, settings, store);
+
+        try
+        {
+            first.ProcessFrame(CreateFrame(DateTimeOffset.Now, new ushort[] { 0x0001, 0x0011 }));
+            second.ProcessFrame(new RfidStationFrame
+            {
+                StationAddress = 0x04,
+                Mode = 0x04,
+                HeadRfid = 0x0004,
+                RawRfidSlots = new ushort[] { 0x0004, 0x0041 },
+                ValidRfids = new ushort[] { 0x0004, 0x0041 },
+                ReportedCardCount = 2,
+                ActualNonZeroSlotCount = 2,
+                ReceivedAt = DateTimeOffset.Now,
+                SourceEndpoint = new IPEndPoint(IPAddress.Loopback, 63111)
+            });
+
+            using var writer = new AcceptanceRuntimeStateWriter(path, new[] { first, second });
+            writer.Write("dual-yard-frame");
+
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var stations = document.RootElement.GetProperty("Stations").EnumerateArray().ToArray();
+            Assert.Equal(2, stations.Length);
+            Assert.Contains(stations, item => item.GetProperty("StationAddress").GetByte() == 1);
+            Assert.Contains(stations, item => item.GetProperty("StationAddress").GetByte() == 4);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
     private static RfidStationFrame CreateFrame(DateTimeOffset at, IReadOnlyList<ushort> values)
     {
         var slots = new ushort[14];

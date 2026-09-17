@@ -6,7 +6,9 @@ namespace MineRailMonitor.Core.Acceptance;
 public sealed class AcceptanceCommandLineOptions
 {
     private const int DefaultListenPort = 62102;
+    private const int DefaultListenPort620 = 62112;
     private const int DefaultSimulatorPort = 62101;
+    private const int DefaultSimulatorPort620 = 62111;
     private const int AcceptanceInterVehicleTimeoutSeconds = 2;
 
     private AcceptanceCommandLineOptions(
@@ -17,7 +19,9 @@ public sealed class AcceptanceCommandLineOptions
         string? readyFile,
         string? stopFile,
         int listenPort,
-        int simulatorPort)
+        int listenPort620,
+        int simulatorPort,
+        int simulatorPort620)
     {
         Enabled = enabled;
         DatabasePath = databasePath;
@@ -26,7 +30,9 @@ public sealed class AcceptanceCommandLineOptions
         ReadyFile = readyFile;
         StopFile = stopFile;
         ListenPort = listenPort;
+        ListenPort620 = listenPort620;
         SimulatorPort = simulatorPort;
+        SimulatorPort620 = simulatorPort620;
     }
 
     public static AcceptanceCommandLineOptions Disabled { get; } = new(
@@ -37,7 +43,9 @@ public sealed class AcceptanceCommandLineOptions
         readyFile: null,
         stopFile: null,
         listenPort: 0,
-        simulatorPort: 0);
+        listenPort620: 0,
+        simulatorPort: 0,
+        simulatorPort620: 0);
 
     public bool Enabled { get; }
 
@@ -47,7 +55,11 @@ public sealed class AcceptanceCommandLineOptions
 
     public int ListenPort { get; }
 
+    public int ListenPort620 { get; }
+
     public int SimulatorPort { get; }
+
+    public int SimulatorPort620 { get; }
 
     public int InterVehicleTimeoutSeconds => AcceptanceInterVehicleTimeoutSeconds;
 
@@ -76,7 +88,9 @@ public sealed class AcceptanceCommandLineOptions
         var readyFile = (string?)null;
         var stopFile = (string?)null;
         var listenPort = DefaultListenPort;
+        var listenPort620 = DefaultListenPort620;
         var simulatorPort = DefaultSimulatorPort;
+        var simulatorPort620 = DefaultSimulatorPort620;
 
         for (var index = 0; index < values.Length; index++)
         {
@@ -122,8 +136,20 @@ public sealed class AcceptanceCommandLineOptions
                 case "--listen-port":
                     listenPort = ParsePort(ReadValue(values, ref index, argument), argument);
                     break;
+                case "--listen-port-560":
+                    listenPort = ParsePort(ReadValue(values, ref index, argument), argument);
+                    break;
+                case "--listen-port-620":
+                    listenPort620 = ParsePort(ReadValue(values, ref index, argument), argument);
+                    break;
                 case "--simulator-port":
                     simulatorPort = ParsePort(ReadValue(values, ref index, argument), argument);
+                    break;
+                case "--simulator-port-560":
+                    simulatorPort = ParsePort(ReadValue(values, ref index, argument), argument);
+                    break;
+                case "--simulator-port-620":
+                    simulatorPort620 = ParsePort(ReadValue(values, ref index, argument), argument);
                     break;
                 default:
                     throw new ArgumentException($"Unknown acceptance argument: {argument}", nameof(args));
@@ -141,14 +167,15 @@ public sealed class AcceptanceCommandLineOptions
         var fullReadyFile = RequireAcceptancePath(readyFile, "--ready-file", mustBeDatabase: false);
         var fullStopFile = RequireAcceptancePath(stopFile, "--stop-file", mustBeDatabase: false);
 
-        if (listenPort == 62002 || listenPort == 62001 || simulatorPort == 62002 || simulatorPort == 62001)
+        var acceptancePorts = new[] { listenPort, listenPort620, simulatorPort, simulatorPort620 };
+        if (acceptancePorts.Any(port => port == 62002 || port == 62001))
         {
             throw new ArgumentException("Acceptance mode cannot use production UDP ports.", nameof(args));
         }
 
-        if (listenPort == simulatorPort)
+        if (acceptancePorts.Distinct().Count() != acceptancePorts.Length)
         {
-            throw new ArgumentException("Acceptance listener and Simulator ports must differ.", nameof(args));
+            throw new ArgumentException("Acceptance listener and Simulator ports must all differ.", nameof(args));
         }
 
         return new AcceptanceCommandLineOptions(
@@ -159,11 +186,13 @@ public sealed class AcceptanceCommandLineOptions
             readyFile: fullReadyFile,
             stopFile: fullStopFile,
             listenPort: listenPort,
-            simulatorPort: simulatorPort);
+            listenPort620: listenPort620,
+            simulatorPort: simulatorPort,
+            simulatorPort620: simulatorPort620);
     }
 
     public override string ToString() => Enabled
-        ? $"Acceptance(loopback, listen={ListenPort}, simulator={SimulatorPort}, database={DatabasePath})"
+        ? $"Acceptance(loopback, listen560={ListenPort}, listen620={ListenPort620}, simulator560={SimulatorPort}, simulator620={SimulatorPort620}, database={DatabasePath})"
         : "Disabled";
 
     private static string ReadValue(IReadOnlyList<string> values, ref int index, string option)

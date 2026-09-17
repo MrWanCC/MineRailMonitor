@@ -14,16 +14,25 @@ public sealed class SimulatorScenarioRunner
     private static readonly TimeSpan ScenarioTimeout = TimeSpan.FromSeconds(60);
     private readonly AcceptanceScenarioDefinition _scenario;
     private readonly int _port;
+    private readonly int _port620;
     private readonly string _resultPath;
     private readonly string _readyFile;
 
     public SimulatorScenarioRunner(AcceptanceScenarioDefinition scenario, int port, string resultPath, string readyFile)
+        : this(scenario, port, port + 10, resultPath, readyFile)
+    {
+    }
+
+    public SimulatorScenarioRunner(AcceptanceScenarioDefinition scenario, int port, int port620, string resultPath, string readyFile)
     {
         _scenario = scenario ?? throw new ArgumentNullException(nameof(scenario));
         if (port < 1024 || port > 65535) throw new ArgumentOutOfRangeException(nameof(port));
+        if (port620 < 1024 || port620 > 65535) throw new ArgumentOutOfRangeException(nameof(port620));
+        if (port == port620) throw new ArgumentException("Simulator yard listeners must use different UDP ports.", nameof(port620));
         if (string.IsNullOrWhiteSpace(resultPath)) throw new ArgumentException("Result path must not be empty.", nameof(resultPath));
         if (string.IsNullOrWhiteSpace(readyFile)) throw new ArgumentException("Ready file must not be empty.", nameof(readyFile));
         _port = port;
+        _port620 = port620;
         _resultPath = Path.GetFullPath(resultPath);
         _readyFile = Path.GetFullPath(readyFile);
     }
@@ -37,10 +46,13 @@ public sealed class SimulatorScenarioRunner
             new SimulatorStation { Address = 0x04, Slots = new ushort[14], CommandBytes = new byte[4] }
         };
         var responder = new RfidSimulatorResponder(stations, emptySlotValue: 0);
-        using var udpResponder = new SimulatorUdpResponder(System.Net.IPAddress.Loopback, _port);
+        using var udpResponder560 = new SimulatorUdpResponder(System.Net.IPAddress.Loopback, _port);
+        using var udpResponder620 = new SimulatorUdpResponder(System.Net.IPAddress.Loopback, _port620);
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(ScenarioTimeout);
-        var responderTask = udpResponder.RunAsync(responder.CreateResponse, timeoutSource.Token);
+        var responderTask = Task.WhenAll(
+            udpResponder560.RunAsync(responder.CreateResponse, timeoutSource.Token),
+            udpResponder620.RunAsync(responder.CreateResponse, timeoutSource.Token));
         var result = new SimulatorScenarioResult
         {
             Scenario = _scenario.Name,
@@ -49,7 +61,9 @@ public sealed class SimulatorScenarioRunner
 
         try
         {
-            AtomicFileWriter.WriteAllText(_readyFile, $"{{\"status\":\"ready\",\"scenario\":\"{_scenario.Name}\",\"port\":{_port}}}");
+            AtomicFileWriter.WriteAllText(
+                _readyFile,
+                $"{{\"status\":\"ready\",\"scenario\":\"{_scenario.Name}\",\"ports\":{{\"560\":{_port},\"620\":{_port620}}}}}");
             await ExecuteScenarioAsync(_scenario, stations, responder, timeoutSource.Token).ConfigureAwait(false);
             result.Pass = true;
         }

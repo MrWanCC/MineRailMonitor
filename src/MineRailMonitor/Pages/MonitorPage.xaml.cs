@@ -16,12 +16,15 @@ namespace MineRailMonitor.Pages;
 
 public partial class MonitorPage : UserControl
 {
+    private const int RfidTaskPageSize = 6;
     private readonly ObservableCollection<DashboardEvent> _runtimeEvents = new();
     private readonly ObservableCollection<RfidTaskCardViewModel> _rfidTaskCards = new();
     private readonly ObservableCollection<RfidAlarmDisplayItem> _rfidAlarmItems = new();
+    private IReadOnlyList<PassageRecord> _recentAlarmRecords = Array.Empty<PassageRecord>();
     private readonly IProjectConfigService _configService;
     private readonly string _projectDirectory;
     private readonly AdminModeService _adminModeService;
+    private readonly IReadOnlyList<StationConfig> _allYards;
     private string? _currentStationId;
     private string _currentStationDisplayName = "-";
     private DeviceConfig? _selectedDevice;
@@ -37,6 +40,9 @@ public partial class MonitorPage : UserControl
     private bool _isMapAnnotationEditing;
     private IReadOnlyList<StationRuntimeState> _rfidRuntimeStates = Array.Empty<StationRuntimeState>();
     private IReadOnlyList<RfidStationConfig> _rfidStations = Array.Empty<RfidStationConfig>();
+    private HashSet<string> _visibleRfidStationIds = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<RfidTaskCardViewModel> _allRfidTaskCards = Array.Empty<RfidTaskCardViewModel>();
+    private int _rfidTaskPageIndex;
     private int _pollIntervalMs = 200;
     private DateTimeOffset? _lastPollAt;
     private bool _databaseHealthy = true;
@@ -51,11 +57,16 @@ public partial class MonitorPage : UserControl
         Unavailable
     }
 
-    public MonitorPage(IProjectConfigService configService, string projectDirectory, AdminModeService adminModeService)
+    public MonitorPage(
+        IProjectConfigService configService,
+        string projectDirectory,
+        AdminModeService adminModeService,
+        IEnumerable<StationConfig>? allYards = null)
     {
         _configService = configService ?? throw new ArgumentNullException(nameof(configService));
         _projectDirectory = projectDirectory ?? throw new ArgumentNullException(nameof(projectDirectory));
         _adminModeService = adminModeService ?? throw new ArgumentNullException(nameof(adminModeService));
+        _allYards = allYards?.Where(item => item is not null).ToArray() ?? Array.Empty<StationConfig>();
         InitializeComponent();
         RuntimeEventsGrid.ItemsSource = _runtimeEvents;
         RfidTaskItemsControl.ItemsSource = _rfidTaskCards;
@@ -77,6 +88,10 @@ public partial class MonitorPage : UserControl
     public bool HasUnsavedMapChanges => _annotationEditor?.HasUnsavedChanges == true;
 
     public event EventHandler? ResetRequested;
+
+    public event EventHandler? AlarmMoreRequested;
+
+    public event EventHandler? MapAnnotationsSaved;
 
     public void SetSystemHealth(bool databaseHealthy, bool externalInterfaceAvailable)
     {
@@ -101,11 +116,16 @@ public partial class MonitorPage : UserControl
             .GroupBy(station => station.StationId.Trim(), StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToArray();
+        _visibleRfidStationIds = new HashSet<string>(
+            _rfidStations.Select(station => station.StationId),
+            StringComparer.OrdinalIgnoreCase);
+        var selectedRfidStationId = _selectedRfidStationId;
         var selectedId = AnnotationRfidStationComboBox.SelectedValue as string;
         AnnotationRfidStationComboBox.ItemsSource = new ObservableCollection<RfidStationChoice>(
             _rfidStations.Select(station => new RfidStationChoice(
                 station.StationId,
                 string.IsNullOrWhiteSpace(station.Name) ? station.StationId : station.Name,
+                station.YardId,
                 station.Enabled)));
         AnnotationRfidStationComboBox.SelectedValue = selectedId;
         Map.SetRfidStations(_rfidStations);
@@ -113,8 +133,18 @@ public partial class MonitorPage : UserControl
         UpdateSystemStatusIndicators();
         RefreshRfidOverviewMetrics();
         RefreshRfidTaskCards();
-        ApplySelectedRfidRuntimeState();
+        if (!string.IsNullOrWhiteSpace(selectedRfidStationId) &&
+            !_visibleRfidStationIds.Contains(selectedRfidStationId!))
+        {
+            ClearDetails();
+        }
+        else
+        {
+            ApplySelectedRfidRuntimeState();
+        }
     }
+
+    public void SetRfidDisplayScope(IEnumerable<RfidStationConfig> stations) => SetRfidStations(stations);
 
     public void SetRfidPollingInfo(int pollIntervalMs, IEnumerable<RfidStationPollingStatus> statuses)
     {
@@ -142,11 +172,39 @@ public partial class MonitorPage : UserControl
         _currentStationDisplayName = FormatStationName(station);
         MapStationTitle.Text = $"{_currentStationDisplayName}站场  实时监控";
         ExitMapAnnotationEditModeWithoutPrompt();
+        RefreshRfidTaskCards();
         Map.SetStation(station, imageSource);
         Map.SetRfidRuntimeStates(_rfidRuntimeStates);
         SetRecognitionStatus(null, isAlarm: false);
         RecognitionSnapshotText.Text = "当前列车：-";
         ApplyDashboardSnapshot(new DashboardSnapshot(Array.Empty<DashboardTrain>(), Array.Empty<DashboardEvent>(), null));
+    }
+
+    public bool SelectRfidStationDevice(string deviceId)
+    {
+        if (_currentStation is null)
+        {
+            return false;
+        }
+
+        var device = _currentStation.Devices.FirstOrDefault(item =>
+            item is not null &&
+            item.Type == DeviceType.RfidStation &&
+            string.Equals(item.Id, deviceId, StringComparison.OrdinalIgnoreCase));
+        if (device is null)
+        {
+            return false;
+        }
+
+        var state = _rfidRuntimeStates.FirstOrDefault(item =>
+            string.Equals(item.StationId, device.RfidStationId, StringComparison.OrdinalIgnoreCase));
+        var status = state?.LifecycleState == PassageLifecycleState.Alarm
+            ? DeviceStatus.Alarm
+            : state?.CommunicationState == StationCommunicationState.Online
+                ? DeviceStatus.Normal
+                : DeviceStatus.Offline;
+        SelectRfidDevice(device, status);
+        return true;
     }
 
     public async Task<bool> TryLeaveMapEditingAsync(string reason)
@@ -222,6 +280,18 @@ public partial class MonitorPage : UserControl
         RefreshRfidAlarmDisplay();
     }
 
+    public void SetRecentAlarmRecords(IEnumerable<PassageRecord> records)
+    {
+        if (records is null) throw new ArgumentNullException(nameof(records));
+
+        _recentAlarmRecords = records
+            .Where(record => record.IsAlert)
+            .OrderByDescending(record => record.CompletedAt)
+            .Take(6)
+            .ToArray();
+        RefreshRfidAlarmDisplay();
+    }
+
     public void SetRecognitionStatus(string? message, bool isAlarm)
     {
         if (string.IsNullOrWhiteSpace(message))
@@ -261,7 +331,7 @@ public partial class MonitorPage : UserControl
         _rfidRuntimeStates = snapshot;
         var onlineCount = snapshot.Count(state => state.CommunicationState == StationCommunicationState.Online);
         var recognizingCount = snapshot.Count(state => state.LifecycleState == PassageLifecycleState.Recognizing);
-        var alarmCount = snapshot.Count(state => state.CommunicationState == StationCommunicationState.Online && state.LifecycleState == PassageLifecycleState.Alarm);
+        var alarmCount = snapshot.Count(IsUncouplingAlarm);
         RealtimeStationSummaryText.Text = $"在线基站 {onlineCount}/{snapshot.Length}";
         RecognizingSummaryText.Text = $"正在识别 {recognizingCount}";
         AlarmSummaryText.Text = $"当前报警 {alarmCount}";
@@ -318,7 +388,7 @@ public partial class MonitorPage : UserControl
         ApplySystemIndicator(
             SystemExternalStatusDot,
             SystemExternalStatusText,
-            _externalInterfaceAvailable ? "外部接口 正常" : "外部接口 未接入",
+            _externalInterfaceAvailable ? "外部接口 正常" : "外部接口 未配置",
             _externalInterfaceAvailable ? SystemHealthState.Healthy : SystemHealthState.Unavailable);
     }
 
@@ -380,8 +450,7 @@ public partial class MonitorPage : UserControl
         var configuredCount = _rfidStations.Count;
         var totalCount = configuredCount > 0 ? configuredCount : _rfidRuntimeStates.Count;
         var onlineCount = _rfidRuntimeStates.Count(state => state.CommunicationState == StationCommunicationState.Online);
-        var alarmCount = _rfidRuntimeStates.Count(state =>
-            state.LifecycleState == PassageLifecycleState.Alarm || !string.IsNullOrWhiteSpace(state.AlarmMessage));
+        var alarmCount = _rfidRuntimeStates.Count(IsUncouplingAlarm);
         var enabledCount = _rfidStations.Count(station => station.Enabled);
         var offlineCount = configuredCount > 0
             ? Math.Max(0, enabledCount - onlineCount)
@@ -396,7 +465,7 @@ public partial class MonitorPage : UserControl
         OverviewDatabaseDisplayText.Text = _databaseHealthy ? "正常" : "异常";
         OverviewDatabaseDisplayText.Foreground = GetSystemStatusBrush(
             _databaseHealthy ? SystemHealthState.Healthy : SystemHealthState.Error);
-        OverviewExternalDisplayText.Text = _externalInterfaceAvailable ? "正常" : "未接入";
+        OverviewExternalDisplayText.Text = _externalInterfaceAvailable ? "正常" : "未配置";
         OverviewExternalDisplayText.Foreground = GetSystemStatusBrush(
             _externalInterfaceAvailable ? SystemHealthState.Healthy : SystemHealthState.Unavailable);
     }
@@ -421,53 +490,122 @@ public partial class MonitorPage : UserControl
                 configurationsById.TryGetValue(stationId, out var configuration) ? configuration : null,
                 statesById.TryGetValue(stationId, out var state) ? state : null))
             .ToArray();
+        _allRfidTaskCards = cards;
+        RfidTaskItemsControl.Tag = cards.Length;
+        ApplyTaskCardFilter();
+
+        RfidTaskSummaryText.Text = cards.Length.ToString(CultureInfo.InvariantCulture);
+        RfidTaskRunningCountText.Text = cards.Count(card => card.TaskCategory == "运行中").ToString(CultureInfo.InvariantCulture);
+        RfidTaskPendingCountText.Text = cards.Count(card => card.TaskCategory == "待发").ToString(CultureInfo.InvariantCulture);
+        RfidTaskAlarmCountText.Text = cards.Count(card => card.TaskCategory == "异常").ToString(CultureInfo.InvariantCulture);
+        RfidTaskOfflineCountText.Text = cards.Count(card => card.TaskCategory == "离线").ToString(CultureInfo.InvariantCulture);
+    }
+
+    private void ApplyTaskCardFilter()
+    {
+        var pageCount = Math.Max(1, (int)Math.Ceiling(_allRfidTaskCards.Count / (double)RfidTaskPageSize));
+        _rfidTaskPageIndex = Math.Min(_rfidTaskPageIndex, pageCount - 1);
+
         _rfidTaskCards.Clear();
-        foreach (var card in cards)
+        foreach (var card in _allRfidTaskCards
+                     .Skip(_rfidTaskPageIndex * RfidTaskPageSize)
+                     .Take(RfidTaskPageSize))
         {
             _rfidTaskCards.Add(card);
         }
 
-        var activeCount = cards.Count(card => card.IsActive);
-        RfidTaskSummaryText.Text = $"当前活动数量 {activeCount} · 共 {cards.Length} 个";
+        RfidTaskPaginationPanel.Visibility = pageCount > 1 ? Visibility.Visible : Visibility.Collapsed;
+        RfidTaskPageText.Text = $"{_rfidTaskPageIndex + 1} / {pageCount}";
+        RfidTaskPreviousPageButton.IsEnabled = _rfidTaskPageIndex > 0;
+        RfidTaskNextPageButton.IsEnabled = _rfidTaskPageIndex < pageCount - 1;
+    }
+
+    private void OnRfidTaskPreviousPageClick(object sender, RoutedEventArgs e)
+    {
+        if (_rfidTaskPageIndex <= 0)
+        {
+            return;
+        }
+
+        _rfidTaskPageIndex--;
+        ApplyTaskCardFilter();
+    }
+
+    private void OnRfidTaskNextPageClick(object sender, RoutedEventArgs e)
+    {
+        var pageCount = Math.Max(1, (int)Math.Ceiling(_allRfidTaskCards.Count / (double)RfidTaskPageSize));
+        if (_rfidTaskPageIndex >= pageCount - 1)
+        {
+            return;
+        }
+
+        _rfidTaskPageIndex++;
+        ApplyTaskCardFilter();
     }
 
     private RfidTaskCardViewModel BuildRfidTaskCard(RfidStationConfig? configuration, StationRuntimeState? state)
     {
         var stationId = configuration?.StationId ?? state?.StationId ?? "-";
+        var stationDisplayId = configuration is null
+            ? stationId
+            : RfidStationIdentity.GetDisplayId(configuration.StationId, configuration.YardId);
         var statusText = GetTaskStatusText(configuration, state);
         var statusBrush = GetTaskStatusBrush(statusText);
         var expected = state?.ExpectedVehicleCount ?? 0;
         var detected = state?.DetectedVehicleCount ?? 0;
-        var progressValue = expected > 0 ? Math.Min(100, detected * 100d / expected) : 0;
+        var isOffline = state is null || state.CommunicationState == StationCommunicationState.Offline;
+        var hasPassage = state is not null && state.LifecycleState != PassageLifecycleState.Idle;
+        var progressValue = !isOffline && hasPassage && expected > 0 ? Math.Min(100, detected * 100d / expected) : 0;
         var latestAt = state?.LastNewVehicleAt ?? state?.LastResponseAt;
         var isActive = state is not null && state.CommunicationState == StationCommunicationState.Online &&
                        state.LifecycleState != PassageLifecycleState.Idle;
 
         return new RfidTaskCardViewModel(
             stationId,
-            string.IsNullOrWhiteSpace(configuration?.Name) ? stationId : configuration?.Name ?? stationId,
+            stationDisplayId,
+            GetRfidMapPointName(stationId),
             statusText,
-            state?.CurrentHeadRfid?.ToString("X4") ?? "-",
-            state is null || expected <= 0 ? "-" : $"{detected} / {expected}",
+            hasPassage ? state?.CurrentHeadRfid?.ToString("X4") ?? "-" : "--",
+            hasPassage && expected > 0 ? $"{detected} / {expected}" : "--",
             progressValue,
-            latestAt?.ToLocalTime().ToString("HH:mm:ss") ?? "-",
+            isOffline ? "等待连接" : latestAt?.ToLocalTime().ToString("HH:mm:ss") ?? "-",
             isActive,
+            isOffline || !hasPassage ? Visibility.Collapsed : Visibility.Visible,
             statusBrush,
             CreateStatusBackground(statusBrush),
             statusBrush);
+    }
+
+    private string GetRfidMapPointName(string stationId)
+    {
+        var binding = _currentStation is null
+            ? null
+            : RfidStationBindingRules.FindBindings(new[] { _currentStation }, stationId).FirstOrDefault();
+        if (binding is not null)
+        {
+            return string.IsNullOrWhiteSpace(binding.DeviceName) ? binding.DeviceId : binding.DeviceName;
+        }
+
+        return "未绑定地图点位";
     }
 
     private void RefreshRfidAlarmDisplay()
     {
         var alarms = new List<RfidAlarmDisplayItem>();
         alarms.AddRange(_rfidRuntimeStates
-            .Where(state => state.LifecycleState == PassageLifecycleState.Alarm || !string.IsNullOrWhiteSpace(state.AlarmMessage))
-            .Select(state => new RfidAlarmDisplayItem(
-                state.LastResponseAt?.ToLocalTime().ToString("HH:mm:ss") ?? "-",
-                state.StationName,
-                string.IsNullOrWhiteSpace(state.AlarmMessage) ? "运行报警" : state.AlarmMessage!,
-                string.IsNullOrWhiteSpace(state.AlarmMessage) ? "状态进入报警" : state.AlarmMessage!,
-                state.LastResponseAt ?? state.SessionStartedAt ?? DateTimeOffset.MinValue)));
+            .Where(IsAlertState)
+            .Select(CreateRuntimeAlertItem));
+        alarms.AddRange(_recentAlarmRecords
+            .Where(record => _visibleRfidStationIds.Contains(record.StationId))
+            .Select(record => new RfidAlarmDisplayItem(
+                record.CompletedAt.ToLocalTime().ToString("HH:mm:ss"),
+                GetDisplayRfidStationId(record.StationId),
+                record.IsWarningOnly ? "警告" : record.AlarmMessage ?? "报警",
+                record.IsWarningOnly
+                    ? $"{string.Join("；", record.WarningMessages)}；已识别 {record.DetectedVehicleCount}/{record.ExpectedVehicleCount} 节"
+                    : $"已识别 {record.DetectedVehicleCount}/{record.ExpectedVehicleCount} 节，缺少 {Math.Max(record.ExpectedVehicleCount - record.DetectedVehicleCount, 0)} 节",
+                record.CompletedAt,
+                record.PassageId)));
         alarms.AddRange(_runtimeEvents
             .Where(IsAlarmEvent)
             .Select(runtimeEvent => new RfidAlarmDisplayItem(
@@ -478,9 +616,19 @@ public partial class MonitorPage : UserControl
                 DateTimeOffset.MinValue)));
 
         _rfidAlarmItems.Clear();
-        foreach (var alarm in alarms.OrderByDescending(item => item.SortAt).Take(6))
+        var seenPassages = new HashSet<Guid>();
+        foreach (var alarm in alarms.OrderByDescending(item => item.SortAt))
         {
+            if (alarm.PassageId.HasValue && !seenPassages.Add(alarm.PassageId.Value))
+            {
+                continue;
+            }
+
             _rfidAlarmItems.Add(alarm);
+            if (_rfidAlarmItems.Count >= 6)
+            {
+                break;
+            }
         }
 
         RfidAlarmCountText.Text = _rfidAlarmItems.Count.ToString(CultureInfo.InvariantCulture);
@@ -492,11 +640,39 @@ public partial class MonitorPage : UserControl
         runtimeEvent.Message.IndexOf("报警", StringComparison.OrdinalIgnoreCase) >= 0 ||
         runtimeEvent.Message.IndexOf("脱节", StringComparison.OrdinalIgnoreCase) >= 0;
 
+    private static bool IsAlertState(StationRuntimeState state) =>
+        IsUncouplingAlarm(state) || state.WarningMessages.Count > 0;
+
+    private static RfidAlarmDisplayItem CreateRuntimeAlertItem(StationRuntimeState state)
+    {
+        var isAlarm = IsUncouplingAlarm(state);
+        var warningText = string.Join("；", state.WarningMessages);
+        return new RfidAlarmDisplayItem(
+            state.LastResponseAt?.ToLocalTime().ToString("HH:mm:ss") ?? "-",
+            state.StationName,
+            isAlarm ? state.AlarmMessage ?? "报警" : "警告",
+            isAlarm
+                ? string.IsNullOrWhiteSpace(state.AlarmMessage) ? "状态进入报警" : state.AlarmMessage!
+                : warningText,
+            state.LastResponseAt ?? state.SessionStartedAt ?? DateTimeOffset.MinValue,
+            state.LastPassageRecord?.PassageId);
+    }
+
+    private void OnRfidAlarmMoreClick(object sender, RoutedEventArgs e)
+    {
+        AlarmMoreRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     private static string GetTaskStatusText(RfidStationConfig? configuration, StationRuntimeState? state)
     {
         if (configuration?.Enabled == false)
         {
             return "已禁用";
+        }
+
+        if (state is not null && IsUncouplingAlarm(state))
+        {
+            return "脱节报警";
         }
 
         if (state is null || state.CommunicationState == StationCommunicationState.Offline)
@@ -506,7 +682,7 @@ public partial class MonitorPage : UserControl
 
         return state.LifecycleState switch
         {
-            PassageLifecycleState.Recognizing => state.WarningMessages.Count > 0 ? "黄色提示" : "识别中",
+            PassageLifecycleState.Recognizing => state.WarningMessages.Count > 0 ? "识别不完整" : "识别中",
             PassageLifecycleState.Alarm => "脱节报警",
             PassageLifecycleState.Finalizing => "记录保存中",
             PassageLifecycleState.Clearing => "正在清除",
@@ -516,10 +692,25 @@ public partial class MonitorPage : UserControl
         };
     }
 
+    private static string GetTaskCategory(string statusText, bool isActive)
+    {
+        if (statusText is "脱节报警" or "识别不完整")
+        {
+            return "异常";
+        }
+
+        if (statusText is "离线" or "已禁用")
+        {
+            return "离线";
+        }
+
+        return isActive ? "运行中" : "待发";
+    }
+
     private static Brush GetTaskStatusBrush(string statusText) => statusText switch
     {
         "识别中" => GetResourceBrush("AccentBrush"),
-        "黄色提示" or "正在清除" => GetResourceBrush("WarningBrush"),
+        "识别不完整" or "正在清除" => GetResourceBrush("WarningBrush"),
         "脱节报警" => GetResourceBrush("AlarmBrush"),
         "离线" or "已禁用" or "等待清空确认" => GetResourceBrush("OfflineBrush"),
         _ => GetResourceBrush("SuccessBrush")
@@ -527,6 +718,12 @@ public partial class MonitorPage : UserControl
 
     private static Brush GetResourceBrush(string key) =>
         Application.Current?.TryFindResource(key) as Brush ?? Brushes.Gray;
+
+    private static bool IsUncouplingAlarm(StationRuntimeState state) =>
+        state.VisualState == RfidStationVisualState.Alarm ||
+        state.LifecycleState == PassageLifecycleState.Alarm ||
+        !string.IsNullOrWhiteSpace(state.AlarmMessage) ||
+        state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm;
 
     private static Brush CreateStatusBackground(Brush brush)
     {
@@ -538,25 +735,31 @@ public partial class MonitorPage : UserControl
     {
         public RfidTaskCardViewModel(
             string stationId,
-            string stationName,
+            string stationDisplayId,
+            string mapPointName,
             string statusText,
             string headRfid,
             string progressText,
             double progressValue,
             string latestRecognitionTime,
             bool isActive,
+            Visibility progressVisibility,
             Brush borderBrush,
             Brush statusBackground,
             Brush statusForeground)
         {
             StationId = stationId;
-            StationName = stationName;
+            StationDisplayId = stationDisplayId;
+            MapPointName = mapPointName;
             StatusText = statusText;
             HeadRfid = headRfid;
             ProgressText = progressText;
             ProgressValue = progressValue;
+            ProgressPercentageText = progressVisibility == Visibility.Visible ? $"{Math.Round(progressValue):0}%" : string.Empty;
             LatestRecognitionTime = latestRecognitionTime;
             IsActive = isActive;
+            ProgressVisibility = progressVisibility;
+            TaskCategory = GetTaskCategory(statusText, isActive);
             BorderBrush = borderBrush;
             StatusBackground = statusBackground;
             StatusForeground = statusForeground;
@@ -565,7 +768,9 @@ public partial class MonitorPage : UserControl
 
         public string StationId { get; }
 
-        public string StationName { get; }
+        public string StationDisplayId { get; }
+
+        public string MapPointName { get; }
 
         public string StatusText { get; }
 
@@ -575,9 +780,15 @@ public partial class MonitorPage : UserControl
 
         public double ProgressValue { get; }
 
+        public string ProgressPercentageText { get; }
+
         public string LatestRecognitionTime { get; }
 
         public bool IsActive { get; }
+
+        public Visibility ProgressVisibility { get; }
+
+        public string TaskCategory { get; }
 
         public Brush BorderBrush { get; }
 
@@ -590,13 +801,20 @@ public partial class MonitorPage : UserControl
 
     private sealed class RfidAlarmDisplayItem
     {
-        public RfidAlarmDisplayItem(string time, string station, string alarmType, string alarmDescription, DateTimeOffset sortAt)
+        public RfidAlarmDisplayItem(
+            string time,
+            string station,
+            string alarmType,
+            string alarmDescription,
+            DateTimeOffset sortAt,
+            Guid? passageId = null)
         {
             Time = time;
             Station = station;
             AlarmType = alarmType;
             AlarmDescription = alarmDescription;
             SortAt = sortAt;
+            PassageId = passageId;
         }
 
         public string Time { get; }
@@ -608,6 +826,8 @@ public partial class MonitorPage : UserControl
         public string AlarmDescription { get; }
 
         public DateTimeOffset SortAt { get; }
+
+        public Guid? PassageId { get; }
     }
 
     private void OnDeviceSelected(object? sender, DeviceSelectedEventArgs e)
@@ -618,19 +838,24 @@ public partial class MonitorPage : UserControl
             return;
         }
 
-        _selectedDevice = e.Device;
-        _selectedRfidStationId = e.Device.Type == DeviceType.RfidStation
-            ? RfidMapBindingResolver.Resolve(e.Device, _rfidStations).Configuration?.StationId ?? e.Device.RfidStationId
+        SelectRfidDevice(e.Device, e.Status);
+    }
+
+    private void SelectRfidDevice(DeviceConfig device, DeviceStatus status)
+    {
+        _selectedDevice = device;
+        _selectedRfidStationId = device.Type == DeviceType.RfidStation
+            ? RfidMapBindingResolver.Resolve(device, _rfidStations).Configuration?.StationId ?? device.RfidStationId
             : null;
-        SelectedDeviceTitle.Text = GetEffectiveRfidName(e.Device);
-        SelectedDeviceId.Text = e.Device.Id;
-        SelectedDeviceStation.Text = GetDeviceLocation(e.Device.Id);
-        SelectedDeviceCadX.Text = e.Device.CadX.ToString("0.####");
-        SelectedDeviceCadY.Text = e.Device.CadY.ToString("0.####");
-        SelectedDeviceStatus.Text = GetStatusText(e.Status);
+        SelectedDeviceTitle.Text = GetEffectiveRfidName(device);
+        SelectedDeviceId.Text = device.Id;
+        SelectedDeviceStation.Text = GetDeviceLocation(device.Id);
+        SelectedDeviceCadX.Text = device.CadX.ToString("0.####");
+        SelectedDeviceCadY.Text = device.CadY.ToString("0.####");
+        SelectedDeviceStatus.Text = GetStatusText(status);
         ApplySelectedRfidRuntimeState();
-        Map.SetSelectedAnnotation(MapAnnotationKind.RfidStation, e.Device.Id);
-        AddSystemEvent("选择", $"选择 {e.Device.Id}");
+        Map.SetSelectedAnnotation(MapAnnotationKind.RfidStation, device.Id);
+        AddSystemEvent("选择", $"选择 {device.Id}");
     }
 
     private void OnRfidTaskCardClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -721,7 +946,7 @@ public partial class MonitorPage : UserControl
 
         if (!_isMapAnnotationEditing)
         {
-            _annotationEditor = new MapAnnotationEditor(_currentStation, _adminModeService);
+            _annotationEditor = new MapAnnotationEditor(_currentStation, _adminModeService, _allYards, _rfidStations);
             _isMapAnnotationEditing = true;
             SetAnnotationTool(MapAnnotationTool.Select);
             AnnotationToolbar.Visibility = Visibility.Visible;
@@ -778,6 +1003,10 @@ public partial class MonitorPage : UserControl
             : UpdateAnnotation(kind, _selectedAnnotationId!, name, cadX, cadY, rotation, textHeight, rfidStationId);
         if (!changed)
         {
+            if (_annotationEditor.LastBindingError is not null)
+            {
+                ShowMessageDialog("绑定被阻止", _annotationEditor.LastBindingError, MessageDialogKind.Warning);
+            }
             return;
         }
 
@@ -898,7 +1127,7 @@ public partial class MonitorPage : UserControl
                 break;
             case DeviceConfig device:
                 var binding = RfidMapBindingResolver.Resolve(device, _rfidStations);
-                AnnotationNameBox.Text = binding.EffectiveName;
+                AnnotationNameBox.Text = string.IsNullOrWhiteSpace(device.Name) ? binding.EffectiveName : device.Name;
                 AnnotationCadXBox.Text = device.CadX.ToString("0.####", CultureInfo.InvariantCulture);
                 AnnotationCadYBox.Text = device.CadY.ToString("0.####", CultureInfo.InvariantCulture);
                 AnnotationRfidStationComboBox.SelectedValue = device.RfidStationId;
@@ -957,7 +1186,7 @@ public partial class MonitorPage : UserControl
             MapAnnotationKind.MapPoint => _annotationEditor!.TryUpdateMapPoint(id, name, cadX, cadY, enabled),
             MapAnnotationKind.RfidStation => _annotationEditor!.TryUpdateRfidStation(
                 id,
-                FindRfidStation(rfidStationId)?.Name ?? name,
+                name,
                 cadX,
                 cadY,
                 rfidStationId,
@@ -1022,6 +1251,7 @@ public partial class MonitorPage : UserControl
 
         CopyStationData(_currentStation, snapshot);
         _annotationEditor.MarkSaved();
+        MapAnnotationsSaved?.Invoke(this, EventArgs.Empty);
         RefreshAnnotationMap();
         AddSystemEvent("地图标注", "地图标注已保存");
         ShowMessageDialog("地图标注", "地图标注已保存", MessageDialogKind.Information);
@@ -1071,6 +1301,7 @@ public partial class MonitorPage : UserControl
             RfidAlarmCard.Visibility = Visibility.Collapsed;
             RfidDetailView.Visibility = Visibility.Visible;
             RfidDetailView.Margin = new Thickness(0);
+            RfidDetailStationBadge.Visibility = Visibility.Collapsed;
             Grid.SetRow(RfidDetailView, 0);
             Grid.SetRowSpan(RfidDetailView, 2);
             RfidDetailHeaderText.Text = "地图标注编辑";
@@ -1079,7 +1310,7 @@ public partial class MonitorPage : UserControl
 
         RfidOverviewCard.Visibility = Visibility.Visible;
         RfidAlarmCard.Visibility = Visibility.Visible;
-        RfidDetailView.Margin = new Thickness(0, 310, 0, 0);
+        RfidDetailView.Margin = new Thickness(0, 318, 0, 8);
         Grid.SetRow(RfidDetailView, 0);
         Grid.SetRowSpan(RfidDetailView, 1);
         RfidDetailHeaderText.Text = "RFID基站详情";
@@ -1234,6 +1465,7 @@ public partial class MonitorPage : UserControl
         var configuration = binding?.Configuration ?? FindRfidStation(_selectedRfidStationId);
         if (!isMapRfidSelection && configuration is null)
         {
+            _selectedRfidStationId = null;
             UpdateRfidSelectionLayout(false);
             return;
         }
@@ -1242,10 +1474,13 @@ public partial class MonitorPage : UserControl
         if (configuration is not null)
         {
             _selectedRfidStationId = configuration.StationId;
+            var displayStationId = RfidStationIdentity.GetDisplayId(configuration.StationId, configuration.YardId);
+            RfidDetailStationBadgeText.Text = displayStationId;
+            RfidDetailStationBadge.Visibility = Visibility.Visible;
             SelectedRfidStationNameText.Text = string.IsNullOrWhiteSpace(configuration.Name)
-                ? configuration.StationId
+                ? displayStationId
                 : configuration.Name;
-            SelectedRfidStationIdText.Text = configuration.StationId;
+            SelectedRfidStationIdText.Text = displayStationId;
             SelectedRfidEndpointText.Text = configuration.TryResolveEndpoint(out var endpoint)
                 ? $"{endpoint.Address}:{endpoint.Port}"
                 : "-";
@@ -1254,7 +1489,7 @@ public partial class MonitorPage : UserControl
         else if (binding is not null)
         {
             SelectedRfidStationNameText.Text = binding.EffectiveName;
-            SelectedRfidStationIdText.Text = _selectedDevice?.RfidStationId ?? "-";
+            SelectedRfidStationIdText.Text = GetDisplayRfidStationId(_selectedDevice?.RfidStationId);
         }
 
         if (binding is not null && (binding.State != RfidMapBindingState.Offline || binding.Configuration is null))
@@ -1306,6 +1541,8 @@ public partial class MonitorPage : UserControl
         SelectedDeviceLastCommunication.Text = "-";
         SelectedRfidStationNameText.Text = "-";
         SelectedRfidStationIdText.Text = "-";
+        RfidDetailStationBadgeText.Text = "-";
+        RfidDetailStationBadge.Visibility = Visibility.Collapsed;
         SelectedRfidCommunicationText.Text = "-";
         SelectedRfidBusinessStateText.Text = "-";
         SelectedRfidEndpointText.Text = "-";
@@ -1406,6 +1643,11 @@ public partial class MonitorPage : UserControl
 
     private static string GetRuntimeStateText(StationRuntimeState state)
     {
+        if (IsUncouplingAlarm(state))
+        {
+            return "脱节报警";
+        }
+
         if (state.CommunicationState == StationCommunicationState.Offline)
         {
             return "离线";
@@ -1413,11 +1655,11 @@ public partial class MonitorPage : UserControl
 
         return state.LifecycleState switch
         {
-            PassageLifecycleState.Recognizing => state.WarningMessages.Count > 0 ? "黄色提示" : "识别中",
+            PassageLifecycleState.Recognizing => state.WarningMessages.Count > 0 ? "识别不完整" : "识别中",
             PassageLifecycleState.Alarm => "脱节报警",
             PassageLifecycleState.Finalizing => "记录保存中",
             PassageLifecycleState.Clearing or PassageLifecycleState.WaitForEmpty => "清除/等待空槽",
-            _ => state.WarningMessages.Count > 0 ? "黄色提示" : "空闲"
+            _ => state.WarningMessages.Count > 0 ? "识别不完整" : "空闲"
         };
     }
 
@@ -1426,6 +1668,15 @@ public partial class MonitorPage : UserControl
             ? null
             : _rfidStations.FirstOrDefault(station =>
                 string.Equals(station.StationId, stationId!.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private string GetDisplayRfidStationId(string? stationId)
+    {
+        var normalized = stationId?.Trim() ?? string.Empty;
+        var station = FindRfidStation(normalized);
+        return station is null
+            ? normalized
+            : RfidStationIdentity.GetDisplayId(station.StationId, station.YardId);
+    }
 
     private string GetEffectiveRfidName(DeviceConfig device) =>
         RfidMapBindingResolver.Resolve(device, _rfidStations).EffectiveName;
@@ -1438,16 +1689,19 @@ public partial class MonitorPage : UserControl
         _ => "离线"
     };
 
-    private sealed class RfidStationChoice
+    public sealed class RfidStationChoice
     {
-        public RfidStationChoice(string stationId, string name, bool enabled)
+        public RfidStationChoice(string stationId, string name, string? yardId, bool enabled)
         {
             StationId = stationId;
-            DisplayName = enabled ? $"{name}（{stationId}）" : $"{name}（{stationId}，已禁用）";
+            var displayStationId = RfidStationIdentity.GetDisplayId(stationId, yardId);
+            DisplayName = enabled ? $"{name}（{displayStationId}）" : $"{name}（{displayStationId}，已禁用）";
         }
 
         public string StationId { get; }
 
         public string DisplayName { get; }
+
+        public override string ToString() => DisplayName;
     }
 }

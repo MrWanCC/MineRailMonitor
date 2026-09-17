@@ -3,6 +3,21 @@ namespace MineRailMonitor.Core.Tests;
 public sealed class SystemStatusMarkupTests
 {
     [Fact]
+    public void Sidebar_places_yard_selection_above_page_navigation_without_global_overview()
+    {
+        var mainWindow = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml"));
+        var yardSelectionIndex = mainWindow.IndexOf("Text=\"站场选择\"", StringComparison.Ordinal);
+        var monitorNavigationIndex = mainWindow.IndexOf("Text=\"实时监控\"", StringComparison.Ordinal);
+        var stationButtonsIndex = mainWindow.IndexOf("x:Name=\"StationButtonsPanel\"", StringComparison.Ordinal);
+
+        Assert.True(yardSelectionIndex >= 0);
+        Assert.True(stationButtonsIndex > yardSelectionIndex);
+        Assert.True(monitorNavigationIndex > stationButtonsIndex);
+        Assert.DoesNotContain("Tag=\"Overview\"", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("Content=\"全局总览\"", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void System_status_card_has_room_for_its_content_and_is_top_aligned()
     {
         var monitor = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));
@@ -48,7 +63,7 @@ public sealed class SystemStatusMarkupTests
         Assert.Contains("<ColumnDefinition Width=\"200\" />", mainWindow);
         Assert.Contains("<RowDefinition Height=\"0\" />", mainWindow);
         Assert.Contains("Visibility=\"Collapsed\"", mainWindow);
-        Assert.Contains("<RowDefinition Height=\"190\" />", monitor);
+        Assert.Contains("<RowDefinition x:Name=\"RfidTaskRowDefinition\" Height=\"176\" />", monitor);
         Assert.Contains("<ColumnDefinition Width=\"380\" />", monitor);
         Assert.Contains("x:Name=\"SelectedDeviceLatestRfid\"", monitor);
         Assert.Contains("x:Name=\"SelectedDeviceLastCommunication\"", monitor);
@@ -66,7 +81,7 @@ public sealed class SystemStatusMarkupTests
     }
 
     [Fact]
-    public void Monitor_bottom_tasks_stay_under_the_map_instead_of_spanning_the_right_rail()
+    public void Monitor_bottom_tasks_stay_left_of_the_right_alarm_rail()
     {
         var monitor = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));
 
@@ -110,7 +125,7 @@ public sealed class SystemStatusMarkupTests
         Assert.DoesNotContain("x:Name=\"RfidOverviewTabButton\"", monitorMarkup);
         Assert.DoesNotContain("x:Name=\"RfidDetailTabButton\"", monitorMarkup);
         Assert.Contains("x:Name=\"RfidTaskItemsControl\"", monitorMarkup);
-        Assert.Contains("HorizontalScrollBarVisibility=\"Auto\"", monitorMarkup);
+        Assert.Contains("HorizontalScrollBarVisibility=\"Disabled\"", monitorMarkup);
         Assert.Contains("Value=\"{Binding ProgressValue, Mode=OneWay}\"", monitorMarkup);
         Assert.Contains("x:Name=\"RfidAlarmItemsControl\"", monitorMarkup);
         Assert.Contains("Text=\"报警信息\"", monitorMarkup);
@@ -120,6 +135,8 @@ public sealed class SystemStatusMarkupTests
         Assert.DoesNotContain("Text=\"列车编号\"", monitorMarkup);
         Assert.Contains("RfidTaskItemsControl.ItemsSource", monitorCode);
         Assert.Contains("RfidAlarmItemsControl.ItemsSource", monitorCode);
+        Assert.Contains("RfidStationIdentity.GetDisplayId", monitorCode);
+        Assert.Contains("StationDisplayId", monitorMarkup);
     }
 
     [Fact]
@@ -148,6 +165,39 @@ public sealed class SystemStatusMarkupTests
     }
 
     [Fact]
+    public void Monitor_alarm_panel_exposes_history_and_a_working_more_action()
+    {
+        var monitorMarkup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));
+        var monitorCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml.cs"));
+        var mainWindowCode = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));
+
+        Assert.Contains("x:Name=\"RfidAlarmMoreButton\"", monitorMarkup);
+        Assert.Contains("Click=\"OnRfidAlarmMoreClick\"", monitorMarkup);
+        Assert.Contains("AlarmMoreRequested", monitorCode);
+        Assert.Contains("SetRecentAlarmRecords", monitorCode);
+        Assert.Contains("SetRecentAlarmRecords", mainWindowCode);
+        Assert.Contains("AlarmMoreRequested", mainWindowCode);
+        Assert.Contains("PassageOutcome.UncouplingAlarm", mainWindowCode);
+    }
+
+    [Fact]
+    public void Selected_rfid_detail_is_rendered_as_an_independent_card()
+    {
+        var monitorMarkup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));
+        var monitorCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml.cs"));
+
+        Assert.Contains("<Border x:Name=\"RfidDetailView\"", monitorMarkup);
+        Assert.Contains("Margin=\"0,318,0,8\"", monitorMarkup);
+        Assert.Contains("Style=\"{StaticResource RightInfoCardStyle}\"", monitorMarkup);
+        Assert.Contains("<RowDefinition Height=\"42\" />", monitorMarkup);
+        Assert.Contains("x:Name=\"RfidDetailStationBadge\"", monitorMarkup);
+        Assert.Contains("x:Name=\"RfidDetailStationBadgeText\"", monitorMarkup);
+        Assert.Contains("RfidDetailView.Margin = new Thickness(0, 318, 0, 8);", monitorCode);
+        Assert.Contains("RfidDetailStationBadgeText.Text = displayStationId;", monitorCode);
+        Assert.Contains("RfidDetailStationBadge.Visibility = Visibility.Collapsed;", monitorCode);
+    }
+
+    [Fact]
     public void Selecting_a_station_replaces_the_empty_state_in_place()
     {
         var monitorMarkup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));
@@ -162,7 +212,7 @@ public sealed class SystemStatusMarkupTests
         var selectionEnd = monitorCode.IndexOf("private void ApplyDashboardSnapshot", selectionStart, StringComparison.Ordinal);
         Assert.True(selectionStart >= 0 && selectionEnd > selectionStart, "RFID selection layout method is missing.");
         Assert.DoesNotContain("RfidOverviewCard.Visibility", monitorCode.Substring(selectionStart, selectionEnd - selectionStart));
-        Assert.Contains("Margin=\"0,310,0,0\"", monitorMarkup);
+        Assert.Contains("Margin=\"0,318,0,8\"", monitorMarkup);
         Assert.Contains("Text=\"RFID基站详情\"", monitorMarkup);
         Assert.DoesNotContain("UpdateRfidTabStyles", monitorCode);
         Assert.Contains("ApplySelectedRfidRuntimeState();", monitorCode);
@@ -184,7 +234,7 @@ public sealed class SystemStatusMarkupTests
         var detailStart = monitorMarkup.IndexOf("x:Name=\"RfidDetailView\"", StringComparison.Ordinal);
         var detailEnd = monitorMarkup.IndexOf("x:Name=\"SystemStatusCard\"", detailStart, StringComparison.Ordinal);
         var detailMarkup = monitorMarkup.Substring(detailStart, detailEnd - detailStart);
-        Assert.Contains("<RowDefinition Height=\"30\" />", detailMarkup);
+        Assert.Contains("<RowDefinition Height=\"42\" />", detailMarkup);
         Assert.Contains("<RowDefinition Height=\"*\" />", detailMarkup);
     }
 
@@ -207,15 +257,16 @@ public sealed class SystemStatusMarkupTests
         Assert.Contains("<Style x:Key=\"TaskCardStationIdStyle\"", monitorMarkup);
         Assert.Contains("<Style x:Key=\"TaskCardLabelStyle\"", monitorMarkup);
         Assert.Contains("<Style x:Key=\"TaskCardValueStyle\"", monitorMarkup);
+        Assert.Contains("<Style x:Key=\"TaskCardStationNameStyle\"", monitorMarkup);
+        Assert.Contains("<Style x:Key=\"TaskCardPercentageStyle\"", monitorMarkup);
         Assert.Contains("<Style x:Key=\"TaskCardStatusBadgeStyle\"", monitorMarkup);
-        Assert.Contains("<Style x:Key=\"TaskCardStatusAccentStyle\"", monitorMarkup);
-        Assert.Contains("Style=\"{StaticResource TaskCardStatusAccentStyle}\"", monitorMarkup);
-        Assert.Contains("Text=\"{Binding StationId}\" Style=\"{StaticResource TaskCardStationIdStyle}\"", monitorMarkup);
+        Assert.Contains("Text=\"{Binding StationDisplayId}\" Style=\"{StaticResource TaskCardStationIdStyle}\"", monitorMarkup);
         Assert.Contains("BorderBrush=\"{Binding StatusForeground}\"", monitorMarkup);
-        Assert.Contains("Text=\"当前车头\" Style=\"{StaticResource TaskCardLabelStyle}\"", monitorMarkup);
-        Assert.Contains("Text=\"{Binding HeadRfid}\" Style=\"{StaticResource TaskCardValueStyle}\"", monitorMarkup);
-        Assert.Contains("<Setter Property=\"Width\" Value=\"168\" />", monitorMarkup);
-        Assert.Contains("<Setter Property=\"Height\" Value=\"156\" />", monitorMarkup);
+        Assert.Contains("Text=\"{Binding HeadRfid}\"", monitorMarkup);
+        Assert.Contains("Text=\"实时运输任务\"", monitorMarkup);
+        Assert.Contains("Source=\"/MineRailMonitor;component/Assets/Icons/rfid-station.png\"", monitorMarkup);
+        Assert.Contains("<Setter Property=\"Width\" Value=\"205\" />", monitorMarkup);
+        Assert.Contains("<Setter Property=\"Height\" Value=\"110\" />", monitorMarkup);
     }
 
     private static string Locate(params string[] parts)

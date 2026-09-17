@@ -97,7 +97,7 @@
                         <TextBlock Text="报警说明" Grid.Row="4" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
                         <TextBlock x:Name="AlarmValue" Grid.Row="4" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
 
-                        <TextBlock Text="Warning" Grid.Row="5" Style="{StaticResource DialogFieldLabelStyle}" Margin="0,7,8,0" />
+                        <TextBlock Text="识别告警" Grid.Row="5" Style="{StaticResource DialogFieldLabelStyle}" Margin="0,7,8,0" />
                         <TextBlock x:Name="WarningValue" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Style="{StaticResource DialogFieldValueStyle}"
                                    Margin="0,7,0,0" TextWrapping="Wrap" />
                     </Grid>

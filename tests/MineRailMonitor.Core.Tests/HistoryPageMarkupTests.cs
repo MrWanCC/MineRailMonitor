@@ -12,6 +12,8 @@ public sealed class HistoryPageMarkupTests
         Assert.DoesNotContain("<TextBox x:Name=\"FromDate", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("<TextBox x:Name=\"ToDate", markup, StringComparison.Ordinal);
         Assert.Contains("StationFilter", markup, StringComparison.Ordinal);
+        Assert.Contains("站场范围", markup, StringComparison.Ordinal);
+        Assert.Contains("YardFilter", markup, StringComparison.Ordinal);
         Assert.Contains("HeadRfidFilter", markup, StringComparison.Ordinal);
         Assert.Contains("OutcomeFilter", markup, StringComparison.Ordinal);
         Assert.Contains("PreviousPageButton", markup, StringComparison.Ordinal);
@@ -29,7 +31,8 @@ public sealed class HistoryPageMarkupTests
 
         Assert.Contains("SqlitePassageRecordStore", markup, StringComparison.Ordinal);
         Assert.Contains("RestorePendingClear", markup, StringComparison.Ordinal);
-        Assert.True(markup.IndexOf("RestorePendingClear", StringComparison.Ordinal) < markup.IndexOf("StartRfidPoller", StringComparison.Ordinal));
+        Assert.Contains("YardCommunicationManager", markup, StringComparison.Ordinal);
+        Assert.True(markup.IndexOf("RestorePendingClear", StringComparison.Ordinal) < markup.IndexOf("StartAllAsync", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -41,14 +44,28 @@ public sealed class HistoryPageMarkupTests
     }
 
     [Fact]
+    public void Shared_data_grid_cells_keep_the_selected_row_readable_when_grid_loses_focus()
+    {
+        var sharedStyles = File.ReadAllText(Locate("src", "MineRailMonitor", "Styles", "Cards.xaml"));
+
+        Assert.Contains("<Condition Property=\"Selector.IsSelectionActive\" Value=\"False\" />", sharedStyles, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"Background\" Value=\"{StaticResource AccentButtonBrush}\" />", sharedStyles, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"Foreground\" Value=\"{StaticResource TextPrimaryBrush}\" />", sharedStyles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void History_page_station_filter_uses_stable_station_id_and_name()
     {
         var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "HistoryPage.xaml.cs"));
 
         Assert.Contains("Tag = station.StationId.Trim()", markup, StringComparison.Ordinal);
-        Assert.Contains("Content = FormatStation(station.StationId, _stationNames)", markup, StringComparison.Ordinal);
-        Assert.Contains("$\"{normalized} · {name}\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Content = FormatStation(station.StationId)", markup, StringComparison.Ordinal);
+        Assert.Contains("$\"{displayId} · {name}\"", markup, StringComparison.Ordinal);
         Assert.Contains("StationId = stationTag", markup, StringComparison.Ordinal);
+        Assert.Contains("SetYardOptions", markup, StringComparison.Ordinal);
+        Assert.Contains("RfidYardFilter", markup, StringComparison.Ordinal);
+        Assert.Contains("RfidStationIdentity.GetDisplayId", markup, StringComparison.Ordinal);
+        Assert.Contains("ResolveStationIds", markup, StringComparison.Ordinal);
         Assert.Contains("StationText = stationText", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("StationAddress = stationTag", markup, StringComparison.Ordinal);
         Assert.Contains("历史未识别基站", markup, StringComparison.Ordinal);

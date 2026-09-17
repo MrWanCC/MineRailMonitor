@@ -20,6 +20,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Resource Include="Assets\Icons\app-logo.png" />
+    <Resource Include="Assets\Icons\rfid-station.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="System.Configuration" />
   </ItemGroup>
 

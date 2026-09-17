@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
+using MineRailMonitor.Core.Services;
 
 namespace MineRailMonitor.Pages;
 
@@ -14,18 +15,27 @@ public partial class AlarmHistoryPage : UserControl
 {
     private const int PageSize = 20;
     private readonly IPassageRecordStore _recordStore;
-    private readonly IReadOnlyDictionary<string, string> _stationNames;
+    private IReadOnlyList<RfidStationConfig> _stations;
+    private IReadOnlyDictionary<string, string> _stationNames;
+    private IReadOnlyList<StationConfig> _yardConfigs = Array.Empty<StationConfig>();
+    private IReadOnlyList<RfidStationYardOption> _yardFilterOptions;
+    private HashSet<string>? _displayScopeStationIds;
     private readonly ObservableCollection<AlarmRow> _rows = new();
+    private bool _isYardFilterSync;
     private int _pageIndex;
     private int _totalCount;
 
     public AlarmHistoryPage(IPassageRecordStore recordStore, IEnumerable<RfidStationConfig>? stations = null)
     {
         _recordStore = recordStore ?? throw new ArgumentNullException(nameof(recordStore));
-        _stationNames = BuildStationNames(stations);
+        _stations = (stations ?? Array.Empty<RfidStationConfig>()).Where(station => station is not null).ToArray();
+        _stationNames = BuildStationNames(_stations);
+        _yardFilterOptions = RfidYardFilter.BuildOptions(null, _stations);
         InitializeComponent();
         AlarmGrid.ItemsSource = _rows;
-        PopulateStationFilter(stations);
+        YardFilter.ItemsSource = _yardFilterOptions;
+        YardFilter.SelectedIndex = 0;
+        RebuildStationFilter();
         StationFilter.SelectedIndex = 0;
         SetDefaultDateTimeFilter();
         Loaded += (_, _) => Refresh();
@@ -37,10 +47,54 @@ public partial class AlarmHistoryPage : UserControl
         ExecuteQuery();
     }
 
+    public void SetRfidStations(IEnumerable<RfidStationConfig>? stations)
+    {
+        _stations = (stations ?? Array.Empty<RfidStationConfig>()).Where(station => station is not null).ToArray();
+        _stationNames = BuildStationNames(_stations);
+        _yardFilterOptions = RfidYardFilter.BuildOptions(_yardConfigs, _stations);
+        SetYardFilterSelection(GetSelectedYardId());
+        RebuildStationFilter();
+    }
+
+    public void SetYardOptions(IEnumerable<StationConfig>? yards)
+    {
+        _yardConfigs = (yards ?? Array.Empty<StationConfig>())
+            .Where(yard => yard is not null)
+            .ToArray();
+        _yardFilterOptions = RfidYardFilter.BuildOptions(_yardConfigs, _stations);
+        SetYardFilterSelection(GetSelectedYardId());
+        RebuildStationFilter();
+        Refresh();
+    }
+
+    public void SetDisplayScope(IEnumerable<string>? stationIds, string? yardId = null)
+    {
+        _displayScopeStationIds = stationIds is null
+            ? null
+            : new HashSet<string>(
+                stationIds.Where(stationId => !string.IsNullOrWhiteSpace(stationId)).Select(stationId => stationId.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+        SetYardFilterSelection(yardId ?? RfidYardFilter.ResolveYardId(stationIds, _stations) ?? RfidStationYardOption.AllId);
+        RebuildStationFilter();
+        Refresh();
+    }
+
     private void OnQueryClick(object sender, RoutedEventArgs e)
     {
         _pageIndex = 0;
         ExecuteQuery();
+    }
+
+    private void OnYardFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isYardFilterSync)
+        {
+            return;
+        }
+
+        _displayScopeStationIds = RfidYardFilter.ResolveStationIds(GetSelectedYardId(), _stations);
+        RebuildStationFilter();
+        Refresh();
     }
 
     private void OnResetClick(object sender, RoutedEventArgs e)
@@ -75,11 +129,16 @@ public partial class AlarmHistoryPage : UserControl
             _rows.Clear();
             foreach (var record in result.Items)
             {
-                _rows.Add(new AlarmRow(record, FormatStation(record.StationId, _stationNames)));
+                _rows.Add(new AlarmRow(record, FormatStation(record.StationId)));
             }
 
-            var statistics = _recordStore.GetStatistics(DateTimeOffset.Now);
-            TodayAlarmValue.Text = statistics.TodayAlarmCount.ToString(CultureInfo.InvariantCulture);
+            var now = DateTimeOffset.Now;
+            var dayStart = new DateTimeOffset(now.Date, now.Offset);
+            var todayAlerts = YardPassageFilter.Filter(_recordStore.Records, _displayScopeStationIds)
+                .Count(record => record.CompletedAt >= dayStart &&
+                                record.CompletedAt < dayStart.AddDays(1) &&
+                                record.IsAlert);
+            TodayAlarmValue.Text = todayAlerts.ToString(CultureInfo.InvariantCulture);
             QueryAlarmValue.Text = _totalCount.ToString(CultureInfo.InvariantCulture);
             StationCountValue.Text = _rows.Select(item => item.Record.StationId)
                 .Where(item => !string.IsNullOrWhiteSpace(item))
@@ -130,8 +189,9 @@ public partial class AlarmHistoryPage : UserControl
             From = ParseFilterDateTime(FromDatePicker, "开始时间"),
             To = ParseFilterDateTime(ToDatePicker, "结束时间", endOfDay: true)?.AddSeconds(1),
             StationId = stationTag,
+            StationIds = _displayScopeStationIds?.ToArray(),
             HeadRfid = headRfid,
-            Outcome = PassageOutcome.UncouplingAlarm,
+            IncludeWarnings = true,
             PageIndex = _pageIndex,
             PageSize = PageSize
         };
@@ -145,32 +205,72 @@ public partial class AlarmHistoryPage : UserControl
         }
 
         var record = _recordStore.GetDetails(row.Record.PassageId) ?? row.Record;
-        var dialog = new PassageDetailsDialog(record, FormatStation(record.StationId, _stationNames), alarmMode: true)
+        var dialog = new PassageDetailsDialog(record, FormatStation(record.StationId), alarmMode: true)
         {
             Owner = Window.GetWindow(this)
         };
         dialog.ShowDialog();
     }
 
-    private void PopulateStationFilter(IEnumerable<RfidStationConfig>? stations)
+    private void RebuildStationFilter()
     {
+        var selectedStationId = (StationFilter.SelectedItem as ComboBoxItem)?.Tag as string;
+        StationFilter.Items.Clear();
         StationFilter.Items.Add(new ComboBoxItem { Content = "全部", Tag = null });
-        StationFilter.Items.Add(new ComboBoxItem
+        if (_displayScopeStationIds is null || _displayScopeStationIds.Contains(PassageRecord.LegacyStationId))
         {
-            Content = "历史未识别基站",
-            Tag = PassageRecord.LegacyStationId
-        });
-        foreach (var station in (stations ?? Array.Empty<RfidStationConfig>())
-                     .Where(item => !string.IsNullOrWhiteSpace(item.StationId))
-                     .GroupBy(item => item.StationId.Trim(), StringComparer.OrdinalIgnoreCase)
+            StationFilter.Items.Add(new ComboBoxItem
+            {
+                Content = "历史未识别基站",
+                Tag = PassageRecord.LegacyStationId
+            });
+        }
+
+        foreach (var station in _stations
+                      .Where(item => !string.IsNullOrWhiteSpace(item.StationId))
+                      .Where(item => _displayScopeStationIds is null || _displayScopeStationIds.Contains(item.StationId.Trim()))
+                      .GroupBy(item => item.StationId.Trim(), StringComparer.OrdinalIgnoreCase)
                      .Select(group => group.First())
                      .OrderBy(item => item.StationId, StringComparer.OrdinalIgnoreCase))
         {
             StationFilter.Items.Add(new ComboBoxItem
             {
-                Content = FormatStation(station.StationId, _stationNames),
+                Content = FormatStation(station.StationId),
                 Tag = station.StationId.Trim()
             });
+        }
+
+        StationFilter.SelectedItem = StationFilter.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(
+                item.Tag as string,
+                selectedStationId,
+                StringComparison.OrdinalIgnoreCase))
+            ?? StationFilter.Items[0];
+    }
+
+    private string GetSelectedYardId() =>
+        (YardFilter.SelectedItem as RfidStationYardOption)?.Id ?? RfidStationYardOption.AllId;
+
+    private void SetYardFilterSelection(string selectedYardId)
+    {
+        var selectedItem = _yardFilterOptions.FirstOrDefault(option =>
+            string.Equals(option.Id, selectedYardId, StringComparison.OrdinalIgnoreCase))
+            ?? _yardFilterOptions.FirstOrDefault();
+        if (selectedItem is null)
+        {
+            return;
+        }
+
+        _isYardFilterSync = true;
+        try
+        {
+            YardFilter.ItemsSource = _yardFilterOptions;
+            YardFilter.SelectedItem = selectedItem;
+        }
+        finally
+        {
+            _isYardFilterSync = false;
         }
     }
 
@@ -183,7 +283,7 @@ public partial class AlarmHistoryPage : UserControl
                 group => group.First().Name?.Trim() ?? string.Empty,
                 StringComparer.OrdinalIgnoreCase);
 
-    private static string FormatStation(string? stationId, IReadOnlyDictionary<string, string> stationNames)
+    private string FormatStation(string? stationId)
     {
         var normalized = stationId?.Trim() ?? string.Empty;
         if (normalized.Length == 0 ||
@@ -192,9 +292,14 @@ public partial class AlarmHistoryPage : UserControl
             return "历史未识别基站";
         }
 
-        return stationNames.TryGetValue(normalized, out var name) && name.Length > 0
-            ? $"{normalized} · {name}"
-            : normalized;
+        var station = _stations.FirstOrDefault(item =>
+            string.Equals(item.StationId.Trim(), normalized, StringComparison.OrdinalIgnoreCase));
+        var displayId = station is null
+            ? normalized
+            : RfidStationIdentity.GetDisplayId(station.StationId, station.YardId);
+        return _stationNames.TryGetValue(normalized, out var name) && name.Length > 0
+            ? $"{displayId} · {name}"
+            : displayId;
     }
 
     private void SetDefaultDateTimeFilter()
@@ -265,7 +370,9 @@ public partial class AlarmHistoryPage : UserControl
             HeadRfidText = FormatRfid(record.HeadRfid);
             ProgressText = $"{record.DetectedVehicleCount} / {record.ExpectedVehicleCount}";
             MissingCountText = Math.Max(record.ExpectedVehicleCount - record.DetectedVehicleCount, 0).ToString(CultureInfo.InvariantCulture);
-            AlarmReasonText = record.AlarmMessage ?? "脱节报警";
+            AlertLevelText = record.IsWarningOnly ? "警告" : "报警";
+            AlarmReasonText = record.AlarmMessage ??
+                (record.WarningMessages.Count == 0 ? "识别告警" : string.Join("；", record.WarningMessages));
             ClearStateText = FormatClearState(record.ClearState);
         }
 
@@ -275,6 +382,7 @@ public partial class AlarmHistoryPage : UserControl
         public string HeadRfidText { get; }
         public string ProgressText { get; }
         public string MissingCountText { get; }
+        public string AlertLevelText { get; }
         public string AlarmReasonText { get; }
         public string ClearStateText { get; }
     }

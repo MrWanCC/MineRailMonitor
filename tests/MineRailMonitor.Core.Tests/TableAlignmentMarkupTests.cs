@@ -15,7 +15,7 @@ public sealed class TableAlignmentMarkupTests
     }
 
     [Fact]
-    public void Monitor_task_cards_use_centered_compact_alignment()
+    public void Monitor_task_cards_use_horizontal_transport_alignment()
     {
         var cards = File.ReadAllText(Locate("src", "MineRailMonitor", "Styles", "Cards.xaml"));
         var monitor = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));
@@ -28,8 +28,9 @@ public sealed class TableAlignmentMarkupTests
         Assert.Contains("VerticalContentAlignment\" Value=\"Center\"", cards);
         Assert.Contains("x:Name=\"RfidTaskItemsControl\"", monitor);
         Assert.Contains("<StackPanel Orientation=\"Horizontal\" />", monitor);
-        Assert.Contains("Text=\"识别进度\"", monitor);
-        Assert.Contains("Text=\"最新识别\"", monitor);
+        Assert.Contains("Text=\"{Binding ProgressText}\"", monitor);
+        Assert.Contains("Text=\"车头\"", monitor);
+        Assert.Contains("HorizontalScrollBarVisibility=\"Disabled\"", monitor);
     }
 
     [Fact]

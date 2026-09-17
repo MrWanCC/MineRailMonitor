@@ -74,6 +74,12 @@ public sealed class ProjectConfigServiceTests
         Assert.Equal(0, station.CadMinY);
         Assert.Equal(100, station.CadMaxY);
         Assert.Equal(new[] { "RFID-01", "RFID-02" }, result.Project.RfidStations.Select(item => item.StationId));
+        Assert.False(result.Project.UsesLegacySharedListener);
+        Assert.Equal(2, result.Project.YardCommunications.Count);
+        Assert.Equal(56002, result.Project.YardCommunications.Single(item => item.YardId == "560").ListenPort);
+        Assert.Equal(56012, result.Project.YardCommunications.Single(item => item.YardId == "620").ListenPort);
+        Assert.Equal("560", result.Project.RfidStations.Single(item => item.StationId == "RFID-01").YardId);
+        Assert.Equal("620", result.Project.RfidStations.Single(item => item.StationId == "RFID-02").YardId);
         Assert.All(result.Project.RfidStations, item =>
         {
             Assert.Equal("127.0.0.1", item.IpAddress);

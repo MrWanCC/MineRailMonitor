@@ -26,8 +26,6 @@
 - RFID Simulator
 - 8 个 Acceptance 场景
 
-RFID 统计页面暂不作为已完成能力宣称。
-
 ## 技术栈
 
 - C# / .NET Framework 4.8
@@ -35,7 +33,7 @@ RFID 统计页面暂不作为已完成能力宣称。
 - UDP RFID 通信
 - SQLite
 - PowerShell 自动验收
-- MSTest 核心与基础设施测试
+- xUnit 核心与基础设施测试
 
 ## 核心工作流程
 
@@ -65,14 +63,14 @@ MineRailMonitor.sln
 
 ```powershell
 dotnet restore MineRailMonitor.sln
-dotnet build MineRailMonitor.sln -c Release
-dotnet test MineRailMonitor.sln -c Release --no-build
+dotnet build MineRailMonitor.sln -c Debug
+dotnet test MineRailMonitor.sln -c Debug --no-build
 ```
 
 启动 WPF 上位机：
 
 ```powershell
-dotnet run --project src/MineRailMonitor/MineRailMonitor.csproj -c Release
+dotnet run --project src/MineRailMonitor/MineRailMonitor.csproj -c Debug
 ```
 
 仓库不包含现场项目、客户地图或生产数据库。没有本地现场配置时，程序使用 `Projects/Example`，缺少底图时显示未配置站场底图。
@@ -95,10 +93,12 @@ dotnet run --project src/MineRailMonitor/MineRailMonitor.csproj -c Release
 启动人工 Simulator：
 
 ```powershell
-dotnet run --project src/MineRailMonitor.Simulator/MineRailMonitor.Simulator.csproj -c Release
+dotnet run --project src/MineRailMonitor.Simulator/MineRailMonitor.Simulator.csproj -c Debug
 ```
 
 人工模式保留扫入下一张、移除标签和清空等操作。Simulator 与上位机之间仍使用真实 RFID UDP 协议链路。
+
+首次使用人工双站场验证时，在模拟器中点击“创建 560 / 620 双站场（12基站）”。左侧切换“560 站场”或“620 站场”，可分别启动、停止对应的 6 个虚拟基站；两个站场的协议地址均为 `01`~`06`，端口组互不重复，并与示例上位机配置对应。
 
 ## 自动验收
 
@@ -132,12 +132,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-rfid-acceptanc
 
 ## 管理员模式
 
-管理员模式需要通过环境变量 `MINE_RAIL_ADMIN_PASSWORD` 提供口令，仓库不保存默认口令。
+本地演示默认管理员口令为 `admin123`。部署环境建议通过环境变量 `MINE_RAIL_ADMIN_PASSWORD` 或未提交的本地配置覆盖 `AdminPassword`，不要继续使用默认口令。
 
 不要将真实口令、Token、Secret 或本地配置文件提交到仓库。
 
 ## 后续计划
 
-- 完善 RFID 统计页面
 - 根据实际部署环境补充独立的现场配置和地图资源
 - 持续完善发布、部署和运维文档

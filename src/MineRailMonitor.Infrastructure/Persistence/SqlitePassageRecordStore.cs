@@ -85,6 +85,36 @@ VALUES ($passage_id, $sequence_no, $rfid_value, $first_seen_at, $batch_no);";
 
     public void Add(PassageRecord record) => Save(record);
 
+    public int MigrateStationIds(IReadOnlyDictionary<string, string> migration)
+    {
+        if (migration is null) throw new ArgumentNullException(nameof(migration));
+
+        var changedRows = 0;
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        foreach (var pair in migration)
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value) ||
+                string.Equals(pair.Key, pair.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = @"
+UPDATE passage_record
+SET station_id = $new_station_id
+WHERE station_id = $old_station_id;";
+            command.Parameters.AddWithValue("$new_station_id", pair.Value.Trim());
+            command.Parameters.AddWithValue("$old_station_id", pair.Key.Trim());
+            changedRows += command.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        return changedRows;
+    }
+
     public void MarkCleared(Guid passageId, DateTimeOffset clearedAt)
     {
         using var connection = OpenConnection();
@@ -324,6 +354,38 @@ PRAGMA user_version=2;";
             clauses.Add("completed_at < $to");
             parameters["$to"] = ToUnixMilliseconds(query.To.Value);
         }
+        if (query.StationIds is not null)
+        {
+            var stationIds = query.StationIds
+                .Where(stationId => !string.IsNullOrWhiteSpace(stationId))
+                .Select(NormalizeStationId)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (stationIds.Length == 0)
+            {
+                clauses.Add("1 = 0");
+            }
+            else
+            {
+                var stationClauses = new List<string>();
+                for (var index = 0; index < stationIds.Length; index++)
+                {
+                    var stationId = stationIds[index];
+                    if (string.Equals(stationId, PassageRecord.LegacyStationId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        stationClauses.Add("(station_id IS NULL OR TRIM(station_id) = '')");
+                    }
+                    else
+                    {
+                        var parameterName = $"$station_id_scope_{index}";
+                        stationClauses.Add($"station_id = {parameterName}");
+                        parameters[parameterName] = stationId;
+                    }
+                }
+
+                clauses.Add($"({string.Join(" OR ", stationClauses)})");
+            }
+        }
         if (!string.IsNullOrWhiteSpace(query.StationId))
         {
             if (string.Equals(NormalizeStationId(query.StationId), PassageRecord.LegacyStationId, StringComparison.OrdinalIgnoreCase))
@@ -350,6 +412,11 @@ PRAGMA user_version=2;";
         {
             clauses.Add("result = $result_filter");
             parameters["$result_filter"] = (int)query.Outcome.Value;
+        }
+        if (query.IncludeWarnings)
+        {
+            clauses.Add("(result = $alert_result OR (warning_message IS NOT NULL AND TRIM(warning_message) <> ''))");
+            parameters["$alert_result"] = (int)PassageOutcome.UncouplingAlarm;
         }
         return clauses.Count == 0 ? "1=1" : string.Join(" AND ", clauses);
     }

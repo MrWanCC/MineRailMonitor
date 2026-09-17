@@ -105,6 +105,70 @@ public sealed class RfidStationConfigurationTests
     }
 
     [Fact]
+    public async Task Save_rejects_an_unknown_station_ownership_yard()
+    {
+        using var project = TemporaryProject.Create();
+        var service = new ProjectConfigService(new FileLogger(Path.Combine(project.Path, "test-logs")));
+        var station = CreateStation("RFID-01", "一号站", "127.0.0.1", 62301, 0x31);
+        station.YardId = "missing";
+
+        var result = await service.SaveRfidStationsAsync(project.Path, new[] { station });
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Errors, error => error.IndexOf("所属站场不存在", StringComparison.Ordinal) >= 0);
+    }
+
+    [Fact]
+    public async Task Save_station_rejects_map_binding_to_a_different_communication_yard()
+    {
+        using var project = TemporaryProject.Create("""
+            {
+              "Id": "test",
+              "Name": "test",
+              "RfidStations": [
+                {
+                  "StationId": "RFID-01",
+                  "Name": "一号站",
+                  "YardId": "560",
+                  "IpAddress": "127.0.0.1",
+                  "Port": 62301,
+                  "ProtocolAddress": 1,
+                  "Enabled": true
+                }
+              ],
+              "Stations": [
+                { "Id": "560", "ConfigFile": "560.json" },
+                { "Id": "620", "ConfigFile": "620.json" }
+              ]
+            }
+            """);
+        File.WriteAllText(Path.Combine(project.Path, "560.json"), "{\"Id\":\"560\",\"Name\":\"560\",\"Devices\":[]}");
+        File.WriteAllText(Path.Combine(project.Path, "620.json"), "{\"Id\":\"620\",\"Name\":\"620\",\"Devices\":[]}");
+        var service = new ProjectConfigService(new FileLogger(Path.Combine(project.Path, "test-logs")));
+
+        var result = await service.SaveStationAsync(project.Path, new StationConfig
+        {
+            Id = "620",
+            Name = "620",
+            Devices = new[]
+            {
+                new DeviceConfig
+                {
+                    Id = "map-rfid-01",
+                    Name = "620 RFID点位",
+                    Type = DeviceType.RfidStation,
+                    StationId = "620",
+                    RfidStationId = "RFID-01",
+                    Enabled = true
+                }
+            }
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Errors, error => error.IndexOf("通信归属站场", StringComparison.Ordinal) >= 0);
+    }
+
+    [Fact]
     public async Task Save_and_load_round_trip_numeric_byte_array_fields()
     {
         using var project = TemporaryProject.Create();

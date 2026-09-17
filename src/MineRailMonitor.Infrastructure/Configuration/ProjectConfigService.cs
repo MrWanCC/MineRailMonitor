@@ -70,6 +70,15 @@ public sealed class ProjectConfigService : IProjectConfigService
             return Failure(errors, "项目配置为空。");
         }
 
+        var rfidStations = (manifest.RfidStations ?? Array.Empty<ProjectConfigService.ProjectManifest.RfidStationManifest>())
+            .Select(item => item.ToConfig())
+            .ToArray();
+        ValidateUniqueRfidStationIds(rfidStations, errors);
+        if (errors.Count > 0)
+        {
+            return ProjectConfigLoadResult.Failure(errors);
+        }
+
         var stations = new List<StationConfig>();
         foreach (var stationReference in manifest.Stations)
         {
@@ -114,6 +123,15 @@ public sealed class ProjectConfigService : IProjectConfigService
             return ProjectConfigLoadResult.Failure(errors);
         }
 
+        var yardCommunications = (manifest.YardCommunications ?? Array.Empty<ProjectConfigService.ProjectManifest.YardCommunicationManifest>())
+            .Select(item => item.ToConfig())
+            .ToArray();
+        ValidateYardCommunications(stations, yardCommunications, errors);
+        if (errors.Count > 0)
+        {
+            return ProjectConfigLoadResult.Failure(errors);
+        }
+
         var project = new ProjectConfig
         {
             Id = manifest.Id,
@@ -121,9 +139,9 @@ public sealed class ProjectConfigService : IProjectConfigService
             DefaultStationId = manifest.DefaultStationId,
             Stations = stations,
             RfidSettings = manifest.RfidSettings ?? new RfidSettings(),
-            RfidStations = (manifest.RfidStations ?? Array.Empty<ProjectConfigService.ProjectManifest.RfidStationManifest>())
-                .Select(item => item.ToConfig())
-                .ToArray()
+            RfidStations = rfidStations,
+            YardCommunications = yardCommunications,
+            UsesLegacySharedListener = manifest.YardCommunications is null
         };
         // Legacy map entries may still carry only ProtocolAddress. Resolve them in memory
         // for this process; the station JSON is changed only by an explicit map save.
@@ -169,6 +187,68 @@ public sealed class ProjectConfigService : IProjectConfigService
         if (string.IsNullOrWhiteSpace(stationPath))
         {
             return SaveFailure(errors, $"项目配置中未找到站场：{station.Id}");
+        }
+
+        var currentProject = await LoadAsync(projectDirectory, cancellationToken);
+        if (!currentProject.Succeeded || currentProject.Project is null)
+        {
+            return SaveFailure(
+                errors,
+                currentProject.Errors.Count == 0
+                    ? "读取项目配置失败，无法校验 RFID 地图绑定。"
+                    : string.Join(Environment.NewLine, currentProject.Errors));
+        }
+
+        var existingBindingKeys = RfidStationBindingRules
+            .FindDuplicateBindings(currentProject.Project.Stations)
+            .Select(GetBindingKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var candidateYards = currentProject.Project.Stations
+            .Select(item => string.Equals(item.Id, station.Id, StringComparison.OrdinalIgnoreCase) ? station : item)
+            .ToArray();
+        var newlyCreatedDuplicateBindings = RfidStationBindingRules
+            .FindDuplicateBindings(candidateYards)
+            .Where(binding => !existingBindingKeys.Contains(GetBindingKey(binding)))
+            .ToArray();
+        if (newlyCreatedDuplicateBindings.Length > 0)
+        {
+            return SaveFailure(
+                errors,
+                "保存被阻止：不能新增重复绑定 RFID 地图绑定。" + Environment.NewLine +
+                string.Join(
+                    Environment.NewLine,
+                    newlyCreatedDuplicateBindings.Select(binding =>
+                        $"• RFID 基站 {binding.RfidStationId}：{binding.DisplayName}")));
+        }
+
+        foreach (var device in (station.Devices ?? Array.Empty<DeviceConfig>()).Where(item =>
+                     item is not null &&
+                     item.Type == DeviceType.RfidStation &&
+                     !string.IsNullOrWhiteSpace(item.RfidStationId)))
+        {
+            var bindingValidation = RfidStationBindingRules.ValidateBinding(
+                candidateYards,
+                currentProject.Project.RfidStations,
+                station.Id,
+                device.Id,
+                device.RfidStationId);
+            if (bindingValidation.Succeeded)
+            {
+                continue;
+            }
+
+            // Preserve legacy duplicate data when this save did not create it;
+            // a newly introduced cross-yard ownership violation is always rejected.
+            var introducesNewConflict = bindingValidation.Conflicts.Count == 0 ||
+                bindingValidation.Conflicts.Any(conflict => !existingBindingKeys.Contains(GetBindingKey(conflict)));
+            if (introducesNewConflict)
+            {
+                AddError(errors, bindingValidation.Message);
+            }
+        }
+        if (errors.Count > 0)
+        {
+            return ProjectConfigSaveResult.Failure(errors);
         }
 
         if (!File.Exists(stationPath))
@@ -234,7 +314,7 @@ public sealed class ProjectConfigService : IProjectConfigService
 
             var existingDevices = root[FindPropertyName(root, "Devices") ?? "Devices"] as JArray;
             var devices = new JArray();
-            foreach (var device in station.Devices)
+            foreach (var device in station!.Devices ?? Array.Empty<DeviceConfig>())
             {
                 var existing = existingDevices?
                     .OfType<JObject>()
@@ -250,7 +330,13 @@ public sealed class ProjectConfigService : IProjectConfigService
                 SetProperty(deviceObject, "RfidStationId", device.RfidStationId is null ? JValue.CreateNull() : new JValue(device.RfidStationId));
                 SetProperty(deviceObject, "CadX", device.CadX);
                 SetProperty(deviceObject, "CadY", device.CadY);
-                SetProperty(deviceObject, "ProtocolAddress", device.ProtocolAddress is null ? JValue.CreateNull() : new JValue(device.ProtocolAddress));
+                RemoveProperties(
+                    deviceObject,
+                    "IpAddress", "IP", "Port", "DestinationAddress", "DestinationPort",
+                    "ProtocolAddress", "Address", "EndpointKey", "StationAddress",
+                    "CommunicationState", "Status", "RuntimeState", "LastRequest", "LastResponse",
+                    "LastRequestAt", "LastResponseAt", "CurrentHeadRfid", "DetectedVehicleCount",
+                    "AlarmMessage", "WarningMessages", "LifecycleState", "VisualState");
                 SetProperty(deviceObject, "Enabled", device.Enabled);
                 devices.Add(deviceObject);
             }
@@ -333,6 +419,19 @@ public sealed class ProjectConfigService : IProjectConfigService
         }
 
         var stationList = stations.ToArray();
+        var currentProject = await LoadAsync(projectDirectory, cancellationToken);
+        if (!currentProject.Succeeded || currentProject.Project is null)
+        {
+            return SaveFailure(
+                errors,
+                currentProject.Errors.Count == 0
+                    ? "读取项目配置失败，无法校验 RFID 基站所属站场。"
+                    : string.Join(Environment.NewLine, currentProject.Errors));
+        }
+
+        errors.AddRange(RfidStationOwnershipRules.Validate(
+            currentProject.Project.Stations,
+            stationList));
         ValidateRfidStations(stationList, errors);
         if (errors.Count > 0)
         {
@@ -357,6 +456,58 @@ public sealed class ProjectConfigService : IProjectConfigService
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Newtonsoft.Json.JsonException)
         {
             return SaveFailure(errors, $"保存RFID基站配置失败：{exception.Message}", exception);
+        }
+    }
+
+    public async Task<ProjectConfigSaveResult> SaveYardCommunicationsAsync(
+        string projectDirectory,
+        IEnumerable<YardCommunicationConfig> configurations,
+        CancellationToken cancellationToken = default)
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(projectDirectory))
+        {
+            return SaveFailure(errors, "项目目录不能为空。");
+        }
+        if (configurations is null)
+        {
+            return SaveFailure(errors, "站场通信接口配置不能为空。");
+        }
+
+        var configurationList = configurations.ToArray();
+        var currentProject = await LoadAsync(projectDirectory, cancellationToken);
+        if (!currentProject.Succeeded || currentProject.Project is null)
+        {
+            return SaveFailure(
+                errors,
+                currentProject.Errors.Count == 0
+                    ? "读取项目配置失败，无法保存站场通信接口。"
+                    : string.Join(Environment.NewLine, currentProject.Errors));
+        }
+
+        ValidateYardCommunications(currentProject.Project.Stations, configurationList, errors);
+        if (errors.Count > 0)
+        {
+            return ProjectConfigSaveResult.Failure(errors);
+        }
+
+        var manifestPath = Path.Combine(projectDirectory, "project.json");
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var root = JObject.Parse(File.ReadAllText(manifestPath));
+            SetProperty(root, "YardCommunications", new JArray(configurationList.Select(ToManifestObject)));
+            using (var writer = File.CreateText(manifestPath))
+            {
+                await writer.WriteAsync(root.ToString(Newtonsoft.Json.Formatting.Indented));
+            }
+
+            _logger.Information("站场通信接口配置保存成功。");
+            return ProjectConfigSaveResult.Success();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Newtonsoft.Json.JsonException)
+        {
+            return SaveFailure(errors, $"保存站场通信接口配置失败：{exception.Message}", exception);
         }
     }
 
@@ -392,16 +543,14 @@ public sealed class ProjectConfigService : IProjectConfigService
     private static string GetDeviceTypeName(DeviceType type) =>
         type == DeviceType.RfidStation ? nameof(DeviceType.RfidStation) : type.ToString();
 
+    private static string GetBindingKey(RfidStationBindingLocation binding) =>
+        $"{binding.YardId}\u001F{binding.DeviceId}\u001F{binding.RfidStationId}";
+
     private static void ValidateRfidStations(
         IReadOnlyList<RfidStationConfig> stations,
         ICollection<string> errors)
     {
-        var stationIds = stations
-            .Where(station => station is not null && !string.IsNullOrWhiteSpace(station.StationId))
-            .GroupBy(station => station.StationId.Trim(), StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key);
-        foreach (var stationId in stationIds)
+        foreach (var stationId in RfidStationConfigurationRules.FindDuplicateStationIds(stations))
         {
             errors.Add($"RFID基站编号重复：{stationId}。");
         }
@@ -437,19 +586,87 @@ public sealed class ProjectConfigService : IProjectConfigService
         }
     }
 
-    private static JObject ToManifestObject(RfidStationConfig station) => new()
+    private static void ValidateUniqueRfidStationIds(
+        IReadOnlyList<RfidStationConfig> stations,
+        ICollection<string> errors)
     {
-        ["StationId"] = station.StationId,
-        ["Name"] = station.Name,
-        ["IpAddress"] = station.IpAddress,
-        ["Port"] = station.Port,
-        ["ProtocolAddress"] = station.ProtocolAddress,
-        ["Enabled"] = station.Enabled,
-        ["Mode"] = station.Mode,
-        ["CommandBytes"] = ToByteArrayToken(station.CommandBytes),
-        ["RequestPayload"] = ToByteArrayToken(station.RequestPayload),
-        ["CrcHigh"] = station.CrcHigh,
-        ["CrcLow"] = station.CrcLow
+        foreach (var stationId in RfidStationConfigurationRules.FindDuplicateStationIds(stations))
+        {
+            errors.Add($"RFID基站编号重复：{stationId}。");
+        }
+    }
+
+    private static void ValidateYardCommunications(
+        IReadOnlyList<StationConfig> yards,
+        IReadOnlyList<YardCommunicationConfig> configurations,
+        ICollection<string> errors)
+    {
+        var yardIds = new HashSet<string>(
+            yards.Where(yard => yard is not null && !string.IsNullOrWhiteSpace(yard.Id))
+                .Select(yard => yard.Id.Trim()),
+            StringComparer.OrdinalIgnoreCase);
+        var seenYardIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenEndpoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var configuration in configurations.Where(item => item is not null))
+        {
+            foreach (var validationError in configuration.Validate())
+            {
+                errors.Add(validationError);
+            }
+            var yardId = configuration.YardId?.Trim() ?? string.Empty;
+            if (!configuration.IsLegacySharedListener && !seenYardIds.Add(yardId))
+            {
+                errors.Add($"站场通信接口所属站场重复：{yardId}。");
+            }
+            if (!configuration.IsLegacySharedListener && yardId.Length > 0 && !yardIds.Contains(yardId))
+            {
+                errors.Add($"站场通信接口所属站场不存在：{yardId}。");
+            }
+
+            if (!configuration.Enabled || !configuration.TryResolveEndpoint(out var endpoint))
+            {
+                continue;
+            }
+
+            var endpointKey = $"{endpoint.Address}|{endpoint.Port}";
+            if (!seenEndpoints.Add(endpointKey))
+            {
+                errors.Add($"启用的站场监听端点重复：{endpoint}，监听端点重复。");
+            }
+        }
+    }
+
+    private static JObject ToManifestObject(RfidStationConfig station)
+    {
+        var result = new JObject
+        {
+            ["StationId"] = station.StationId,
+            ["Name"] = station.Name,
+            ["IpAddress"] = station.IpAddress,
+            ["Port"] = station.Port,
+            ["ProtocolAddress"] = station.ProtocolAddress,
+            ["Enabled"] = station.Enabled,
+            ["Mode"] = station.Mode,
+            ["CommandBytes"] = ToByteArrayToken(station.CommandBytes),
+            ["RequestPayload"] = ToByteArrayToken(station.RequestPayload),
+            ["CrcHigh"] = station.CrcHigh,
+            ["CrcLow"] = station.CrcLow
+        };
+        if (!string.IsNullOrWhiteSpace(station.YardId))
+        {
+            result["YardId"] = station.YardId!.Trim();
+        }
+
+        return result;
+    }
+
+    private static JObject ToManifestObject(YardCommunicationConfig configuration) => new()
+    {
+        ["YardId"] = configuration.YardId.Trim(),
+        ["ListenIp"] = configuration.ListenIp.Trim(),
+        ["ListenPort"] = configuration.ListenPort,
+        ["Enabled"] = configuration.Enabled
     };
 
     private static JArray ToByteArrayToken(IEnumerable<byte>? values) =>
@@ -459,6 +676,18 @@ public sealed class ProjectConfigService : IProjectConfigService
     {
         var propertyName = FindPropertyName(target, preferredName) ?? preferredName;
         target[propertyName] = value is JToken token ? token : JToken.FromObject(value!);
+    }
+
+    private static void RemoveProperties(JObject target, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            var actualName = FindPropertyName(target, propertyName);
+            if (actualName is not null)
+            {
+                target.Remove(actualName);
+            }
+        }
     }
 
     private static string? FindPropertyName(JObject target, string propertyName) =>
@@ -520,10 +749,29 @@ public sealed class ProjectConfigService : IProjectConfigService
 
         public IReadOnlyList<RfidStationManifest>? RfidStations { get; set; }
 
+        public IReadOnlyList<YardCommunicationManifest>? YardCommunications { get; set; }
+
+        public sealed class YardCommunicationManifest
+        {
+            public string YardId { get; set; } = string.Empty;
+            public string ListenIp { get; set; } = string.Empty;
+            public int ListenPort { get; set; }
+            public bool Enabled { get; set; } = true;
+
+            public YardCommunicationConfig ToConfig() => new()
+            {
+                YardId = YardId,
+                ListenIp = ListenIp,
+                ListenPort = ListenPort,
+                Enabled = Enabled
+            };
+        }
+
     public sealed class RfidStationManifest
     {
         public string StationId { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
+        public string? YardId { get; set; }
         public string IpAddress { get; set; } = string.Empty;
         public int Port { get; set; }
         public byte ProtocolAddress { get; set; }
@@ -553,6 +801,7 @@ public sealed class ProjectConfigService : IProjectConfigService
             {
                 StationId = stationId,
                 Name = name,
+                YardId = YardId,
                 IpAddress = ipAddress,
                 Port = port,
                 ProtocolAddress = protocolAddress,

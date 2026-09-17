@@ -38,14 +38,12 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Grid Width="48" Height="48" Margin="0,0,14,0">
-                        <Path Data="{StaticResource TrainIconGeometry}" Width="46" Height="46" Stretch="Uniform"
-                              Fill="#168EDC" Stroke="#4BDEFF" StrokeThickness="1.8" StrokeLineJoin="Round">
-                            <Path.Effect>
-                                <DropShadowEffect Color="#008DFF" BlurRadius="16" ShadowDepth="0" Opacity="0.9" />
-                            </Path.Effect>
-                        </Path>
-                    </Grid>
+                    <Image Source="/MineRailMonitor;component/Assets/Icons/app-logo.png"
+                           Width="48" Height="48" Margin="0,0,12,0"
+                           VerticalAlignment="Center"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           SnapsToDevicePixels="True" />
                     <TextBlock Text="矿山轨道运输监控系统" FontSize="32" FontWeight="Bold"
                                Foreground="#F3F8FF" VerticalAlignment="Center" />
                 </StackPanel>
@@ -66,7 +64,7 @@
                         </StackPanel>
                         <StackPanel Orientation="Horizontal">
                             <Ellipse x:Name="HeaderExternalStatusDot" Style="{StaticResource HeaderStatusDotStyle}" />
-                            <TextBlock x:Name="HeaderExternalStatusText" Text="外部接口未接入" Style="{StaticResource HeaderStatusTextStyle}" />
+                            <TextBlock x:Name="HeaderExternalStatusText" Text="外部接口未配置" Style="{StaticResource HeaderStatusTextStyle}" />
                         </StackPanel>
                     </StackPanel>
                     <StackPanel x:Name="AdminModeBanner" Orientation="Horizontal" Visibility="Collapsed"
@@ -159,6 +157,14 @@
 
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel Margin="6,14,6,10">
+                            <StackPanel Orientation="Horizontal" Margin="18,0,0,8">
+                                <Path Data="{StaticResource TrainIconGeometry}" Width="20" Height="20" Stretch="Uniform"
+                                      Stroke="#64CFFF" StrokeThickness="1.7" Fill="Transparent" Margin="0,0,10,0" />
+                                <TextBlock Text="站场选择" FontSize="15" FontWeight="SemiBold" />
+                            </StackPanel>
+                            <StackPanel x:Name="StationButtonsPanel" />
+
+                            <Border Height="1" Background="#138AC2" Margin="12,16,12,12" />
                             <Button x:Name="MonitorNavButton" Tag="Monitor" Style="{StaticResource NavButtonStyle}" Click="OnNavigationClick">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE80F;" Style="{StaticResource SegoeFluentIconStyle}" />
@@ -171,7 +177,7 @@
                                     <TextBlock Text="RFID统计" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Button>
-                            <Button Tag="Alarms" Style="{StaticResource NavButtonStyle}" Click="OnNavigationClick">
+                            <Button x:Name="AlarmNavButton" Tag="Alarms" Style="{StaticResource NavButtonStyle}" Click="OnNavigationClick">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE7BA;" Style="{StaticResource SegoeFluentIconStyle}" />
                                     <TextBlock Text="报警记录" VerticalAlignment="Center" />
@@ -195,15 +201,6 @@
                                     <TextBlock Text="系统设置" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Button>
-
-                            <Border Height="1" Background="#138AC2" Margin="12,16,12,12" />
-                            <StackPanel Orientation="Horizontal" Margin="18,0,0,8">
-                                <Path Data="{StaticResource TrainIconGeometry}" Width="20" Height="20" Stretch="Uniform"
-                                      Stroke="#64CFFF" StrokeThickness="1.7" Fill="Transparent" Margin="0,0,10,0" />
-                                <TextBlock Text="站场选择" FontSize="15" FontWeight="SemiBold" />
-                            </StackPanel>
-                            <StackPanel x:Name="StationButtonsPanel" />
-                            <Button Tag="Overview" Style="{StaticResource StationButtonStyle}" Click="OnNavigationClick" Content="全局总览" />
                         </StackPanel>
                     </ScrollViewer>
 

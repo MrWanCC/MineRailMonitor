@@ -8,6 +8,20 @@
     "InterVehicleTimeoutSeconds": 30,
     "EmptyRfidValue": 0
   },
+  "YardCommunications": [
+    {
+      "YardId": "560",
+      "ListenIp": "127.0.0.1",
+      "ListenPort": 56002,
+      "Enabled": true
+    },
+    {
+      "YardId": "620",
+      "ListenIp": "127.0.0.2",
+      "ListenPort": 56012,
+      "Enabled": true
+    }
+  ],
   "RfidStations": [
     {
       "StationId": "RFID-01",
@@ -15,6 +29,7 @@
       "IpAddress": "127.0.0.1",
       "Port": 62101,
       "ProtocolAddress": 1,
+      "YardId": "560",
       "Enabled": false
     },
     {
@@ -23,6 +38,7 @@
       "IpAddress": "127.0.0.1",
       "Port": 62102,
       "ProtocolAddress": 2,
+      "YardId": "620",
       "Enabled": false
     }
   ],

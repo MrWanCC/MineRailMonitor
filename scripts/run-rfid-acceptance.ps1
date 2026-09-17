@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
-    [string]$Configuration = 'Release',
+    [string]$Configuration = 'Debug',
     [switch]$KeepSuccessfulArtifacts,
     [string[]]$Scenario
 )
@@ -17,8 +17,10 @@ $runId = Get-Date -Format 'yyyyMMdd-HHmmssfff'
 $runRoot = Join-Path $repoRoot "artifacts\acceptance\$runId"
 $reportPath = Join-Path $runRoot 'phase33a-result.json'
 $acceptanceRunWatch = [System.Diagnostics.Stopwatch]::StartNew()
-$simulatorPort = 62101
-$upperPort = 62102
+$simulatorPort560 = 62101
+$simulatorPort620 = 62111
+$upperPort560 = 62102
+$upperPort620 = 62112
 $scenarioNames = @(
     'Normal11',
     'Uncoupling10',
@@ -282,7 +284,7 @@ function Get-DatabaseSnapshot {
     param([Parameter(Mandatory = $true)][string]$DatabasePath)
 
     $recordRows = @(Invoke-SqliteQuery -DatabasePath $DatabasePath -Sql @"
-SELECT passage_id, station_address, head_rfid, expected_vehicle_count,
+SELECT passage_id, station_id, station_address, head_rfid, expected_vehicle_count,
        detected_vehicle_count, result, clear_state, warning_message, alarm_message
 FROM passage_record
 ORDER BY completed_at ASC, created_at ASC;
@@ -302,6 +304,7 @@ ORDER BY completed_at ASC, created_at ASC;
         $warning = if ($warningParts.Count -eq 0) { $null } else { $warningParts -join "`n" }
         [void]$records.Add([pscustomobject]@{
             PassageId = [string]$row.passage_id
+            StationId = [string]$row.station_id
             StationAddress = [int]$row.station_address
             Station = ('RFID-{0:X2}' -f [int]$row.station_address)
             HeadRfid = Format-Rfid $row.head_rfid
@@ -439,6 +442,14 @@ function Test-ScenarioResult {
     for ($index = 0; $index -lt $actualRecords.Count; $index++) {
         $actual = $actualRecords[$index]
         $expected = @($expectation.Records)[$index]
+        $expectedStation = @($Runtime.Stations | Where-Object { [int]$_.StationAddress -eq $expected.StationAddress })[0]
+        if ($null -eq $expectedStation -or [string]::IsNullOrWhiteSpace([string]$expectedStation.StationId)) {
+            throw "未找到验收测试配置中的StationId：$Name station=$($expected.StationAddress)。"
+        }
+        $expectedStationId = [string]$expectedStation.StationId
+        if ($actual.StationId -ne $expectedStationId) {
+            throw "SQLite StationId与当前验收测试配置不一致：$Name expected=$expectedStationId actual=$($actual.StationId)。"
+        }
         if ($actual.StationAddress -ne $expected.StationAddress -or
             $actual.HeadRfid -ne $expected.HeadRfid -or
             $actual.Expected -ne $expected.Expected -or
@@ -462,8 +473,11 @@ function Test-ScenarioResult {
         $history = @(Get-RuntimeStationHistory -Runtime $Runtime -StationAddress $actual.StationAddress)
         $states = @($history | ForEach-Object { $_.LifecycleState })
         $lifecycleSequence = @(Get-CompactLifecycleSequence -States $states)
-        if ($states -notcontains 'Recognizing' -or $states -notcontains 'Clearing' -or $states -notcontains 'WaitForEmpty') {
-            throw "Runtime生命周期缺少 Recognizing/Clearing/WaitForEmpty：$Name station=$($actual.StationAddress)。"
+        # A fast UDP response can make the persisted snapshot observe the
+        # intermediate Clearing state as WaitForEmpty. The Clear request and
+        # the subsequent empty-read confirmation are validated below.
+        if ($states -notcontains 'Recognizing' -or $states -notcontains 'WaitForEmpty') {
+            throw "Runtime生命周期缺少 Recognizing/WaitForEmpty：$Name station=$($actual.StationAddress)。"
         }
         if ($actual.Result -eq 'Completed' -and $states -notcontains 'Completed') {
             throw "Runtime生命周期缺少Completed：$Name station=$($actual.StationAddress)。"
@@ -491,6 +505,7 @@ function Test-ScenarioResult {
         [void]$resultRows.Add([pscustomobject]@{
             Scenario = $Name
             Station = $actual.Station
+            StationId = $actual.StationId
             StationAddress = $actual.StationAddress
             PassageId = $actual.PassageId
             HeadRfid = $actual.HeadRfid
@@ -627,7 +642,7 @@ function Invoke-Scenario {
     $verified = $null
     try {
         $simulatorArguments = @(
-            '--test-mode', '--scenario', $Name, '--port', $simulatorPort.ToString(),
+            '--test-mode', '--scenario', $Name, '--port', $simulatorPort560.ToString(), '--port-620', $simulatorPort620.ToString(),
             '--result', $simulatorResultPath, '--ready-file', $simulatorReadyPath
         )
         $simulatorProcess = Start-AcceptanceProcess `
@@ -641,7 +656,8 @@ function Invoke-Scenario {
         $upperArguments = @(
             '--acceptance', '--database', $databasePath, '--runtime-state', $runtimeStatePath,
             '--log-dir', $logDirectory, '--ready-file', $upperReadyPath, '--stop-file', $stopFile,
-            '--listen-port', $upperPort.ToString(), '--simulator-port', $simulatorPort.ToString()
+            '--listen-port-560', $upperPort560.ToString(), '--listen-port-620', $upperPort620.ToString(),
+            '--simulator-port-560', $simulatorPort560.ToString(), '--simulator-port-620', $simulatorPort620.ToString()
         )
         $upperProcess = Start-AcceptanceProcess `
             -FilePath $mainExecutable `

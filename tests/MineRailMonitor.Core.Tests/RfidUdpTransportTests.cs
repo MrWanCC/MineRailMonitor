@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using MineRailMonitor.Core.Communication;
+using MineRailMonitor.Core.Models;
 using MineRailMonitor.Simulator.Communication;
 using MineRailMonitor.Simulator.Models;
 using MineRailMonitor.Simulator.Protocol;
@@ -90,6 +92,139 @@ public sealed class RfidUdpTransportTests
     }
 
     [Fact]
+    public async Task Listener_survives_unavailable_station_and_receives_from_live_station()
+    {
+        var received = new List<RfidUdpDatagramEventArgs>();
+        using var receiver = new RfidUdpTransport(IPAddress.Loopback, 0);
+        using var pollerCancellation = new CancellationTokenSource();
+        using var responderCancellation = new CancellationTokenSource();
+        using var responder = new SimulatorUdpResponder(IPAddress.Loopback, 0);
+        var unavailableEndpoint = new IPEndPoint(IPAddress.Loopback, GetUnusedLoopbackPort());
+        var liveStation = CreateStation(0x02, responder.LocalEndPoint);
+        var unavailableStation = CreateStation(0x01, unavailableEndpoint);
+        var poller = new RfidStationPoller(
+            new[] { unavailableStation, liveStation },
+            25,
+            receiver,
+            new SystemRfidTimeProvider());
+
+        receiver.DatagramReceived += (_, args) =>
+        {
+            received.Add(args);
+            if (args.IsValid && args.Data.Length >= 3)
+            {
+                poller.RecordResponse(args.RemoteEndPoint, args.Data[2], args.ReceivedAt);
+            }
+        };
+
+        var receiveTask = receiver.StartAsync(CancellationToken.None);
+        var responderTask = responder.RunAsync(_ => CreateFrame(address: 0x02), responderCancellation.Token);
+        var pollerTask = poller.RunAsync(pollerCancellation.Token);
+
+        try
+        {
+            await EventuallyAsync(
+                () => received.Any(item => item.IsValid && item.RemoteEndPoint.Port == responder.LocalEndPoint.Port),
+                TimeSpan.FromSeconds(3));
+
+            Assert.Contains(poller.EndpointStatuses.Values, status => status.RequestCount > 0);
+            Assert.True(poller.EndpointStatuses.Values.Single(status => status.StationAddress == 0x02).ResponseCount > 0);
+        }
+        finally
+        {
+            pollerCancellation.Cancel();
+            responderCancellation.Cancel();
+            receiver.Stop();
+            try
+            {
+                await pollerTask;
+            }
+            catch (OperationCanceledException) when (pollerCancellation.IsCancellationRequested)
+            {
+            }
+            await receiveTask;
+            await responderTask;
+        }
+    }
+
+    [Fact]
+    public async Task Six_station_polling_keeps_live_station_responsive_when_other_endpoints_are_unavailable()
+    {
+        var received = new ConcurrentQueue<RfidUdpDatagramEventArgs>();
+        var receiveErrors = new ConcurrentQueue<Exception>();
+        using var receiver = new RfidUdpTransport(IPAddress.Loopback, 0);
+        using var pollerCancellation = new CancellationTokenSource();
+        using var responderCancellation = new CancellationTokenSource();
+        using var responder = new SimulatorUdpResponder(IPAddress.Loopback, 62001);
+        var stations = Enumerable.Range(1, 6)
+            .Select(address => CreateStation(
+                (byte)address,
+                new IPEndPoint(IPAddress.Loopback, address == 1 ? 62001 : 10000 + address)))
+            .ToArray();
+        var poller = new RfidStationPoller(
+            stations,
+            25,
+            receiver,
+            new SystemRfidTimeProvider());
+
+        receiver.DatagramReceived += (_, args) =>
+        {
+            received.Enqueue(args);
+            if (args.IsValid && args.Data.Length >= 3)
+            {
+                poller.RecordResponse(args.RemoteEndPoint, args.Data[2], args.ReceivedAt);
+            }
+        };
+        receiver.ReceiveError += receiveErrors.Enqueue;
+
+        var receiveTask = receiver.StartAsync(CancellationToken.None);
+        var responderTask = responder.RunAsync(_ => CreateFrame(address: 0x01), responderCancellation.Token);
+        var pollerTask = poller.RunAsync(pollerCancellation.Token);
+
+        try
+        {
+            var liveStatus = poller.StationStatuses[0x01];
+            await EventuallyAsync(
+                () => liveStatus.RequestCount >= 3 && liveStatus.ResponseCount >= 3,
+                TimeSpan.FromSeconds(5));
+
+            var requestCount = liveStatus.RequestCount;
+            var responseCount = liveStatus.ResponseCount;
+            await EventuallyAsync(
+                () => liveStatus.RequestCount >= requestCount + 2 && liveStatus.ResponseCount >= responseCount + 2,
+                TimeSpan.FromSeconds(5));
+
+            Assert.NotNull(liveStatus.LastRequestAt);
+            Assert.NotNull(liveStatus.LastResponseAt);
+            Assert.All(
+                stations.Skip(1),
+                station => Assert.True(poller.StationStatuses[station.ProtocolAddress].RequestCount > 0));
+            Assert.All(
+                stations.Skip(1),
+                station => Assert.Equal(0, poller.StationStatuses[station.ProtocolAddress].ResponseCount));
+            Assert.Contains(
+                received,
+                item => item.IsValid && item.RemoteEndPoint.Port == responder.LocalEndPoint.Port);
+            Assert.Empty(receiveErrors);
+        }
+        finally
+        {
+            pollerCancellation.Cancel();
+            responderCancellation.Cancel();
+            receiver.Stop();
+            try
+            {
+                await pollerTask;
+            }
+            catch (OperationCanceledException) when (pollerCancellation.IsCancellationRequested)
+            {
+            }
+            await receiveTask;
+            await responderTask;
+        }
+    }
+
+    [Fact]
     public async Task StopReleasesBoundSocket()
     {
         using var receiver = new RfidUdpTransport(IPAddress.Loopback, 0);
@@ -135,11 +270,26 @@ public sealed class RfidUdpTransportTests
         return await task;
     }
 
-    private static byte[] CreateFrame(byte? firstByte = null, byte? lastByte = null)
+    private static int GetUnusedLoopbackPort()
+    {
+        using var probe = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        return ((IPEndPoint)probe.Client.LocalEndPoint!).Port;
+    }
+
+    private static RfidStationConfig CreateStation(byte address, IPEndPoint endpoint) => new()
+    {
+        Address = address,
+        Enabled = true,
+        DestinationEndpoint = endpoint,
+        CommandBytes = new byte[4],
+        RequestPayload = new byte[28]
+    };
+
+    private static byte[] CreateFrame(byte? firstByte = null, byte? lastByte = null, byte address = 0x03)
     {
         var input = new SimulatorFrameInput
         {
-            Address = 0x03,
+            Address = address,
             EmptySlotValue = 0,
             Slots = new ushort[14],
             CrcHigh = 0x12,

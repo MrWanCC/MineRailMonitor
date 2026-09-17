@@ -39,14 +39,14 @@ public partial class MainWindow : Window
     private HistoryPage? _historyPage;
     private AlarmHistoryPage? _alarmHistoryPage;
     private RfidStatisticsPage? _statisticsPage;
-    private RfidRuntimeCoordinator? _rfidRuntimeCoordinator;
+    private YardCommunicationManager? _yardCommunicationManager;
     private readonly SqlitePassageRecordStore _passageRecordStore;
     private AcceptanceRuntimeStateWriter? _acceptanceRuntimeStateWriter;
     private DateTimeOffset _lastStatisticsRefresh = DateTimeOffset.MinValue;
-    private RfidStationPoller? _rfidPoller;
-    private CancellationTokenSource? _rfidPollerCts;
-    private RfidUdpTransport? _rfidUdpTransport;
+    private DateTimeOffset _lastRecentAlarmRefresh = DateTimeOffset.MinValue;
     private ProjectConfig? _loadedProject;
+    private readonly CurrentYardContext _currentYardContext = new();
+    private IYardRfidStationResolver? _yardRfidStationResolver;
     private Button? _activeNavigationButton;
     private Button? _activeStationButton;
     private bool _allowWindowClose;
@@ -79,6 +79,7 @@ public partial class MainWindow : Window
         }
         _adminModeService = ((App)Application.Current).AdminModeService;
         _adminModeService.PropertyChanged += OnAdminModeStateChanged;
+        _currentYardContext.PropertyChanged += OnCurrentYardContextChanged;
         UpdateAdminModeBanner();
         _configService = new ProjectConfigService(((App)Application.Current).Logger);
         _passageRecordStore = new SqlitePassageRecordStore(
@@ -86,6 +87,7 @@ public partial class MainWindow : Window
                 ? _acceptanceOptions.DatabasePath!
                 : Path.Combine(AppContext.BaseDirectory, "Data", "MineRailMonitor.db"));
         _communicationPage = new CommunicationPage();
+        _communicationPage.SetAdminMode(_adminModeService.IsAdmin);
         _rfidFrameParser = new RfidFrameParser(new RfidFrameParserOptions
         {
             EmptyRfidValue = ReadEmptyRfidValue()
@@ -148,7 +150,6 @@ public partial class MainWindow : Window
         ApplyDwmBorderFallback();
         UpdateClock();
         _clockTimer.Start();
-        StartRfidListener();
         await LoadProjectAsync();
     }
 
@@ -179,32 +180,44 @@ public partial class MainWindow : Window
         }
 
         _loadedProject = result.Project;
+        var legacyStationIdMigration = RfidStationIdentity.BuildLegacyMigrationMap(_loadedProject.RfidStations);
+        if (legacyStationIdMigration.Count > 0)
+        {
+            var migratedRecordCount = _passageRecordStore.MigrateStationIds(legacyStationIdMigration);
+            ((App)Application.Current).Logger.Information(
+                $"RFID基站编号已规范化：{legacyStationIdMigration.Count} 个别名，历史记录更新 {migratedRecordCount} 条。");
+        }
         var runtimeSettings = GetRuntimeSettings(result.Project);
         _rfidFrameParser = new RfidFrameParser(new RfidFrameParserOptions
         {
             EmptyRfidValue = runtimeSettings.EmptyRfidValue
         });
         var settingsStations = _acceptanceOptions.Enabled ? CreateAcceptanceStations() : result.Project.RfidStations;
+        _yardRfidStationResolver = new YardRfidStationResolver(result.Project.Stations, settingsStations);
+        if (_acceptanceOptions.Enabled)
+        {
+            _currentYardContext.SelectGlobal();
+        }
+        else if (result.Project.Stations.Any(item =>
+                     string.Equals(item.Id, result.Project.DefaultStationId, StringComparison.OrdinalIgnoreCase)))
+        {
+            _currentYardContext.SelectYard(result.Project.DefaultStationId);
+        }
         _settingsPage = new SettingsPage(
             runtimeSettings,
             _adminModeService,
             settingsStations,
-            stationsEditable: !_acceptanceOptions.Enabled);
+            stationsEditable: !_acceptanceOptions.Enabled,
+            isRfidStationBound: IsRfidStationBound,
+            yards: result.Project.Stations,
+            bindingSaveRequested: SaveRfidBindingAsync,
+            viewMapPointRequested: ViewRfidMapPoint,
+            yardCommunications: result.Project.YardCommunications);
         _settingsPage.SaveRequested += SaveRfidSettingsAsync;
         _settingsPage.StationsSaveRequested += SaveRfidStationsAsync;
-        _rfidRuntimeCoordinator = CreateRfidRuntimeCoordinator(result.Project, runtimeSettings);
-        if (_rfidRuntimeCoordinator is not null)
-        {
-            _rfidRuntimeCoordinator.RestorePendingClear(_passageRecordStore.GetPendingClear());
-            if (_acceptanceOptions.Enabled)
-            {
-                _acceptanceRuntimeStateWriter = new AcceptanceRuntimeStateWriter(
-                    _acceptanceOptions.RuntimeStatePath!,
-                    _rfidRuntimeCoordinator);
-                _rfidRuntimeCoordinator.CommandSent += OnRfidCommandSent;
-                _acceptanceRuntimeStateWriter.Write("loaded");
-            }
-        }
+        _settingsPage.SaveYardCommunicationsRequested += SaveYardCommunicationsAsync;
+        await RecreateYardCommunicationManagerAsync(result.Project, settingsStations, runtimeSettings);
+        _acceptanceRuntimeStateWriter?.Write("loaded");
         _historyPage = new HistoryPage(
             _passageRecordStore,
             _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations);
@@ -214,8 +227,11 @@ public partial class MainWindow : Window
         _statisticsPage = new RfidStatisticsPage(
             _passageRecordStore,
             _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations);
+        _historyPage.SetYardOptions(result.Project.Stations);
+        _alarmHistoryPage.SetYardOptions(result.Project.Stations);
+        _statisticsPage.SetYardOptions(result.Project.Stations);
+        _communicationPage.SetYardOptions(result.Project.Stations);
         _communicationPage.ConfigureStations(settingsStations, SendCommunicationTestAsync);
-        StartRfidPoller(result.Project, runtimeSettings);
         StationButtonsPanel.Children.Clear();
         foreach (var station in result.Project.Stations)
         {
@@ -229,7 +245,13 @@ public partial class MainWindow : Window
             StationButtonsPanel.Children.Add(button);
         }
 
-        _monitorPage = new MonitorPage(_configService, _projectDirectory, _adminModeService);
+        _monitorPage = new MonitorPage(
+            _configService,
+            _projectDirectory,
+            _adminModeService,
+            result.Project.Stations);
+        _monitorPage.AlarmMoreRequested += OnMonitorAlarmMoreRequested;
+        _monitorPage.MapAnnotationsSaved += OnMonitorMapAnnotationsSaved;
         _monitorPage.SetRfidStations(settingsStations);
         _monitorPage.SetSystemHealth(databaseHealthy: true, externalInterfaceAvailable: _externalInterfaceAvailable);
         _monitorPage.SetSystemRfidStatus(_rfidListenerHealthy);
@@ -237,6 +259,7 @@ public partial class MainWindow : Window
         _monitorPage.AddSystemEvent("配置", "配置加载成功");
         PageContent.Content = _monitorPage;
         ShowStation(result.Project.DefaultStationId);
+        ApplyCurrentYardDisplayScope();
         UpdateRfidRuntimeUi();
         RefreshHistoricalStatistics();
         if (_acceptanceOptions.Enabled)
@@ -274,12 +297,14 @@ public partial class MainWindow : Window
 
         if (page == "Communication")
         {
+            ApplyCurrentYardDisplayScope();
             PageContent.Content = _communicationPage;
             return;
         }
 
         if (page == "Rfid" && _statisticsPage is not null)
         {
+            ApplyCurrentYardDisplayScope();
             _statisticsPage.Refresh();
             PageContent.Content = _statisticsPage;
             return;
@@ -287,12 +312,14 @@ public partial class MainWindow : Window
 
         if (page == "Settings" && _settingsPage is not null)
         {
+            _settingsPage.RefreshBindingOverview();
             PageContent.Content = _settingsPage;
             return;
         }
 
         if (page == "History" && _historyPage is not null)
         {
+            ApplyCurrentYardDisplayScope();
             _historyPage.Refresh();
             PageContent.Content = _historyPage;
             return;
@@ -300,6 +327,7 @@ public partial class MainWindow : Window
 
         if (page == "Alarms" && _alarmHistoryPage is not null)
         {
+            ApplyCurrentYardDisplayScope();
             _alarmHistoryPage.Refresh();
             PageContent.Content = _alarmHistoryPage;
             return;
@@ -313,10 +341,45 @@ public partial class MainWindow : Window
             "History" => "历史查询",
             "Communication" => "通信调试",
             "Settings" => "系统设置",
-            "Overview" => "全局总览",
             _ => "页面"
         };
         PageContent.Content = new PlaceholderPage(title, "本阶段仅提供页面骨架，业务功能将在后续阶段实现。");
+    }
+
+    private async void OnMonitorAlarmMoreRequested(object? sender, EventArgs e)
+    {
+        if (_alarmHistoryPage is null)
+        {
+            return;
+        }
+
+        if (_monitorPage is not null && !await _monitorPage.TryLeaveMapEditingAsync("查看报警记录"))
+        {
+            return;
+        }
+
+        if (_settingsPage is not null && !await _settingsPage.TryLeaveAsync("查看报警记录"))
+        {
+            return;
+        }
+
+        SelectNavigationButton(AlarmNavButton);
+        _alarmHistoryPage.Refresh();
+        PageContent.Content = _alarmHistoryPage;
+    }
+
+    private void OnMonitorMapAnnotationsSaved(object? sender, EventArgs e)
+    {
+        if (_loadedProject is null)
+        {
+            return;
+        }
+
+        _yardRfidStationResolver = new YardRfidStationResolver(
+            _loadedProject.Stations,
+            _loadedProject.RfidStations);
+        _settingsPage?.RefreshBindingOverview();
+        ApplyCurrentYardDisplayScope();
     }
 
     private async Task<bool> SaveRfidSettingsAsync(RfidSettings settings)
@@ -325,6 +388,13 @@ public partial class MainWindow : Window
         {
             return false;
         }
+
+        if (AreRfidSettingsEqual(_loadedProject.RfidSettings, settings))
+        {
+            _settingsPage.SetSaveResult("设置已保存。", false);
+            return true;
+        }
+
         var result = await _configService.SaveRfidSettingsAsync(_projectDirectory, settings);
         if (!result.Succeeded)
         {
@@ -333,10 +403,57 @@ public partial class MainWindow : Window
         }
         _loadedProject.RfidSettings = settings;
         _rfidFrameParser = new RfidFrameParser(new RfidFrameParserOptions { EmptyRfidValue = settings.EmptyRfidValue });
-        _rfidRuntimeCoordinator?.UpdateDefaults(settings);
-        StopRfidPoller();
-        StartRfidPoller(_loadedProject);
+        _yardCommunicationManager?.UpdateSettings(settings);
+        if (_yardCommunicationManager is not null)
+        {
+            await _yardCommunicationManager.RestartAllAsync();
+        }
         _settingsPage.SetSaveResult("设置已保存。", false);
+        return true;
+    }
+
+    private static bool AreRfidSettingsEqual(RfidSettings left, RfidSettings right) =>
+        left.PollIntervalMs == right.PollIntervalMs &&
+        left.ExpectedVehicleCount == right.ExpectedVehicleCount &&
+        left.InterVehicleTimeoutSeconds == right.InterVehicleTimeoutSeconds &&
+        left.EmptyRfidValue == right.EmptyRfidValue;
+
+    private async Task<bool> SaveYardCommunicationsAsync(IReadOnlyList<YardCommunicationConfig> configurations)
+    {
+        if (_loadedProject is null || _settingsPage is null || !_adminModeService.IsAdmin)
+        {
+            return false;
+        }
+
+        if (_acceptanceOptions.Enabled)
+        {
+            _settingsPage.SetSaveResult("验收模式禁止保存正式站场通信接口配置。", true);
+            return false;
+        }
+
+        var result = await _configService.SaveYardCommunicationsAsync(_projectDirectory, configurations);
+        if (!result.Succeeded)
+        {
+            _settingsPage.SetSaveResult(string.Join(Environment.NewLine, result.Errors), true);
+            return false;
+        }
+
+        _loadedProject.YardCommunications = configurations.ToArray();
+        _loadedProject.UsesLegacySharedListener = false;
+        if (_yardCommunicationManager is null)
+        {
+            await RecreateYardCommunicationManagerAsync(
+                _loadedProject,
+                _loadedProject.RfidStations,
+                _loadedProject.RfidSettings);
+        }
+        else
+        {
+            await _yardCommunicationManager.ApplyConfigurationsAsync(configurations);
+            _rfidListenerHealthy = IsCommunicationHealthy();
+            UpdateRfidRuntimeUi();
+        }
+        _settingsPage.SetSaveResult("站场通信接口已保存，560/620 已按独立接口运行。", false);
         return true;
     }
 
@@ -352,6 +469,27 @@ public partial class MainWindow : Window
             return false;
         }
 
+        var removedReferencedStationIds = RfidMapBindingResolver.FindRemovedReferencedStationIds(
+            _loadedProject.Stations,
+            stations);
+        if (removedReferencedStationIds.Count > 0)
+        {
+            var dialog = new StyledMessageDialog(
+                "无法删除 RFID 基站",
+                "以下基站仍被地图标记引用，请先解除地图绑定后再删除：" + Environment.NewLine +
+                string.Join(Environment.NewLine, removedReferencedStationIds.Select(stationId => $"• {stationId}")),
+                MessageDialogKind.Warning)
+            {
+                Owner = this
+            };
+            dialog.ShowDialog();
+            _settingsPage.SetSaveResult("存在地图绑定，无法删除 RFID 基站。请先解除地图绑定。", true);
+            return false;
+        }
+
+        var requiresRuntimeRestart = RfidStationConfigurationChangeRules.RequiresRuntimeRestart(
+            _loadedProject.RfidStations,
+            stations);
         var result = await _configService.SaveRfidStationsAsync(_projectDirectory, stations);
         if (!result.Succeeded)
         {
@@ -360,19 +498,91 @@ public partial class MainWindow : Window
         }
 
         _loadedProject.RfidStations = stations.ToArray();
-        _monitorPage?.SetRfidStations(_loadedProject.RfidStations);
-        var pendingClearRecords = _passageRecordStore.GetPendingClear();
-        if (_rfidRuntimeCoordinator is not null)
+        _yardRfidStationResolver = new YardRfidStationResolver(_loadedProject.Stations, _loadedProject.RfidStations);
+        ApplyCurrentYardDisplayScope();
+        _communicationPage.ConfigureStations(_loadedProject.RfidStations, SendCommunicationTestAsync);
+        _historyPage?.SetRfidStations(_loadedProject.RfidStations);
+        _alarmHistoryPage?.SetRfidStations(_loadedProject.RfidStations);
+        _statisticsPage?.SetRfidStations(_loadedProject.RfidStations);
+
+        if (requiresRuntimeRestart)
         {
-            _rfidRuntimeCoordinator.CommandSent -= OnRfidCommandSent;
+            var runtimeStations = _acceptanceOptions.Enabled
+                ? CreateAcceptanceStations()
+                : _loadedProject.RfidStations;
+            await RecreateYardCommunicationManagerAsync(
+                _loadedProject,
+                runtimeStations,
+                _loadedProject.RfidSettings);
         }
-        _rfidRuntimeCoordinator = CreateRfidRuntimeCoordinator(_loadedProject, _loadedProject.RfidSettings);
-        _rfidRuntimeCoordinator?.RestorePendingClear(pendingClearRecords);
-        StopRfidPoller();
-        StartRfidPoller(_loadedProject);
         UpdateRfidRuntimeUi();
         _settingsPage.SetSaveResult("设置与RFID基站配置已保存。", false);
         return true;
+    }
+
+    private bool IsRfidStationBound(string stationId)
+    {
+        if (_loadedProject is null || string.IsNullOrWhiteSpace(stationId))
+        {
+            return false;
+        }
+
+        var normalizedStationId = stationId.Trim();
+        return _loadedProject.Stations
+            .Where(station => station is not null)
+            .SelectMany(station => station.Devices ?? Array.Empty<DeviceConfig>())
+            .Any(device => device is not null &&
+                          string.Equals(device.RfidStationId?.Trim(), normalizedStationId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task<bool> SaveRfidBindingAsync(StationConfig station)
+    {
+        if (_loadedProject is null || _settingsPage is null || !_adminModeService.IsAdmin)
+        {
+            return false;
+        }
+
+        if (_acceptanceOptions.Enabled)
+        {
+            _settingsPage.SetSaveResult("验收模式禁止保存地图绑定配置。", true);
+            return false;
+        }
+
+        var save = await _configService.SaveStationAsync(_projectDirectory, station);
+        if (!save.Succeeded)
+        {
+            _settingsPage.SetSaveResult(string.Join(Environment.NewLine, save.Errors), true);
+            return false;
+        }
+
+        _yardRfidStationResolver = new YardRfidStationResolver(
+            _loadedProject.Stations,
+            _loadedProject.RfidStations);
+        ApplyCurrentYardDisplayScope();
+        _settingsPage.RefreshBindingOverview();
+        _settingsPage.SetSaveResult("地图绑定已保存。", false);
+        return true;
+    }
+
+    private void ViewRfidMapPoint(string yardId, string deviceId)
+    {
+        if (_loadedProject is null || _monitorPage is null)
+        {
+            return;
+        }
+
+        var yard = _loadedProject.Stations.FirstOrDefault(item =>
+            string.Equals(item.Id, yardId, StringComparison.OrdinalIgnoreCase));
+        if (yard is null)
+        {
+            return;
+        }
+
+        SelectNavigationButton(MonitorNavButton);
+        _currentYardContext.SelectYard(yard.Id);
+        ShowStation(yard.Id);
+        _monitorPage.SelectRfidStationDevice(deviceId);
+        PageContent.Content = _monitorPage;
     }
 
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -402,52 +612,111 @@ public partial class MainWindow : Window
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
-    private void StartRfidListener()
+    private async Task RecreateYardCommunicationManagerAsync(
+        ProjectConfig project,
+        IReadOnlyList<RfidStationConfig> stations,
+        RfidSettings runtimeSettings)
     {
-        _rfidListenerHealthy = false;
-        UpdateHeaderStatusIndicators();
-        try
-        {
-            var address = _acceptanceOptions.Enabled
-                ? _acceptanceOptions.ListenAddress
-                : IPAddress.Parse(ConfigurationManager.AppSettings["RfidUdpListenAddress"]!);
-            var port = _acceptanceOptions.Enabled
-                ? _acceptanceOptions.ListenPort
-                : int.Parse(ConfigurationManager.AppSettings["RfidUdpListenPort"]!, System.Globalization.CultureInfo.InvariantCulture);
-            if (address is null || port <= 0)
-            {
-                throw new InvalidOperationException("RFID UDP 监听配置无效。");
-            }
+        _yardCommunicationManager?.Dispose();
+        _yardCommunicationManager = null;
+        _acceptanceRuntimeStateWriter?.Dispose();
+        _acceptanceRuntimeStateWriter = null;
 
-            _rfidUdpTransport = new RfidUdpTransport(address, port);
-            _rfidUdpTransport.DatagramReceived += OnRfidDatagramReceived;
-            _rfidUdpTransport.ReceiveError += OnRfidReceiveError;
-            var endpoint = _rfidUdpTransport.LocalEndPoint;
-            _rfidListenerHealthy = true;
-            UpdateHeaderStatusIndicators();
-            _communicationPage.SetListenerStatus($"监听中：{endpoint}，等待数据");
-            _ = _rfidUdpTransport.StartAsync(CancellationToken.None);
-            ((App)Application.Current).Logger.Information($"RFID UDP 监听已启动：{endpoint}");
-        }
-        catch (Exception exception)
+        YardCommunicationManager manager;
+        if (_acceptanceOptions.Enabled)
         {
-            _rfidListenerHealthy = false;
-            UpdateHeaderStatusIndicators();
-            _communicationPage.SetError(exception);
-            ((App)Application.Current).Logger.Error("RFID UDP 监听启动失败。", exception);
+            manager = new YardCommunicationManager(
+                CreateAcceptanceYardCommunications(),
+                stations,
+                runtimeSettings,
+                _passageRecordStore);
+        }
+        else if (project.UsesLegacySharedListener || project.YardCommunications.Count == 0)
+        {
+            var (listenAddress, listenPort) = ResolveLegacyListenerEndpoint();
+            manager = YardCommunicationManager.CreateLegacyShared(
+                stations,
+                runtimeSettings,
+                _passageRecordStore,
+                listenAddress,
+                listenPort);
+        }
+        else
+        {
+            manager = new YardCommunicationManager(
+                project.YardCommunications,
+                stations,
+                runtimeSettings,
+                _passageRecordStore);
+        }
+
+        manager.DatagramReceived += OnYardDatagramReceived;
+        manager.ReceiveError += OnYardReceiveError;
+        manager.CommandSent += OnYardCommandSent;
+        _yardCommunicationManager = manager;
+
+        foreach (var context in manager.Contexts.Values)
+        {
+            context.RestorePendingClear(_passageRecordStore.GetPendingClear());
+        }
+
+        if (_acceptanceOptions.Enabled)
+        {
+            var runtimeCoordinators = manager.Contexts.Values
+                .Select(context => context.RuntimeCoordinator)
+                .Where(coordinator => coordinator is not null)
+                .Cast<RfidRuntimeCoordinator>()
+                .ToArray();
+            if (runtimeCoordinators.Length > 0)
+            {
+                _acceptanceRuntimeStateWriter = new AcceptanceRuntimeStateWriter(
+                    _acceptanceOptions.RuntimeStatePath!,
+                    runtimeCoordinators);
+            }
+        }
+
+        await manager.StartAllAsync();
+        _rfidListenerHealthy = IsCommunicationHealthy();
+        UpdateHeaderStatusIndicators();
+        _communicationPage.SetListenerStatus(
+            manager.Contexts.Count == 0
+                ? "未创建 RFID 站场通信上下文"
+                : $"通信上下文：{manager.Contexts.Count} 个，运行中：{manager.Contexts.Values.Count(context => context.IsRunning)} 个");
+        foreach (var diagnostic in manager.Diagnostics)
+        {
+            ((App)Application.Current).Logger.Warning(diagnostic);
         }
     }
 
-    private void OnRfidDatagramReceived(object? sender, RfidUdpDatagramEventArgs args)
+    private (IPAddress Address, int Port) ResolveLegacyListenerEndpoint()
+    {
+        if (_acceptanceOptions.Enabled)
+        {
+            return (_acceptanceOptions.ListenAddress, _acceptanceOptions.ListenPort);
+        }
+
+        var addressText = ConfigurationManager.AppSettings["RfidUdpListenAddress"];
+        var portText = ConfigurationManager.AppSettings["RfidUdpListenPort"];
+        if (!IPAddress.TryParse(addressText, out var address) || address == IPAddress.None ||
+            !int.TryParse(portText, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var port) || port is < 1 or > 65535)
+        {
+            throw new InvalidOperationException("RFID UDP 监听配置无效。");
+        }
+
+        return (address, port);
+    }
+
+    private void OnYardDatagramReceived(YardCommunicationContext context, RfidUdpDatagramEventArgs args)
     {
         var hex = BitConverter.ToString(args.Data).Replace('-', ' ');
-        var message = $"RFID UDP RX {args.RemoteEndPoint} {args.Data.Length} Bytes {hex}";
+        var message = $"RFID UDP RX [{context.YardId}] {args.RemoteEndPoint} {args.Data.Length} Bytes {hex}";
         var responseMatched = false;
         if (args.IsValid)
         {
             if (args.Data.Length >= 3)
             {
-                responseMatched = _rfidPoller?.RecordResponse(args.RemoteEndPoint, args.Data[2], args.ReceivedAt) == true;
+                responseMatched = context.RecordResponse(args.RemoteEndPoint, args.Data[2], args.ReceivedAt);
             }
             if (responseMatched)
             {
@@ -464,7 +733,7 @@ public partial class MainWindow : Window
         }
 
         RfidStationFrame? parsedFrame = null;
-        if (responseMatched && args.Data[3] == 0x04)
+        if (responseMatched && args.Data.Length >= 4 && args.Data[3] == 0x04)
         {
             _rfidFrameParser.TryParse(args.Data, args.RemoteEndPoint, args.ReceivedAt, out parsedFrame);
         }
@@ -474,7 +743,7 @@ public partial class MainWindow : Window
             var recognitionSession = (StationRecognitionSession?)null;
             if (parsedFrame is not null)
             {
-                recognitionSession = _rfidRuntimeCoordinator?.ProcessFrame(parsedFrame);
+                recognitionSession = context.ProcessFrame(parsedFrame);
                 if (recognitionSession is not null)
                 {
                     _monitorPage?.SetRecognitionSnapshot(parsedFrame, recognitionSession);
@@ -483,46 +752,44 @@ public partial class MainWindow : Window
                 UpdateRfidRuntimeUi();
                 _acceptanceRuntimeStateWriter?.Write("frame");
             }
-            _communicationPage.AddDatagram(args, parsedFrame, recognitionSession);
+            _communicationPage.AddDatagram(context.YardId, args, parsedFrame, recognitionSession);
             if (responseMatched)
             {
-                _rfidListenerHealthy = true;
+                _rfidListenerHealthy = IsCommunicationHealthy();
                 UpdateHeaderStatusIndicators();
                 _monitorPage?.SetSystemRfidStatus(true);
-                _communicationPage.SetListenerStatus($"监听中：{_rfidUdpTransport?.LocalEndPoint}，最近收到有效报文");
+                _communicationPage.SetListenerStatus($"[{context.YardId}] 最近收到有效报文：{context.ListenerEndPoint}", context.YardId);
             }
         }));
     }
 
-    private void OnRfidReceiveError(Exception exception)
+    private void OnYardReceiveError(YardCommunicationContext context, Exception exception)
     {
-        ((App)Application.Current).Logger.Error("RFID UDP 接收异常。", exception);
+        ((App)Application.Current).Logger.Error($"RFID UDP 接收异常 [{context.YardId}]。", exception);
         _ = Dispatcher.BeginInvoke(new Action(() =>
         {
-            _rfidListenerHealthy = false;
+            _rfidListenerHealthy = IsCommunicationHealthy();
             UpdateHeaderStatusIndicators();
             _monitorPage?.SetSystemRfidStatus(false);
-            _communicationPage.SetError(exception);
+            _communicationPage.SetError(exception, context.YardId);
         }));
     }
 
     private void OnWindowClosed(object? sender, EventArgs e)
     {
         _adminModeService.PropertyChanged -= OnAdminModeStateChanged;
-        if (_rfidRuntimeCoordinator is not null)
-        {
-            _rfidRuntimeCoordinator.CommandSent -= OnRfidCommandSent;
-        }
         _clockTimer.Stop();
-        _rfidUdpTransport?.Stop();
-        _rfidUdpTransport?.Dispose();
-        StopRfidPoller();
+        _yardCommunicationManager?.Dispose();
         _acceptanceRuntimeStateWriter?.Write("closed");
         _acceptanceRuntimeStateWriter?.Dispose();
         _passageRecordStore.Dispose();
     }
 
-    private void OnRfidCommandSent(byte stationAddress, RfidPollCommand command, DateTimeOffset sentAt)
+    private void OnYardCommandSent(
+        YardCommunicationContext context,
+        byte stationAddress,
+        RfidPollCommand command,
+        DateTimeOffset sentAt)
     {
         if (command == RfidPollCommand.Clear)
         {
@@ -536,6 +803,7 @@ public partial class MainWindow : Window
         {
             UpdateAdminModeBanner();
             _monitorPage?.HandleAdminModeChanged(_adminModeService.IsAdmin);
+            _communicationPage.SetAdminMode(_adminModeService.IsAdmin);
         }
     }
 
@@ -597,42 +865,6 @@ public partial class MainWindow : Window
     {
         var value = ConfigurationManager.AppSettings["EmptyRfidValue"];
         return ushort.TryParse(value, out var parsedValue) ? parsedValue : (ushort)0;
-    }
-
-    private void StartRfidPoller(ProjectConfig project, RfidSettings? runtimeSettings = null)
-    {
-        var stations = _acceptanceOptions.Enabled ? CreateAcceptanceStations() : project.RfidStations;
-        var settings = runtimeSettings ?? project.RfidSettings;
-        if (_rfidUdpTransport is null || stations.Count == 0)
-        {
-            ((App)Application.Current).Logger.Information("未配置真实 RFID 基站地址，轮询器保持停止。");
-            return;
-        }
-
-        try
-        {
-            _rfidPoller = new RfidStationPoller(
-                stations,
-                settings.PollIntervalMs,
-                _rfidUdpTransport,
-                new SystemRfidTimeProvider(),
-                _rfidRuntimeCoordinator);
-            _rfidPollerCts = new CancellationTokenSource();
-            _ = _rfidPoller.RunAsync(_rfidPollerCts.Token);
-            ((App)Application.Current).Logger.Information($"RFID 轮询器已启动，启用基站：{stations.Count}。");
-        }
-        catch (Exception exception)
-        {
-            ((App)Application.Current).Logger.Error("RFID 轮询器启动失败。", exception);
-        }
-    }
-
-    private void StopRfidPoller()
-    {
-        _rfidPollerCts?.Cancel();
-        _rfidPollerCts?.Dispose();
-        _rfidPollerCts = null;
-        _rfidPoller = null;
     }
 
     private void ApplyDwmBorderFallback()
@@ -720,6 +952,7 @@ public partial class MainWindow : Window
 
             SelectNavigationButton(MonitorNavButton);
             SelectStationButton(button);
+            _currentYardContext.SelectYard(stationId);
             ShowStation(stationId);
             PageContent.Content = _monitorPage;
         }
@@ -777,7 +1010,7 @@ public partial class MainWindow : Window
     private void OnClockTick(object? sender, EventArgs e)
     {
         UpdateClock();
-        _rfidRuntimeCoordinator?.Evaluate(DateTimeOffset.Now);
+        _yardCommunicationManager?.Evaluate(DateTimeOffset.Now);
         _acceptanceRuntimeStateWriter?.Write("tick");
         UpdateRecognitionStatus();
         UpdateRfidRuntimeUi();
@@ -797,14 +1030,16 @@ public partial class MainWindow : Window
     {
         // The canonical head-warning text is produced by RfidRuntimeCoordinator:
         // 未检测到车头标签、首个识别标签不是有效车头标签、检测到多个车头标签、协议数据告警。
-        if (_monitorPage is null || _rfidRuntimeCoordinator is null)
+        if (_monitorPage is null)
         {
             return;
         }
 
-        var states = _rfidRuntimeCoordinator.States.Values.ToArray();
+        var states = FilterCurrentYardStates(GetAllRuntimeStates()).ToArray();
         var alarm = states.FirstOrDefault(state =>
-            state.CommunicationState != StationCommunicationState.Offline &&
+            state.VisualState == RfidStationVisualState.Alarm ||
+            state.LifecycleState == PassageLifecycleState.Alarm ||
+            state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm ||
             !string.IsNullOrWhiteSpace(state.AlarmMessage));
         if (alarm is not null)
         {
@@ -841,31 +1076,36 @@ public partial class MainWindow : Window
             return;
         }
 
-        _monitorPage.SetRfidRuntimeStates(_rfidRuntimeCoordinator?.States.Values ?? Array.Empty<StationRuntimeState>());
+        var allRuntimeStates = GetAllRuntimeStates();
+        _monitorPage.SetRfidRuntimeStates(FilterCurrentYardStates(allRuntimeStates));
+        if (DateTimeOffset.Now - _lastRecentAlarmRefresh >= TimeSpan.FromSeconds(2))
+        {
+            RefreshRecentAlarmHistory();
+        }
         _monitorPage.SetRfidPollingInfo(
             _loadedProject?.RfidSettings.PollIntervalMs ?? 200,
-            _rfidPoller?.EndpointStatuses.Values ?? Array.Empty<RfidStationPollingStatus>());
+            FilterCurrentYardPollingStatuses(GetAllPollingStatuses()));
         _communicationPage.SetStationStatuses(
-            _rfidPoller?.EndpointStatuses.Values ?? Array.Empty<RfidStationPollingStatus>());
-        _statisticsPage?.SetRuntimeStates(_rfidRuntimeCoordinator?.States.Values ?? Array.Empty<StationRuntimeState>());
+            GetAllPollingStatuses());
+        _statisticsPage?.SetRuntimeStates(GetAllRuntimeStates());
         _monitorPage.SetSystemRfidStatus(_rfidListenerHealthy);
         UpdateHeaderStatusIndicators();
     }
 
     private async Task SendCommunicationTestAsync(RfidStationConfig station, RfidPollCommand command)
     {
-        if (_rfidUdpTransport is null)
+        if (command == RfidPollCommand.Clear && !_adminModeService.IsAdmin)
         {
-            throw new InvalidOperationException("RFID UDP 监听通道尚未就绪。");
+            throw new InvalidOperationException("发送清空命令需要管理员模式。");
         }
 
-        if (!station.TryResolveEndpoint(out var endpoint))
+        var context = _yardCommunicationManager?.FindContextForStation(station);
+        if (context is null)
         {
-            throw new InvalidOperationException($"RFID基站端点配置无效：{station.StationId}。");
+            throw new InvalidOperationException($"未找到基站所属的站场通信上下文：{station.StationId}。");
         }
 
-        var request = RfidRequestFrameBuilder.Build(station, command);
-        await _rfidUdpTransport.SendAsync(request, endpoint, CancellationToken.None);
+        await context.SendAsync(station, command, CancellationToken.None);
     }
 
     private void RefreshHistoricalStatistics()
@@ -877,7 +1117,11 @@ public partial class MainWindow : Window
 
         try
         {
-            _monitorPage.SetHistoricalStatistics(_passageRecordStore.GetStatistics(DateTimeOffset.Now));
+            _monitorPage.SetHistoricalStatistics(YardPassageFilter.BuildStatistics(
+                _passageRecordStore.Records,
+                DateTimeOffset.Now,
+                GetCurrentYardStationIds()));
+            RefreshRecentAlarmHistory();
             _statisticsPage?.Refresh();
             _lastStatisticsRefresh = DateTimeOffset.Now;
         }
@@ -887,12 +1131,123 @@ public partial class MainWindow : Window
         }
     }
 
-    private RfidRuntimeCoordinator? CreateRfidRuntimeCoordinator(ProjectConfig project, RfidSettings runtimeSettings)
+    private void RefreshRecentAlarmHistory()
     {
-        var stations = _acceptanceOptions.Enabled ? CreateAcceptanceStations() : project.RfidStations;
-        return stations.Count(station => station.Enabled) == 0
-            ? null
-            : new RfidRuntimeCoordinator(stations, runtimeSettings, _passageRecordStore);
+        if (_monitorPage is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = _passageRecordStore.Query(new PassageQuery
+            {
+                IncludeWarnings = true,
+                StationIds = GetCurrentYardStationIds(),
+                PageIndex = 0,
+                PageSize = 6
+            });
+            _monitorPage.SetRecentAlarmRecords(FilterCurrentYardPassages(result.Items));
+            _lastRecentAlarmRefresh = DateTimeOffset.Now;
+        }
+        catch (Exception exception)
+        {
+            ((App)Application.Current).Logger.Error("读取最近报警记录失败。", exception);
+        }
+    }
+
+    private void OnCurrentYardContextChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not (nameof(CurrentYardContext.CurrentYardId) or nameof(CurrentYardContext.IsGlobalOverview)))
+        {
+            return;
+        }
+
+        ApplyCurrentYardDisplayScope();
+        UpdateRecognitionStatus();
+        UpdateRfidRuntimeUi();
+    }
+
+    private void ApplyCurrentYardDisplayScope()
+    {
+        if (_monitorPage is null || _yardRfidStationResolver is null)
+        {
+            return;
+        }
+
+        var scope = GetCurrentYardScope();
+        if (scope is null)
+        {
+            return;
+        }
+
+        _monitorPage.SetRfidDisplayScope(scope.RfidStations);
+        _monitorPage.SetRfidRuntimeStates(FilterCurrentYardStates(GetAllRuntimeStates()));
+        _monitorPage.SetRfidPollingInfo(
+            _loadedProject?.RfidSettings.PollIntervalMs ?? 200,
+            FilterCurrentYardPollingStatuses(GetAllPollingStatuses()));
+        var stationIds = scope.IsGlobal ? null : scope.RfidStationIds;
+        var selectedYardId = scope.IsGlobal ? null : scope.YardId;
+        _settingsPage?.SetSelectedYard(selectedYardId);
+        _communicationPage.SetDisplayScope(stationIds, selectedYardId);
+        _historyPage?.SetDisplayScope(stationIds, selectedYardId);
+        _alarmHistoryPage?.SetDisplayScope(stationIds, selectedYardId);
+        _statisticsPage?.SetDisplayScope(stationIds, selectedYardId);
+        RefreshRecentAlarmHistory();
+    }
+
+    private IReadOnlyList<string>? GetCurrentYardStationIds()
+    {
+        var scope = GetCurrentYardScope();
+        return scope is null || scope.IsGlobal ? null : scope.RfidStationIds;
+    }
+
+    private YardRfidStationScope? GetCurrentYardScope()
+    {
+        if (_yardRfidStationResolver is null)
+        {
+            return null;
+        }
+
+        return _acceptanceOptions.Enabled || _currentYardContext.IsGlobalOverview
+            ? _yardRfidStationResolver.ResolveAll()
+            : _yardRfidStationResolver.Resolve(_currentYardContext.CurrentYardId!);
+    }
+
+    private IEnumerable<StationRuntimeState> FilterCurrentYardStates(IEnumerable<StationRuntimeState> states)
+    {
+        var scope = GetCurrentYardScope();
+        if (scope is null || scope.IsGlobal)
+        {
+            return states;
+        }
+
+        var visibleRfidStationIds = new HashSet<string>(scope.RfidStationIds, StringComparer.OrdinalIgnoreCase);
+        return states.Where(state => visibleRfidStationIds.Contains(state.StationId));
+    }
+
+    private IEnumerable<RfidStationPollingStatus> FilterCurrentYardPollingStatuses(IEnumerable<RfidStationPollingStatus> statuses)
+    {
+        var scope = GetCurrentYardScope();
+        if (scope is null || scope.IsGlobal)
+        {
+            return statuses;
+        }
+
+        var visibleRfidStationIds = new HashSet<string>(scope.RfidStationIds, StringComparer.OrdinalIgnoreCase);
+        return statuses.Where(status => visibleRfidStationIds.Contains(status.StationId));
+    }
+
+    private IEnumerable<PassageRecord> FilterCurrentYardPassages(IEnumerable<PassageRecord> records)
+    {
+        var scope = GetCurrentYardScope();
+        if (scope is null || scope.IsGlobal)
+        {
+            return records;
+        }
+
+        var visibleRfidStationIds = new HashSet<string>(scope.RfidStationIds, StringComparer.OrdinalIgnoreCase);
+        return records.Where(record => visibleRfidStationIds.Contains(record.StationId));
     }
 
     private RfidSettings GetRuntimeSettings(ProjectConfig project) => _acceptanceOptions.Enabled
@@ -905,29 +1260,81 @@ public partial class MainWindow : Window
         }
         : project.RfidSettings;
 
-    private IReadOnlyList<RfidStationConfig> CreateAcceptanceStations() => new[]
+    private IReadOnlyList<StationRuntimeState> GetAllRuntimeStates() =>
+        _yardCommunicationManager?.GetRuntimeStates() ?? Array.Empty<StationRuntimeState>();
+
+    private IReadOnlyList<RfidStationPollingStatus> GetAllPollingStatuses() =>
+        _yardCommunicationManager?.GetPollingStatuses() ?? Array.Empty<RfidStationPollingStatus>();
+
+    private bool IsCommunicationHealthy()
     {
-        CreateAcceptanceStation(0x01),
-        CreateAcceptanceStation(0x04)
+        if (_yardCommunicationManager is null || _yardCommunicationManager.Contexts.Count == 0)
+        {
+            return false;
+        }
+
+        var enabledContexts = GetCurrentYardCommunicationContexts()
+            .Where(context => context.Configuration.Enabled)
+            .ToArray();
+        return enabledContexts.Length > 0 &&
+            enabledContexts.All(context => context.IsRunning && string.IsNullOrWhiteSpace(context.LastError));
+    }
+
+    private IEnumerable<YardCommunicationContext> GetCurrentYardCommunicationContexts()
+    {
+        if (_yardCommunicationManager is null ||
+            _acceptanceOptions.Enabled ||
+            _currentYardContext.IsGlobalOverview)
+        {
+            return _yardCommunicationManager?.Contexts.Values ?? Array.Empty<YardCommunicationContext>();
+        }
+
+        var current = _yardCommunicationManager.GetContext(_currentYardContext.CurrentYardId!);
+        return current is null ? Array.Empty<YardCommunicationContext>() : new[] { current };
+    }
+
+    private IReadOnlyList<YardCommunicationConfig> CreateAcceptanceYardCommunications() => new[]
+    {
+        new YardCommunicationConfig
+        {
+            YardId = "560",
+            ListenIp = _acceptanceOptions.ListenAddress.ToString(),
+            ListenPort = _acceptanceOptions.ListenPort,
+            Enabled = true
+        },
+        new YardCommunicationConfig
+        {
+            YardId = "620",
+            ListenIp = _acceptanceOptions.ListenAddress.ToString(),
+            ListenPort = _acceptanceOptions.ListenPort620,
+            Enabled = true
+        }
     };
 
-    private RfidStationConfig CreateAcceptanceStation(byte address) => new()
+    private IReadOnlyList<RfidStationConfig> CreateAcceptanceStations() => new[]
+    {
+        CreateAcceptanceStation(0x01, "560", _acceptanceOptions.SimulatorPort),
+        CreateAcceptanceStation(0x04, "620", _acceptanceOptions.SimulatorPort620)
+    };
+
+    private RfidStationConfig CreateAcceptanceStation(byte address, string yardId, int simulatorPort) => new()
     {
         StationId = $"ACCEPTANCE-RFID-{address:X2}",
         Name = $"验收基站 {address:X2}",
+        YardId = yardId,
         ProtocolAddress = address,
         Enabled = true,
         Mode = 0x04,
         CommandBytes = new byte[4],
         RequestPayload = new byte[28],
         IpAddress = _acceptanceOptions.SimulatorAddress.ToString(),
-        Port = _acceptanceOptions.SimulatorPort,
-        DestinationEndpoint = new IPEndPoint(_acceptanceOptions.SimulatorAddress, _acceptanceOptions.SimulatorPort)
+        Port = simulatorPort,
+        DestinationEndpoint = new IPEndPoint(_acceptanceOptions.SimulatorAddress, simulatorPort)
     };
 
     private void UpdateHeaderStatusIndicators()
     {
-        var stationStates = _rfidRuntimeCoordinator?.States.Values.ToArray() ?? Array.Empty<StationRuntimeState>();
+        var stationStates = FilterCurrentYardStates(GetAllRuntimeStates()).ToArray();
         var stationStatus = GetRfidStatus(stationStates);
         var systemStatus = !_rfidListenerHealthy
             ? (StatusIndicatorState.Error, "系统异常")
@@ -944,7 +1351,7 @@ public partial class MainWindow : Window
         ApplyStatusIndicator(
             HeaderExternalStatusDot,
             HeaderExternalStatusText,
-            _externalInterfaceAvailable ? "外部接口正常" : "外部接口未接入",
+            _externalInterfaceAvailable ? "外部接口正常" : "外部接口未配置",
             _externalInterfaceAvailable ? StatusIndicatorState.Healthy : StatusIndicatorState.Unavailable);
     }
 

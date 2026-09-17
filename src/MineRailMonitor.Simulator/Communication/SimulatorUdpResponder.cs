@@ -15,6 +15,9 @@ public sealed class SimulatorUdpResponder : IDisposable
 
     public IPEndPoint LocalEndPoint { get; }
 
+    // Read-only UI telemetry hook. It does not alter the request/response flow.
+    public event Action<IPEndPoint, byte[], byte[]?>? PacketHandled;
+
     public async Task RunAsync(Func<byte[], byte[]?> responseFactory, CancellationToken cancellationToken)
     {
         if (responseFactory is null)
@@ -33,6 +36,8 @@ public sealed class SimulatorUdpResponder : IDisposable
                 {
                     await _client.SendAsync(response, response.Length, request.RemoteEndPoint).ConfigureAwait(false);
                 }
+
+                PacketHandled?.Invoke(request.RemoteEndPoint, request.Buffer, response);
             }
         }
         catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)

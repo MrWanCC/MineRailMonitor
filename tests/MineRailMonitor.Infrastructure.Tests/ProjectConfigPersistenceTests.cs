@@ -7,7 +7,7 @@ namespace MineRailMonitor.Infrastructure.Tests;
 public sealed class ProjectConfigPersistenceTests
 {
     [Fact]
-    public async Task Saves_coordinates_without_dropping_unknown_fields_or_null_protocol_address()
+    public async Task Saves_coordinates_without_dropping_unknown_fields_or_map_protocol_configuration()
     {
         using var project = TemporaryProject.Create(twoStations: false);
         var service = CreateService();
@@ -23,7 +23,7 @@ public sealed class ProjectConfigPersistenceTests
         var json = File.ReadAllText(project.Station560Path);
         Assert.Contains("unknown-station-value", json, StringComparison.Ordinal);
         Assert.Contains("unknown-device-value", json, StringComparison.Ordinal);
-        Assert.Contains("\"ProtocolAddress\": null", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProtocolAddress", json, StringComparison.Ordinal);
 
         var reloaded = await service.LoadAsync(project.Path);
         var savedDevice = Assert.Single(reloaded.Project!.Stations.Single().Devices);
@@ -184,7 +184,7 @@ public sealed class ProjectConfigPersistenceTests
               "Id": "560",
               "Name": "-560 站场",
               "Devices": [
-                { "Id": "map-rfid-1", "Name": "旧名称", "Type": "RfidStation", "StationId": "560", "ProtocolAddress": "01", "CadX": 1, "CadY": 2, "Enabled": true }
+                { "Id": "map-rfid-1", "Name": "旧名称", "Type": "RfidStation", "StationId": "560", "ProtocolAddress": "01", "IpAddress": "192.0.2.10", "Port": 62001, "CommunicationState": "Online", "LastResponseAt": "2026-09-11T10:00:00+08:00", "CadX": 1, "CadY": 2, "Enabled": true }
               ]
             }
             """;
@@ -204,6 +204,165 @@ public sealed class ProjectConfigPersistenceTests
         Assert.True(save.Succeeded, string.Join(Environment.NewLine, save.Errors));
         var savedJson = File.ReadAllText(project.Station560Path);
         Assert.Contains("\"RfidStationId\": \"RFID-01\"", savedJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProtocolAddress", savedJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Refuses_to_create_a_new_cross_yard_duplicate_rfid_binding_when_saving()
+    {
+        const string manifest = """
+            {
+              "Id": "Temporary",
+              "Name": "Temporary Project",
+              "DefaultStationId": "560",
+              "RfidStations": [
+                { "StationId": "RFID-01", "Name": "一号读卡站", "IpAddress": "127.0.0.1", "Port": 10001, "ProtocolAddress": 1, "Enabled": true },
+                { "StationId": "RFID-02", "Name": "二号读卡站", "IpAddress": "127.0.0.1", "Port": 10002, "ProtocolAddress": 2, "Enabled": true }
+              ],
+              "Stations": [
+                { "Id": "560", "ConfigFile": "stations/560.json" },
+                { "Id": "620", "ConfigFile": "stations/620.json" }
+              ]
+            }
+            """;
+        const string station560Json = """
+            {
+              "Id": "560",
+              "Name": "-560 站场",
+              "Devices": [
+                { "Id": "point-a", "Name": "卸矿站", "Type": "RfidStation", "StationId": "560", "RfidStationId": "RFID-01", "Enabled": true }
+              ]
+            }
+            """;
+        const string station620Json = """
+            {
+              "Id": "620",
+              "Name": "-620 站场",
+              "Devices": []
+            }
+            """;
+        using var project = TemporaryProject.Create(
+            twoStations: true,
+            twoDevices: false,
+            station560Json: station560Json,
+            manifest: manifest);
+        File.WriteAllText(project.Station620Path, station620Json);
+        var service = CreateService();
+        var loaded = await service.LoadAsync(project.Path);
+        var station620 = loaded.Project!.Stations.Single(station => station.Id == "620");
+        station620.Devices = new[]
+        {
+            new DeviceConfig
+            {
+                Id = "point-b",
+                Name = "三号引坡",
+                Type = DeviceType.RfidStation,
+                StationId = "620",
+                RfidStationId = "RFID-01",
+                Enabled = true
+            }
+        };
+
+        var save = await service.SaveStationAsync(project.Path, station620);
+
+        Assert.False(save.Succeeded);
+        Assert.Contains(save.Errors, error => error.Contains("重复绑定"));
+        Assert.DoesNotContain("\"point-b\"", File.ReadAllText(project.Station620Path));
+    }
+
+    [Fact]
+    public async Task Saves_and_reloads_rfid_station_yard_ownership()
+    {
+        const string manifest = """
+            {
+              "Id": "Temporary",
+              "Name": "Temporary Project",
+              "DefaultStationId": "560",
+              "RfidStations": [
+                { "StationId": "RFID-01", "Name": "一号读卡站", "YardId": "560", "IpAddress": "127.0.0.1", "Port": 62001, "ProtocolAddress": 1, "Enabled": true }
+              ],
+              "Stations": [
+                { "Id": "560", "ConfigFile": "stations/560.json" },
+                { "Id": "620", "ConfigFile": "stations/620.json" }
+              ]
+            }
+            """;
+        using var project = TemporaryProject.Create(true, false, manifest: manifest);
+        var service = CreateService();
+        var loaded = await service.LoadAsync(project.Path);
+        var station = Assert.Single(loaded.Project!.RfidStations);
+
+        Assert.Equal("560", station.YardId);
+
+        station.YardId = "620";
+        var save = await service.SaveRfidStationsAsync(project.Path, new[] { station });
+
+        Assert.True(save.Succeeded, string.Join(Environment.NewLine, save.Errors));
+        var reloaded = await service.LoadAsync(project.Path);
+        Assert.Equal("620", Assert.Single(reloaded.Project!.RfidStations).YardId);
+    }
+
+    [Fact]
+    public async Task Refuses_to_save_station_ownership_that_conflicts_with_map_binding()
+    {
+        const string manifest = """
+            {
+              "Id": "Temporary",
+              "Name": "Temporary Project",
+              "DefaultStationId": "560",
+              "RfidStations": [
+                { "StationId": "RFID-01", "Name": "一号读卡站", "YardId": "620", "IpAddress": "127.0.0.1", "Port": 62001, "ProtocolAddress": 1, "Enabled": true }
+              ],
+              "Stations": [
+                { "Id": "560", "ConfigFile": "stations/560.json" },
+                { "Id": "620", "ConfigFile": "stations/620.json" }
+              ]
+            }
+            """;
+        const string station560Json = """
+            {
+              "Id": "560",
+              "Name": "-560 站场",
+              "Devices": [
+                { "Id": "point-a", "Name": "卸矿站", "Type": "RfidStation", "StationId": "560", "RfidStationId": "RFID-01", "Enabled": true }
+              ]
+            }
+            """;
+        using var project = TemporaryProject.Create(true, false, station560Json, manifest);
+        var service = CreateService();
+        var loaded = await service.LoadAsync(project.Path);
+        var station = Assert.Single(loaded.Project!.RfidStations);
+        var originalManifest = File.ReadAllText(System.IO.Path.Combine(project.Path, "project.json"));
+
+        var save = await service.SaveRfidStationsAsync(project.Path, new[] { station });
+
+        Assert.False(save.Succeeded);
+        Assert.Contains(save.Errors, error => error.IndexOf("其它站场", StringComparison.Ordinal) >= 0);
+        Assert.Equal(originalManifest, File.ReadAllText(System.IO.Path.Combine(project.Path, "project.json")));
+    }
+
+    [Fact]
+    public async Task Reports_duplicate_rfid_station_ids_when_loading_project_manifest()
+    {
+        const string manifest = """
+            {
+              "Id": "Temporary",
+              "Name": "Temporary Project",
+              "DefaultStationId": "560",
+              "RfidStations": [
+                { "StationId": "RFID-04", "Name": "四号读卡站", "IpAddress": "127.0.0.1", "Port": 10004, "ProtocolAddress": 4, "Enabled": true },
+                { "StationId": "rfid-04", "Name": "四号读卡站副本", "IpAddress": "127.0.0.1", "Port": 10014, "ProtocolAddress": 14, "Enabled": true }
+              ],
+              "Stations": [ { "Id": "560", "ConfigFile": "stations/560.json" } ]
+            }
+            """;
+        using var project = TemporaryProject.Create(false, false, manifest: manifest);
+        var service = CreateService();
+
+        var result = await service.LoadAsync(project.Path);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Errors, error => error.IndexOf("RFID基站编号重复：RFID-04", StringComparison.OrdinalIgnoreCase) >= 0);
     }
 
     private static ProjectConfigService CreateService() =>

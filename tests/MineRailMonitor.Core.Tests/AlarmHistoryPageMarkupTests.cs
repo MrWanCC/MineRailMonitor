@@ -12,6 +12,8 @@ public sealed class AlarmHistoryPageMarkupTests
         Assert.DoesNotContain("<TextBox x:Name=\"FromDate", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("<TextBox x:Name=\"ToDate", markup, StringComparison.Ordinal);
         Assert.Contains("StationFilter", markup, StringComparison.Ordinal);
+        Assert.Contains("站场范围", markup, StringComparison.Ordinal);
+        Assert.Contains("YardFilter", markup, StringComparison.Ordinal);
         Assert.Contains("HeadRfidFilter", markup, StringComparison.Ordinal);
         Assert.Contains("QueryButton", markup, StringComparison.Ordinal);
         Assert.Contains("ResetButton", markup, StringComparison.Ordinal);
@@ -26,11 +28,12 @@ public sealed class AlarmHistoryPageMarkupTests
     }
 
     [Fact]
-    public void Alarm_page_queries_only_uncoupling_alarms_and_calculates_missing_count()
+    public void Alert_page_queries_warnings_and_uncoupling_alarms_and_calculates_missing_count()
     {
         var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "AlarmHistoryPage.xaml.cs"));
 
-        Assert.Contains("Outcome = PassageOutcome.UncouplingAlarm", code, StringComparison.Ordinal);
+        Assert.Contains("IncludeWarnings = true", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Outcome = PassageOutcome.UncouplingAlarm", code, StringComparison.Ordinal);
         Assert.Contains("Math.Max", code, StringComparison.Ordinal);
         Assert.Contains("record.ExpectedVehicleCount - record.DetectedVehicleCount", code, StringComparison.Ordinal);
         Assert.Contains("ToString(\"X4\")", code, StringComparison.Ordinal);
@@ -39,6 +42,9 @@ public sealed class AlarmHistoryPageMarkupTests
         Assert.Contains("FromDatePicker.SelectedDate", code, StringComparison.Ordinal);
         Assert.Contains("ToDatePicker.SelectedDate", code, StringComparison.Ordinal);
         Assert.Contains("StartOfDay", code, StringComparison.Ordinal);
+        Assert.Contains("SetYardOptions", code, StringComparison.Ordinal);
+        Assert.Contains("RfidYardFilter", code, StringComparison.Ordinal);
+        Assert.Contains("RfidStationIdentity.GetDisplayId", code, StringComparison.Ordinal);
     }
 
     [Fact]

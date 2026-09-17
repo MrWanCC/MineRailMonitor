@@ -268,7 +268,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             if (!state.LastResponseAt.HasValue || now - state.LastResponseAt.Value >= _policy.OfflineTimeout)
             {
                 state.CommunicationState = StationCommunicationState.Offline;
-                state.VisualState = RfidStationVisualState.Offline;
+                UpdateVisualState(state);
                 continue;
             }
 
@@ -550,6 +550,10 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
     private void ResetToIdle(StationRuntimeState state)
     {
+        var keepAlarmVisual = state.VisualState == RfidStationVisualState.Alarm ||
+                              state.LifecycleState == PassageLifecycleState.Alarm ||
+                              state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm;
+
         state.LifecycleState = PassageLifecycleState.Idle;
         state.PendingClear = false;
         state.ConsecutiveEmptyReads = 0;
@@ -568,7 +572,14 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         state.PersistenceErrorMessage = null;
         state.PersistenceAttemptCount = 0;
         state.ClearPersistenceAttemptCount = 0;
-        UpdateVisualState(state);
+        if (keepAlarmVisual)
+        {
+            state.VisualState = RfidStationVisualState.Alarm;
+        }
+        else
+        {
+            UpdateVisualState(state);
+        }
     }
 
     private void AddWarning(StationRuntimeState state, string warning)
@@ -590,6 +601,22 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
     private static void UpdateVisualState(StationRuntimeState state)
     {
+        // Keep an uncoupling alarm visible while the clear handshake and empty-slot
+        // confirmation are still in progress. The lifecycle continues normally;
+        // this only preserves the alarm indication for the visual layer.
+        if (state.LifecycleState == PassageLifecycleState.Alarm ||
+            state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm)
+        {
+            state.VisualState = RfidStationVisualState.Alarm;
+            return;
+        }
+
+        if (state.LifecycleState == PassageLifecycleState.Idle &&
+            state.VisualState == RfidStationVisualState.Alarm)
+        {
+            return;
+        }
+
         if (state.CommunicationState == StationCommunicationState.Offline)
         {
             state.VisualState = RfidStationVisualState.Offline;

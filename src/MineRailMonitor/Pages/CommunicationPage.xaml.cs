@@ -430,10 +430,19 @@ public partial class CommunicationPage : UserControl
             .Cast<RfidStationPollingStatus>()
             .ToArray();
         var onlineCount = statuses.Count(status => status.IsOnline);
+        var timeoutCount = statuses.Sum(status => status.TimeoutCount);
+        var responseTimes = statuses
+            .Where(status => status.LastResponseMilliseconds.HasValue)
+            .Select(status => status.LastResponseMilliseconds!.Value)
+            .ToArray();
         OverviewStationCountText.Text = visibleStations.Count.ToString(CultureInfo.InvariantCulture);
         OverviewOnlineCountText.Text = onlineCount.ToString(CultureInfo.InvariantCulture);
         OverviewOfflineCountText.Text = Math.Max(0, visibleStations.Count - onlineCount).ToString(CultureInfo.InvariantCulture);
-        OverviewTimeoutCountText.Text = statuses.Sum(status => status.TimeoutCount).ToString(CultureInfo.InvariantCulture);
+        OverviewResponseTimeText.Text = responseTimes.Length == 0
+            ? "-"
+            : $"{responseTimes.Average().ToString("0", CultureInfo.InvariantCulture)}ms";
+        OverviewTimeoutCountText.Text = timeoutCount.ToString(CultureInfo.InvariantCulture);
+        OverviewTimeoutCountRun.Text = timeoutCount.ToString(CultureInfo.InvariantCulture);
     }
 
     private void UpdateSelectedDiagnostic(RfidStationConfig? station, RfidStationPollingStatus? status)

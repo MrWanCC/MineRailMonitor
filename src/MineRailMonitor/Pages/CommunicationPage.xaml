@@ -43,18 +43,48 @@
             <Setter Property="MinHeight" Value="30" />
             <Setter Property="Padding" Value="12,0" />
         </Style>
+        <Style x:Key="CommunicationTableTextElementStyle" TargetType="TextBlock" BasedOn="{StaticResource DataGridTextElementStyle}">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextAlignment" Value="Left" />
+        </Style>
+        <Style x:Key="CommunicationTableCenterTextElementStyle" TargetType="TextBlock" BasedOn="{StaticResource DataGridTextElementStyle}">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="CommunicationLogListStyle" TargetType="ListView">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+        </Style>
+        <Style x:Key="CommunicationLogRowStyle" TargetType="ListViewItem">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="BorderBrush" Value="{StaticResource GridLineBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#132D45" />
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{StaticResource AccentButtonBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <Grid Margin="12,10">
         <Grid.RowDefinitions>
-            <RowDefinition Height="58" />
-            <RowDefinition Height="58" />
-            <RowDefinition Height="72" />
+            <RowDefinition Height="52" />
+            <RowDefinition Height="52" />
+            <RowDefinition Height="64" />
+            <RowDefinition Height="260" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="54" />
+            <RowDefinition Height="64" />
         </Grid.RowDefinitions>
 
-        <Border x:Name="CommunicationHeaderBar" Grid.Row="0" Style="{StaticResource CommunicationHeaderStyle}" Margin="0,0,0,8">
+        <Border x:Name="CommunicationHeaderBar" Grid.Row="0" Style="{StaticResource CommunicationHeaderStyle}" Margin="0,0,0,6">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -94,7 +124,7 @@
             </Grid>
         </Border>
 
-        <Border x:Name="CommunicationStatusBar" Grid.Row="1" Style="{StaticResource CommunicationSectionStyle}" Padding="12,0" Margin="0,0,0,8">
+        <Border x:Name="CommunicationStatusBar" Grid.Row="1" Style="{StaticResource CommunicationSectionStyle}" Padding="12,0" Margin="0,0,0,6">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -125,7 +155,7 @@
             </Grid>
         </Border>
 
-        <Border x:Name="CommunicationOverviewBar" Grid.Row="2" Style="{StaticResource CommunicationSectionStyle}" Padding="8" Margin="0,0,0,8">
+        <Border x:Name="CommunicationOverviewBar" Grid.Row="2" Style="{StaticResource CommunicationSectionStyle}" Padding="7" Margin="0,0,0,6">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -162,183 +192,95 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="3">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.15*" />
-                <ColumnDefinition Width="1.85*" />
-            </Grid.ColumnDefinitions>
-
-            <Border Grid.Column="0" Style="{StaticResource CommunicationSectionStyle}" Margin="0,0,8,0" Padding="8">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="34" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="154" />
-                    </Grid.RowDefinitions>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="4" Height="22" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
-                        <TextBlock Text="基站通信状态" Style="{StaticResource SectionTitleStyle}" />
-                    </StackPanel>
-                    <DataGrid x:Name="StationStatusGrid" Grid.Row="1" Style="{StaticResource IndustrialDataGridStyle}"
-                              AutoGenerateColumns="False" HeadersVisibility="Column" IsReadOnly="True"
-                              SelectionMode="Single" SelectionUnit="FullRow" SelectionChanged="OnStationSelectionChanged"
-                              ScrollViewer.HorizontalScrollBarVisibility="Auto">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="基站" Binding="{Binding StationText}" Width="150" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="协议地址" Binding="{Binding ProtocolAddressText}" Width="72" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="IP / 端口" Binding="{Binding EndpointText}" Width="140" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="状态" Binding="{Binding StatusText}" Width="70" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="最后发送" Binding="{Binding LastSentText}" Width="92" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="最后接收" Binding="{Binding LastReceivedText}" Width="92" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="响应耗时" Binding="{Binding ResponseMillisecondsText}" Width="78" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="发送" Binding="{Binding SentCountText}" Width="62" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="接收" Binding="{Binding ReceivedCountText}" Width="62" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="超时" Binding="{Binding TimeoutCountText}" Width="62" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="连续超时" Binding="{Binding ConsecutiveTimeoutCountText}" Width="78" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="最后错误" Binding="{Binding LastErrorText}" Width="150" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                        </DataGrid.Columns>
-                    </DataGrid>
-                    <TextBlock x:Name="NoStationText" Grid.Row="1" Text="暂无已配置 RFID 基站"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" IsHitTestVisible="False" />
-                    <Border x:Name="SelectedDiagnosticCard" Grid.Row="2" Background="#061E31" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,8,0,0">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="22" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-                            <TextBlock Text="选中基站诊断" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" />
-                            <UniformGrid Grid.Row="1" Rows="3" Columns="4">
-                                <StackPanel Margin="0,1,8,1">
-                                    <TextBlock Text="基站名称" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticStationText" Text="-" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                </StackPanel>
-                                <StackPanel Margin="0,1,8,1">
-                                    <TextBlock Text="YardId" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticYardText" Text="-" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                </StackPanel>
-                                <StackPanel Margin="0,1,8,1">
-                                    <TextBlock Text="IP" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticIpText" Text="-" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" FontFamily="Consolas" />
-                                </StackPanel>
-                                <StackPanel Margin="0,1,0,1">
-                                    <TextBlock Text="端口" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticPortText" Text="-" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" FontFamily="Consolas" />
-                                </StackPanel>
-                                <StackPanel Margin="0,1,8,1">
-                                    <TextBlock Text="协议地址" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticProtocolText" Text="-" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" FontFamily="Consolas" />
-                                </StackPanel>
-                                <StackPanel Margin="0,1,8,1">
-                                    <TextBlock Text="实时状态" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticStateText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontWeight="SemiBold" />
-                                </StackPanel>
-                                <StackPanel Margin="0,1,8,1">
-                                    <TextBlock Text="最后发送" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticLastSentText" Text="-" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" FontFamily="Consolas" />
-                                </StackPanel>
-                                <StackPanel Margin="0,1,0,1">
-                                    <TextBlock Text="最后接收" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticLastReceivedText" Text="-" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" FontFamily="Consolas" />
-                                </StackPanel>
-                                <StackPanel Margin="0,1,8,1">
-                                    <TextBlock Text="最近响应耗时" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticResponseText" Text="-" Foreground="{StaticResource AccentBrush}" FontSize="11" FontFamily="Consolas" />
-                                </StackPanel>
-                                <StackPanel Margin="0,1,8,1">
-                                    <TextBlock Text="连续超时" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticConsecutiveTimeoutText" Text="0" Foreground="{StaticResource WarningBrush}" FontSize="11" FontFamily="Consolas" />
-                                </StackPanel>
-                                <StackPanel Margin="0,1,8,1">
-                                    <TextBlock Text="最后错误" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticErrorText" Text="无" Foreground="{StaticResource WarningBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                </StackPanel>
-                                <StackPanel Margin="0,1,0,1">
-                                    <TextBlock Text="通信统计" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticCountsText" Text="发送 0 · 接收 0 · 超时 0" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" />
-                                </StackPanel>
-                            </UniformGrid>
-                        </Grid>
-                    </Border>
-                </Grid>
-            </Border>
-
-            <Grid Grid.Column="1">
+        <Border Grid.Row="3" Style="{StaticResource CommunicationSectionStyle}" Padding="8" Margin="0,0,0,6">
+            <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="210" />
+                    <RowDefinition Height="32" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-
-                <Grid Grid.Row="0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Border x:Name="LatestTxCard" Grid.Column="0" Style="{StaticResource CommunicationPacketCardStyle}" Margin="0,0,4,8">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="34" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-                            <Border Grid.Row="0" Style="{StaticResource CommunicationPacketHeaderStyle}" Background="#073B39">
-                                <DockPanel>
-                                    <TextBlock Text="最近 TX（发送报文）" Foreground="{StaticResource SuccessBrush}" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="LatestTxTimeText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontFamily="Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                </DockPanel>
-                            </Border>
-                            <StackPanel Grid.Row="1" Margin="10,8">
-                                <TextBlock x:Name="LatestTxSummaryText" Text="暂无发送报文" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
-                                <TextBlock x:Name="LatestTxLengthText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,5,0,6" />
-                                <Border Background="#061C2C" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="10,8">
-                                    <TextBlock x:Name="LatestTxHexText" Text="-" Style="{StaticResource CommunicationLogStyle}" Foreground="{StaticResource TextSecondaryBrush}" MaxHeight="54" />
-                                </Border>
-                            </StackPanel>
-                        </Grid>
-                    </Border>
-                    <Border x:Name="LatestRxCard" Grid.Column="1" Style="{StaticResource CommunicationPacketCardStyle}" Margin="4,0,0,8">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="34" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-                            <Border Grid.Row="0" Style="{StaticResource CommunicationPacketHeaderStyle}" Background="#07304A">
-                                <DockPanel>
-                                    <TextBlock Text="最近 RX（接收报文）" Foreground="{StaticResource AccentBrush}" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="LatestRxTimeText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontFamily="Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                </DockPanel>
-                            </Border>
-                            <StackPanel Grid.Row="1" Margin="10,8">
-                                <TextBlock x:Name="LatestRxSummaryText" Text="暂无接收报文" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
-                                <TextBlock x:Name="LatestRxLengthText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,5,0,6" />
-                                <Border Background="#061C2C" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="10,8">
-                                    <TextBlock x:Name="LatestRxHexText" Text="-" Style="{StaticResource CommunicationLogStyle}" Foreground="{StaticResource TextSecondaryBrush}" MaxHeight="54" />
-                                </Border>
-                            </StackPanel>
-                        </Grid>
-                    </Border>
+                <DockPanel VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <Border Width="4" Height="21" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                        <TextBlock Text="基站通信状态" Style="{StaticResource SectionTitleStyle}" FontSize="15" />
+                        <TextBlock Text="  ·  实时显示各基站通信情况" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Text="单击行查看诊断详情，点击测试发送读取命令" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                </DockPanel>
+                <Grid Grid.Row="1">
+                    <DataGrid x:Name="StationStatusGrid" Style="{StaticResource IndustrialDataGridStyle}"
+                              AutoGenerateColumns="False" HeadersVisibility="Column" IsReadOnly="True"
+                              SelectionMode="Single" SelectionUnit="FullRow" SelectionChanged="OnStationSelectionChanged"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="序号" Binding="{Binding RowNumberText}" Width="0.45*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="基站名称" Binding="{Binding StationText}" Width="1.7*" ElementStyle="{StaticResource CommunicationTableTextElementStyle}" />
+                            <DataGridTextColumn Header="协议地址" Binding="{Binding ProtocolAddressText}" Width="0.75*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="IP地址" Binding="{Binding IpText}" Width="1.15*" ElementStyle="{StaticResource CommunicationTableTextElementStyle}" />
+                            <DataGridTextColumn Header="端口" Binding="{Binding PortText}" Width="0.82*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="在线状态" Binding="{Binding StatusText}" Width="0.8*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="最后发送时间" Binding="{Binding LastSentText}" Width="1.1*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="最后接收时间" Binding="{Binding LastReceivedText}" Width="1.1*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="响应时间" Binding="{Binding ResponseMillisecondsText}" Width="0.78*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="发送次数" Binding="{Binding SentCountText}" Width="0.72*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="接收次数" Binding="{Binding ReceivedCountText}" Width="0.72*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="超时次数" Binding="{Binding TimeoutCountText}" Width="0.72*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="连续超时" Binding="{Binding ConsecutiveTimeoutCountText}" Width="0.78*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="无效帧" Binding="{Binding InvalidFrameCountText}" Width="0.66*" ElementStyle="{StaticResource CommunicationTableCenterTextElementStyle}" />
+                            <DataGridTextColumn Header="最后错误" Binding="{Binding LastErrorText}" Width="1.2*" ElementStyle="{StaticResource CommunicationTableTextElementStyle}" />
+                            <DataGridTemplateColumn Header="操作" Width="0.62*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Content="测试" Height="23" Padding="8,0" Style="{StaticResource CommunicationActionButtonStyle}" Click="OnStationTestClick" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <TextBlock x:Name="NoStationText" Text="暂无已配置 RFID 基站"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" IsHitTestVisible="False" />
                 </Grid>
+            </Grid>
+        </Border>
 
-                <Border x:Name="CurrentFrameCard" Grid.Row="1" Style="{StaticResource CommunicationPacketCardStyle}">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="34" />
-                            <RowDefinition Height="*" />
-                            <RowDefinition Height="100" />
-                        </Grid.RowDefinitions>
-                        <Border Grid.Row="0" Style="{StaticResource CommunicationPacketHeaderStyle}">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <Border Width="4" Height="20" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,9,0" />
-                                <TextBlock Text="当前报文解析" Style="{StaticResource SectionTitleStyle}" FontSize="14" />
-                            </StackPanel>
-                        </Border>
-                        <Grid Grid.Row="1" Margin="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="180" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="160" />
-                            </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Background="#061E31" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="9,4">
-                                <Grid>
+        <Grid Grid.Row="4" Margin="0,0,0,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.55*" />
+                <ColumnDefinition Width="1*" />
+            </Grid.ColumnDefinitions>
+
+            <Border x:Name="SelectedDiagnosticCard" Grid.Column="0" Style="{StaticResource CommunicationSectionStyle}" Margin="0,0,6,0" Padding="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="35" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <DockPanel VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="4" Height="21" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                            <TextBlock Text="基站详细信息" Style="{StaticResource SectionTitleStyle}" FontSize="15" />
+                            <TextBlock x:Name="SelectedDiagnosticStationText" Text="-" Foreground="{StaticResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" Margin="16,0,0,0" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <TextBlock Text="状态" Style="{StaticResource CommunicationMetricLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <TextBlock x:Name="SelectedDiagnosticStateText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <TextBlock x:Name="SelectedDiagnosticOfflineDurationText" Text="" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DockPanel>
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.05*" />
+                            <ColumnDefinition Width="1.05*" />
+                            <ColumnDefinition Width="1.05*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="#061E31" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="10,7" Margin="0,0,5,0">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="24" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="基本信息" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" />
+                                <Grid Grid.Row="1">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="*" />
                                         <RowDefinition Height="*" />
@@ -349,17 +291,184 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="协议地址" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="FrameAddressText" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="8,0,0,0" />
-                                    <TextBlock Grid.Row="1" Text="模式" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="FrameModeText" Grid.Row="1" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="8,0,0,0" />
-                                    <TextBlock Grid.Row="2" Text="帧长度" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="FrameLengthText" Grid.Row="2" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="8,0,0,0" />
-                                    <TextBlock Grid.Row="3" Text="有效 RFID" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="FrameCountText" Grid.Row="3" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="8,0,0,0" />
+                                    <TextBlock Text="YardId" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticYardText" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Row="1" Text="协议地址" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticProtocolText" Grid.Row="1" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                    <TextBlock Grid.Row="2" Text="IP地址" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticIpText" Grid.Row="2" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                    <TextBlock Grid.Row="3" Text="端口" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticPortText" Grid.Row="3" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
                                 </Grid>
+                            </Grid>
+                        </Border>
+                        <Border Grid.Column="1" Background="#061E31" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="10,7" Margin="3,0">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="24" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="实时状态" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" />
+                                <Grid Grid.Row="1">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="最后发送" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticLastSentText" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                    <TextBlock Grid.Row="1" Text="最后接收" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticLastReceivedText" Grid.Row="1" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                    <TextBlock Grid.Row="2" Text="响应耗时" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticResponseText" Grid.Row="2" Grid.Column="1" Text="-" Foreground="{StaticResource AccentBrush}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                    <TextBlock Grid.Row="3" Text="连续超时" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticConsecutiveTimeoutText" Grid.Row="3" Grid.Column="1" Text="0" Foreground="{StaticResource WarningBrush}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+                        <Border Grid.Column="2" Background="#061E31" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="10,7" Margin="5,0,0,0">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="24" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="通信统计（自程序启动后）" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" />
+                                <Grid Grid.Row="1">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="发送次数" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticSentText" Grid.Column="1" Text="0" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" Margin="12,0,0,0" />
+                                    <TextBlock Grid.Row="1" Text="接收次数" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticReceivedText" Grid.Row="1" Grid.Column="1" Text="0" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" Margin="12,0,0,0" />
+                                    <TextBlock Grid.Row="2" Text="超时次数" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticTimeoutText" Grid.Row="2" Grid.Column="1" Text="0" Foreground="{StaticResource WarningBrush}" FontSize="11" Margin="12,0,0,0" />
+                                    <TextBlock Grid.Row="3" Text="最后错误" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="SelectedDiagnosticErrorText" Grid.Row="3" Grid.Column="1" Text="无" Foreground="{StaticResource WarningBrush}" FontSize="11" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border x:Name="RealtimeCommunicationLogCard" Grid.Column="1" Style="{StaticResource CommunicationSectionStyle}" Padding="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="34" />
+                        <RowDefinition Height="42" />
+                        <RowDefinition Height="28" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <DockPanel VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="4" Height="21" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                            <TextBlock Text="实时通信日志" Style="{StaticResource SectionTitleStyle}" FontSize="15" />
+                            <TextBlock Text="  ·  最近 50 条" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock Text="TX / RX" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border x:Name="LatestTxCard" Background="#073B39" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="0,0,3,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="最近 TX" Foreground="{StaticResource SuccessBrush}" FontSize="10" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="LatestTxSummaryText" Text="暂无发送报文" Foreground="{StaticResource TextPrimaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock x:Name="LatestTxLengthText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="9" Visibility="Collapsed" />
+                                    <TextBlock x:Name="LatestTxHexText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="9" Visibility="Collapsed" />
+                                </StackPanel>
+                                <TextBlock x:Name="LatestTxTimeText" Grid.Column="1" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" FontFamily="Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <Border x:Name="LatestRxCard" Grid.Column="1" Background="#07304A" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="3,0,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="最近 RX" Foreground="{StaticResource AccentBrush}" FontSize="10" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="LatestRxSummaryText" Text="暂无接收报文" Foreground="{StaticResource TextPrimaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock x:Name="LatestRxLengthText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="9" Visibility="Collapsed" />
+                                    <TextBlock x:Name="LatestRxHexText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="9" Visibility="Collapsed" />
+                                </StackPanel>
+                                <TextBlock x:Name="LatestRxTimeText" Grid.Column="1" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" FontFamily="Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                    <Grid Grid.Row="2" Background="{StaticResource DataGridHeaderBrush}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="78" />
+                            <ColumnDefinition Width="42" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="116" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="时间" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" VerticalAlignment="Center" Margin="8,0" />
+                        <TextBlock Grid.Column="1" Text="方向" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="数据内容" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="3" Text="说明" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" VerticalAlignment="Center" />
+                    </Grid>
+                    <ListView x:Name="CommunicationLogList" Grid.Row="3" Style="{StaticResource CommunicationLogListStyle}"
+                              ItemsSource="{Binding}" ItemContainerStyle="{StaticResource CommunicationLogRowStyle}">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="78" />
+                                        <ColumnDefinition Width="42" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="116" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center" Margin="8,0" />
+                                    <TextBlock Grid.Column="1" Text="{Binding DirectionText}" Foreground="{Binding DirectionBrush}" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding DataText}" Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                    <TextBlock Grid.Column="3" Text="{Binding DescriptionText}" Foreground="{Binding DescriptionBrush}" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                    <Expander x:Name="CurrentFrameCard" Grid.Row="4" Header="当前报文解析" Foreground="{StaticResource TextPrimaryBrush}" Background="#061E31" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="8,3" IsExpanded="False">
+                        <Grid MinHeight="170" Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="110" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="8,4">
+                                <StackPanel>
+                                    <TextBlock Text="协议地址" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                                    <TextBlock x:Name="FrameAddressText" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" />
+                                    <TextBlock Text="模式" Style="{StaticResource CommunicationMetricLabelStyle}" Margin="0,8,0,0" />
+                                    <TextBlock x:Name="FrameModeText" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" />
+                                    <TextBlock Text="帧长度" Style="{StaticResource CommunicationMetricLabelStyle}" Margin="0,8,0,0" />
+                                    <TextBlock x:Name="FrameLengthText" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" />
+                                    <TextBlock Text="有效 RFID" Style="{StaticResource CommunicationMetricLabelStyle}" Margin="0,8,0,0" />
+                                    <TextBlock x:Name="FrameCountText" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" />
+                                </StackPanel>
                             </Border>
-                            <Border Grid.Column="1" Background="#061E31" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Margin="8,0" Padding="6">
+                            <Border Grid.Column="1" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Margin="6,0" Padding="4">
                                 <ItemsControl x:Name="FrameRfidSlotsItemsControl">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
@@ -368,85 +477,97 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,1,1" Padding="8,0">
-                                                <TextBlock Text="{Binding}" Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
-                                            </Border>
+                                            <TextBlock Text="{Binding}" Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center" Margin="6,0" />
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                             </Border>
-                            <Border Grid.Column="2" Background="#061E31" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="9,4">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="*" />
-                                        <RowDefinition Height="*" />
-                                        <RowDefinition Height="*" />
-                                    </Grid.RowDefinitions>
+                            <Border Grid.Column="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="8,4">
+                                <StackPanel>
                                     <TextBlock Text="CRC" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="FrameCrcText" Grid.Row="0" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" HorizontalAlignment="Right" />
-                                    <TextBlock Grid.Row="1" Text="解析结果" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="FrameParseResultText" Grid.Row="1" Text="-" Foreground="{StaticResource SuccessBrush}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Right" />
-                                    <TextBlock x:Name="FrameDescriptionText" Grid.Row="2" Text="暂无报文" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                </Grid>
+                                    <TextBlock x:Name="FrameCrcText" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" />
+                                    <TextBlock Text="解析结果" Style="{StaticResource CommunicationMetricLabelStyle}" Margin="0,8,0,0" />
+                                    <TextBlock x:Name="FrameParseResultText" Text="-" Foreground="{StaticResource SuccessBrush}" FontSize="11" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="FrameDescriptionText" Text="暂无报文" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                </StackPanel>
                             </Border>
                         </Grid>
-                        <Border Grid.Row="2" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,1,0,0" Padding="8,4">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="22" />
-                                    <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-                                <TextBlock Text="报文日志（最近 50 条）" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" />
-                                <ListBox x:Name="RxListBox" Grid.Row="1" Background="Transparent" BorderThickness="0"
-                                         Foreground="{StaticResource TextPrimaryBrush}" ScrollViewer.VerticalScrollBarVisibility="Auto">
-                                    <ListBox.ItemContainerStyle>
-                                        <Style TargetType="ListBoxItem">
-                                            <Setter Property="Padding" Value="0,2" />
-                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                        </Style>
-                                    </ListBox.ItemContainerStyle>
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding}" Style="{StaticResource CommunicationLogStyle}" FontSize="10" MaxHeight="28" />
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                            </Grid>
-                        </Border>
-                        <TextBlock x:Name="LatestRxText" Visibility="Collapsed" />
-                    </Grid>
-                </Border>
-            </Grid>
+                    </Expander>
+                    <Expander Grid.Row="5" Header="原始报文日志" Foreground="{StaticResource TextPrimaryBrush}" Background="#061E31" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="8,3" IsExpanded="False">
+                        <ListBox x:Name="RxListBox" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextPrimaryBrush}" Height="120" Margin="0,5,0,0">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="0,2" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" Style="{StaticResource CommunicationLogStyle}" FontSize="10" MaxHeight="28" />
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Expander>
+                    <TextBlock x:Name="LatestRxText" Visibility="Collapsed" />
+                </Grid>
+            </Border>
         </Grid>
 
-        <Border x:Name="CommunicationStatsBar" Grid.Row="4" Style="{StaticResource CommunicationSectionStyle}" Padding="12,0" Margin="0,8,0,0">
+        <Border x:Name="CommunicationStatsBar" Grid.Row="5" Style="{StaticResource CommunicationSectionStyle}" Padding="10,0" Margin="0,0,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="1" />
-                    <ColumnDefinition Width="170" />
+                    <ColumnDefinition Width="135" />
                     <ColumnDefinition Width="1" />
-                    <ColumnDefinition Width="170" />
+                    <ColumnDefinition Width="135" />
+                    <ColumnDefinition Width="1" />
+                    <ColumnDefinition Width="135" />
+                    <ColumnDefinition Width="1" />
+                    <ColumnDefinition Width="135" />
+                    <ColumnDefinition Width="1" />
+                    <ColumnDefinition Width="135" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,18,0">
-                    <TextBlock Text="▣" Foreground="{StaticResource AccentBrush}" FontSize="20" Margin="0,0,10,0" />
+                    <Border Width="4" Height="20" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,9,0" />
                     <TextBlock Text="当前通信统计" Style="{StaticResource SectionTitleStyle}" FontSize="14" />
+                    <TextBlock Text="（当前范围）" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" Margin="5,3,0,0" />
                 </StackPanel>
                 <Border Grid.Column="1" Width="1" Height="28" Background="{StaticResource GridLineBrush}" />
-                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="18,0,0,0">
-                    <TextBlock Text="已配置基站" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                    <TextBlock x:Name="ConfiguredStationCountText" Text="0" Style="{StaticResource CommunicationMetricValueStyle}" Foreground="{StaticResource AccentBrush}" />
+                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="14,0,0,0">
+                    <TextBlock Text="发送总数" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                    <TextBlock x:Name="TotalSentCountText" Text="0" Style="{StaticResource CommunicationMetricValueStyle}" Foreground="{StaticResource AccentBrush}" />
                 </StackPanel>
                 <Border Grid.Column="3" Width="1" Height="28" Background="{StaticResource GridLineBrush}" />
-                <StackPanel Grid.Column="4" VerticalAlignment="Center" Margin="18,0,0,0">
-                    <TextBlock Text="日志条数" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                    <TextBlock x:Name="PacketLogCountText" Text="0 / 50" Style="{StaticResource CommunicationMetricValueStyle}" Foreground="{StaticResource SuccessBrush}" />
+                <StackPanel Grid.Column="4" VerticalAlignment="Center" Margin="14,0,0,0">
+                    <TextBlock Text="接收总数" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                    <TextBlock x:Name="TotalReceivedCountText" Text="0" Style="{StaticResource CommunicationMetricValueStyle}" Foreground="{StaticResource SuccessBrush}" />
                 </StackPanel>
-                <TextBlock Grid.Column="5" Text="选择基站后可发送读取 / 清空命令，收到数据后将在右侧显示原始帧与解析结果。"
+                <Border Grid.Column="5" Width="1" Height="28" Background="{StaticResource GridLineBrush}" />
+                <StackPanel Grid.Column="6" VerticalAlignment="Center" Margin="14,0,0,0">
+                    <TextBlock Text="超时总数" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                    <TextBlock x:Name="TotalTimeoutCountText" Text="0" Style="{StaticResource CommunicationMetricValueStyle}" Foreground="{StaticResource WarningBrush}" />
+                </StackPanel>
+                <Border Grid.Column="7" Width="1" Height="28" Background="{StaticResource GridLineBrush}" />
+                <StackPanel Grid.Column="8" VerticalAlignment="Center" Margin="14,0,0,0">
+                    <TextBlock Text="无效帧总数" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                    <TextBlock x:Name="TotalInvalidFrameCountText" Text="0" Style="{StaticResource CommunicationMetricValueStyle}" Foreground="{StaticResource WarningBrush}" />
+                </StackPanel>
+                <Border Grid.Column="9" Width="1" Height="28" Background="{StaticResource GridLineBrush}" />
+                <StackPanel Grid.Column="10" VerticalAlignment="Center" Margin="14,0,0,0">
+                    <TextBlock Text="在线率" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                    <TextBlock x:Name="OnlineRateText" Text="0%" Style="{StaticResource CommunicationMetricValueStyle}" Foreground="{StaticResource SuccessBrush}" />
+                </StackPanel>
+                <TextBlock Grid.Column="11" Text="统计自程序启动后累计；选择基站可查看单站诊断和报文解析。"
                            Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
                            HorizontalAlignment="Right" VerticalAlignment="Center" />
             </Grid>
         </Border>
+        <StackPanel Visibility="Collapsed">
+            <TextBlock x:Name="ConfiguredStationCountText" />
+            <TextBlock x:Name="SelectedDiagnosticCountsText" />
+            <TextBlock x:Name="PacketLogCountText" />
+        </StackPanel>
     </Grid>
 </UserControl>

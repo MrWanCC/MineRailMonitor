@@ -23,6 +23,11 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("OverviewOfflineCountText", markup, StringComparison.Ordinal);
         Assert.Contains("OverviewTimeoutCountText", markup, StringComparison.Ordinal);
         Assert.Contains("SelectedDiagnosticCard", markup, StringComparison.Ordinal);
+        Assert.Contains("RealtimeCommunicationLogCard", markup, StringComparison.Ordinal);
+        Assert.Contains("CommunicationLogList", markup, StringComparison.Ordinal);
+        Assert.Contains("TotalSentCountText", markup, StringComparison.Ordinal);
+        Assert.Contains("TotalReceivedCountText", markup, StringComparison.Ordinal);
+        Assert.Contains("TotalTimeoutCountText", markup, StringComparison.Ordinal);
         Assert.Contains("SelectedDiagnosticCountsText", markup, StringComparison.Ordinal);
         Assert.Contains("ConsecutiveTimeoutCountText", markup, StringComparison.Ordinal);
         Assert.Contains("LatestRxText", markup, StringComparison.Ordinal);
@@ -40,6 +45,7 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("UpdateDiagnosticsOverview", code, StringComparison.Ordinal);
         Assert.Contains("UpdateSelectedDiagnostic", code, StringComparison.Ordinal);
         Assert.Contains("OnStationSelectionChanged", code, StringComparison.Ordinal);
+        Assert.Contains("OnStationTestClick", code, StringComparison.Ordinal);
         Assert.Contains("RfidStationEndpointKey", code, StringComparison.Ordinal);
         Assert.DoesNotContain("item.StationAddress == station.ProtocolAddress", code, StringComparison.Ordinal);
     }

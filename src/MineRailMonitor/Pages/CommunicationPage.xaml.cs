@@ -265,6 +265,19 @@ public partial class CommunicationPage : UserControl
             return;
         }
 
+        await SelectStationAndTestAsync(row);
+    }
+
+    private async void OnSelectedStationTestClick(object sender, RoutedEventArgs e)
+    {
+        if (StationStatusGrid.SelectedItem is StationStatusRow row)
+        {
+            await SelectStationAndTestAsync(row);
+        }
+    }
+
+    private async Task SelectStationAndTestAsync(StationStatusRow row)
+    {
         _selectedStationId = row.StationId;
         StationStatusGrid.SelectedItem = row;
         var selectorItem = TestStationSelector.Items
@@ -450,17 +463,22 @@ public partial class CommunicationPage : UserControl
         if (station is null)
         {
             SelectedDiagnosticStationText.Text = "-";
+            SelectedDiagnosticBasicStationText.Text = "-";
             SelectedDiagnosticYardText.Text = "-";
             SelectedDiagnosticIpText.Text = "-";
             SelectedDiagnosticPortText.Text = "-";
             SelectedDiagnosticProtocolText.Text = "-";
             SelectedDiagnosticStateText.Text = "-";
             SelectedDiagnosticStateText.Foreground = (Brush)FindResource("TextSecondaryBrush");
+            SelectedDiagnosticInnerStateText.Text = "-";
+            SelectedDiagnosticInnerStateText.Foreground = (Brush)FindResource("TextSecondaryBrush");
             SelectedDiagnosticOfflineDurationText.Text = string.Empty;
+            SelectedDiagnosticInnerOfflineDurationText.Text = "-";
             SelectedDiagnosticLastSentText.Text = "-";
             SelectedDiagnosticLastReceivedText.Text = "-";
             SelectedDiagnosticResponseText.Text = "-";
-            SelectedDiagnosticConsecutiveTimeoutText.Text = "0";
+            SelectedDiagnosticConsecutiveTimeoutStatsText.Text = "0";
+            SelectedDiagnosticInvalidText.Text = "0";
             SelectedDiagnosticErrorText.Text = "无";
             SelectedDiagnosticSentText.Text = "0";
             SelectedDiagnosticReceivedText.Text = "0";
@@ -470,6 +488,7 @@ public partial class CommunicationPage : UserControl
         }
 
         SelectedDiagnosticStationText.Text = FormatStation(station);
+        SelectedDiagnosticBasicStationText.Text = FormatStation(station);
         SelectedDiagnosticYardText.Text = string.IsNullOrWhiteSpace(station.YardId) ? "-" : station.YardId;
         if (station.TryResolveEndpoint(out var endpoint))
         {
@@ -484,18 +503,29 @@ public partial class CommunicationPage : UserControl
 
         SelectedDiagnosticProtocolText.Text = $"0x{station.ProtocolAddress:X2}";
         SelectedDiagnosticStateText.Text = FormatStatus(status);
-        SelectedDiagnosticStateText.Foreground = status?.LastSentAt.HasValue != true
+        var stateBrush = status?.LastSentAt.HasValue != true
             ? (Brush)FindResource("TextSecondaryBrush")
-            : status.IsOnline
+            : status?.IsOnline == true
                 ? (Brush)FindResource("SuccessBrush")
                 : (Brush)FindResource("AlarmBrush");
-        SelectedDiagnosticOfflineDurationText.Text = FormatOfflineDuration(status);
+        SelectedDiagnosticStateText.Foreground = stateBrush;
+        SelectedDiagnosticInnerStateText.Text = FormatStatus(status);
+        SelectedDiagnosticInnerStateText.Foreground = stateBrush;
+        var offlineDuration = FormatOfflineDuration(status);
+        SelectedDiagnosticOfflineDurationText.Text = offlineDuration;
+        SelectedDiagnosticInnerOfflineDurationText.Text = offlineDuration.Length > 0
+            ? offlineDuration.StartsWith("已离线：", StringComparison.Ordinal)
+                ? offlineDuration.Substring(4)
+                : offlineDuration
+            : "-";
         SelectedDiagnosticLastSentText.Text = FormatTime(status?.LastSentAt);
         SelectedDiagnosticLastReceivedText.Text = FormatTime(status?.LastReceivedAt);
         SelectedDiagnosticResponseText.Text = status?.LastResponseMilliseconds is long milliseconds
             ? $"{milliseconds} ms"
             : "-";
-        SelectedDiagnosticConsecutiveTimeoutText.Text = (status?.ConsecutiveTimeoutCount ?? 0)
+        SelectedDiagnosticConsecutiveTimeoutStatsText.Text = (status?.ConsecutiveTimeoutCount ?? 0)
+            .ToString(CultureInfo.InvariantCulture);
+        SelectedDiagnosticInvalidText.Text = GetInvalidFrameCount(station)
             .ToString(CultureInfo.InvariantCulture);
         SelectedDiagnosticErrorText.Text = status?.LastError ?? "无";
         SelectedDiagnosticSentText.Text = (status?.SentCount ?? 0).ToString(CultureInfo.InvariantCulture);
@@ -713,6 +743,7 @@ public partial class CommunicationPage : UserControl
             InvalidFrameCountText = invalidFrameCount.ToString(CultureInfo.InvariantCulture);
             LastErrorText = status?.LastError ?? "-";
             StatusText = FormatStatus(status);
+            StatusBrush = GetStatusBrush(status);
         }
 
         public RfidStationConfig Station { get; }
@@ -734,6 +765,7 @@ public partial class CommunicationPage : UserControl
         public string InvalidFrameCountText { get; }
         public string LastErrorText { get; }
         public string StatusText { get; }
+        public Brush StatusBrush { get; }
     }
 
     private sealed class CommunicationLogRow
@@ -766,4 +798,11 @@ public partial class CommunicationPage : UserControl
         status is null || !status.LastSentAt.HasValue
             ? "等待"
             : status.IsOnline ? "在线" : "离线";
+
+    private static Brush GetStatusBrush(RfidStationPollingStatus? status) =>
+        status?.LastSentAt.HasValue != true
+            ? (Brush)Application.Current.FindResource("TextSecondaryBrush")
+            : status.IsOnline
+                ? (Brush)Application.Current.FindResource("SuccessBrush")
+                : (Brush)Application.Current.FindResource("AlarmBrush");
 }

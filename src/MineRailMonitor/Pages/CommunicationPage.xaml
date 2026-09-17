@@ -195,9 +195,7 @@
                         <StackPanel Margin="48,0,0,0" VerticalAlignment="Center">
                             <TextBlock x:Name="OverviewResponseTimeText" Text="-" Foreground="{StaticResource AccentBrush}" FontSize="22" FontWeight="SemiBold" />
                             <TextBlock Text="平均响应时间" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                            <TextBlock Text="累计超时 " Foreground="{StaticResource TextSecondaryBrush}" FontSize="9" Margin="0,1,0,0">
-                                <Run x:Name="OverviewTimeoutCountRun" Text="0" Foreground="{StaticResource WarningBrush}" />
-                            </TextBlock>
+                            <TextBlock x:Name="OverviewTimeoutCountRun" Visibility="Collapsed" />
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -314,16 +312,21 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
+                                    <Border Grid.Row="0" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="1" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="2" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="3" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="4" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
                                     <TextBlock Text="基站名称" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticBasicStationText" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock x:Name="SelectedDiagnosticBasicStationText" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Row="1" Text="协议地址" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticProtocolText" Grid.Row="1" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticProtocolText" Grid.Row="1" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" FontFamily="Consolas" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="2" Text="IP地址" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticIpText" Grid.Row="2" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticIpText" Grid.Row="2" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" FontFamily="Consolas" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="3" Text="端口" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticPortText" Grid.Row="3" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticPortText" Grid.Row="3" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" FontFamily="Consolas" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="4" Text="所属站场" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticYardText" Grid.Row="4" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock x:Name="SelectedDiagnosticYardText" Grid.Row="4" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
                                 </Grid>
                             </Grid>
                         </Border>
@@ -346,16 +349,21 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
+                                    <Border Grid.Row="0" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="1" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="2" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="3" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="4" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
                                     <TextBlock Text="在线状态" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticInnerStateText" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticInnerStateText" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="1" Text="最后发送" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticLastSentText" Grid.Row="1" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticLastSentText" Grid.Row="1" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" FontFamily="Consolas" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="2" Text="最后接收" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticLastReceivedText" Grid.Row="2" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticLastReceivedText" Grid.Row="2" Grid.Column="1" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" FontFamily="Consolas" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="3" Text="已离线时长" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticInnerOfflineDurationText" Grid.Row="3" Grid.Column="1" Text="-" Foreground="{StaticResource WarningBrush}" FontSize="11" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticInnerOfflineDurationText" Grid.Row="3" Grid.Column="1" Text="-" Foreground="{StaticResource WarningBrush}" FontSize="12" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="4" Text="最近响应时间" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticResponseText" Grid.Row="4" Grid.Column="1" Text="-" Foreground="{StaticResource AccentBrush}" FontSize="11" FontFamily="Consolas" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticResponseText" Grid.Row="4" Grid.Column="1" Text="-" Foreground="{StaticResource AccentBrush}" FontSize="12" FontFamily="Consolas" Margin="12,0,0,0" />
                                 </Grid>
                             </Grid>
                         </Border>
@@ -379,18 +387,24 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
+                                    <Border Grid.Row="0" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="1" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="2" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="3" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="4" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
+                                    <Border Grid.Row="5" Grid.ColumnSpan="2" Background="#07263B" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1" />
                                     <TextBlock Text="发送次数" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticSentText" Grid.Column="1" Text="0" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticSentText" Grid.Column="1" Text="0" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="1" Text="接收次数" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticReceivedText" Grid.Row="1" Grid.Column="1" Text="0" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="11" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticReceivedText" Grid.Row="1" Grid.Column="1" Text="0" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="2" Text="超时次数" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticTimeoutText" Grid.Row="2" Grid.Column="1" Text="0" Foreground="{StaticResource WarningBrush}" FontSize="11" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticTimeoutText" Grid.Row="2" Grid.Column="1" Text="0" Foreground="{StaticResource WarningBrush}" FontSize="12" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="3" Text="连续超时" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticConsecutiveTimeoutStatsText" Grid.Row="3" Grid.Column="1" Text="0" Foreground="{StaticResource WarningBrush}" FontSize="11" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticConsecutiveTimeoutStatsText" Grid.Row="3" Grid.Column="1" Text="0" Foreground="{StaticResource WarningBrush}" FontSize="12" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="4" Text="无效帧" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticInvalidText" Grid.Row="4" Grid.Column="1" Text="0" Foreground="{StaticResource WarningBrush}" FontSize="11" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="SelectedDiagnosticInvalidText" Grid.Row="4" Grid.Column="1" Text="0" Foreground="{StaticResource WarningBrush}" FontSize="12" Margin="12,0,0,0" />
                                     <TextBlock Grid.Row="5" Text="最后错误" Style="{StaticResource CommunicationMetricLabelStyle}" />
-                                    <TextBlock x:Name="SelectedDiagnosticErrorText" Grid.Row="5" Grid.Column="1" Text="无" Foreground="{StaticResource WarningBrush}" FontSize="11" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock x:Name="SelectedDiagnosticErrorText" Grid.Row="5" Grid.Column="1" Text="无" Foreground="{StaticResource WarningBrush}" FontSize="12" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
                                 </Grid>
                             </Grid>
                         </Border>
@@ -402,7 +416,7 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="34" />
-                        <RowDefinition Height="42" />
+                        <RowDefinition Height="64" />
                         <RowDefinition Height="28" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
@@ -428,12 +442,12 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Text="最近 TX" Foreground="{StaticResource SuccessBrush}" FontSize="10" FontWeight="SemiBold" />
-                                    <TextBlock x:Name="LatestTxSummaryText" Text="暂无发送报文" Foreground="{StaticResource TextPrimaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="最近 TX" Foreground="{StaticResource SuccessBrush}" FontSize="12" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="LatestTxSummaryText" Text="暂无发送报文" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
                                     <TextBlock x:Name="LatestTxLengthText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="9" Visibility="Collapsed" />
                                     <TextBlock x:Name="LatestTxHexText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="9" Visibility="Collapsed" />
                                 </StackPanel>
-                                <TextBlock x:Name="LatestTxTimeText" Grid.Column="1" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" FontFamily="Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                <TextBlock x:Name="LatestTxTimeText" Grid.Column="1" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontFamily="Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
                             </Grid>
                         </Border>
                         <Border x:Name="LatestRxCard" Grid.Column="1" Background="#07304A" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" CornerRadius="3" Padding="8,3" Margin="3,0,0,0">
@@ -443,12 +457,12 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Text="最近 RX" Foreground="{StaticResource AccentBrush}" FontSize="10" FontWeight="SemiBold" />
-                                    <TextBlock x:Name="LatestRxSummaryText" Text="暂无接收报文" Foreground="{StaticResource TextPrimaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="最近 RX" Foreground="{StaticResource AccentBrush}" FontSize="12" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="LatestRxSummaryText" Text="暂无接收报文" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
                                     <TextBlock x:Name="LatestRxLengthText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="9" Visibility="Collapsed" />
                                     <TextBlock x:Name="LatestRxHexText" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="9" Visibility="Collapsed" />
                                 </StackPanel>
-                                <TextBlock x:Name="LatestRxTimeText" Grid.Column="1" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" FontFamily="Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                <TextBlock x:Name="LatestRxTimeText" Grid.Column="1" Text="-" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontFamily="Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
                             </Grid>
                         </Border>
                     </Grid>
@@ -459,10 +473,10 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="116" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="时间" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" VerticalAlignment="Center" Margin="8,0" />
-                        <TextBlock Grid.Column="1" Text="方向" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="2" Text="数据内容" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="3" Text="说明" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" VerticalAlignment="Center" />
+                        <TextBlock Text="时间" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
+                        <TextBlock Grid.Column="1" Text="方向" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="数据内容" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="3" Text="说明" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
                     </Grid>
                     <ListView x:Name="CommunicationLogList" Grid.Row="3" Style="{StaticResource CommunicationLogListStyle}"
                               ItemsSource="{Binding}" ItemContainerStyle="{StaticResource CommunicationLogRowStyle}">
@@ -475,10 +489,10 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="116" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center" Margin="8,0" />
-                                    <TextBlock Grid.Column="1" Text="{Binding DirectionText}" Foreground="{Binding DirectionBrush}" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="2" Text="{Binding DataText}" Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                    <TextBlock Grid.Column="3" Text="{Binding DescriptionText}" Foreground="{Binding DescriptionBrush}" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
+                                    <TextBlock Grid.Column="1" Text="{Binding DirectionText}" Foreground="{Binding DirectionBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding DataText}" Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                    <TextBlock Grid.Column="3" Text="{Binding DescriptionText}" Foreground="{Binding DescriptionBrush}" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                 </Grid>
                             </DataTemplate>
                         </ListView.ItemTemplate>

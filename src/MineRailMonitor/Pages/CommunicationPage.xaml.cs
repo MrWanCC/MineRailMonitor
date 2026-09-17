@@ -18,12 +18,14 @@ public partial class CommunicationPage : UserControl
     private readonly ObservableCollection<CommunicationLogRow> _communicationLogRows = new();
     private readonly ObservableCollection<string> _frameRfidSlots = new();
     private readonly Dictionary<RfidStationEndpointKey, long> _invalidFrameCounts = new();
+    private readonly Dictionary<string, long> _timeoutLogCounts = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<RfidStationConfig> _stations = Array.Empty<RfidStationConfig>();
     private IReadOnlyList<StationConfig> _yardConfigs = Array.Empty<StationConfig>();
     private IReadOnlyList<RfidStationYardOption> _yardFilterOptions;
     private IReadOnlyList<RfidStationPollingStatus> _stationStatuses = Array.Empty<RfidStationPollingStatus>();
     private HashSet<string>? _displayScopeStationIds;
     private bool _isYardFilterSync;
+    private bool _hasObservedStationStatuses;
     private string? _selectedStationId;
     private long _invalidFrameCount;
     private Func<RfidStationConfig, RfidPollCommand, Task>? _sendTestAsync;
@@ -130,7 +132,19 @@ public partial class CommunicationPage : UserControl
     {
         if (statuses is null) throw new ArgumentNullException(nameof(statuses));
 
-        _stationStatuses = statuses.Where(status => status is not null).ToArray();
+        var nextStatuses = statuses.Where(status => status is not null).ToArray();
+        if (_hasObservedStationStatuses)
+        {
+            AddTimeoutLogEntries(nextStatuses);
+        }
+
+        foreach (var status in nextStatuses)
+        {
+            _timeoutLogCounts[GetStatusLogKey(status)] = status.TimeoutCount;
+        }
+
+        _hasObservedStationStatuses = true;
+        _stationStatuses = nextStatuses;
         RefreshStationRows();
     }
 
@@ -623,6 +637,44 @@ public partial class CommunicationPage : UserControl
         {
             _communicationLogRows.RemoveAt(_communicationLogRows.Count - 1);
         }
+    }
+
+    private void AddTimeoutLogEntries(IReadOnlyList<RfidStationPollingStatus> statuses)
+    {
+        foreach (var status in statuses)
+        {
+            var statusKey = GetStatusLogKey(status);
+            if (!_timeoutLogCounts.TryGetValue(statusKey, out var previousCount))
+            {
+                _timeoutLogCounts[statusKey] = status.TimeoutCount;
+                continue;
+            }
+
+            if (status.TimeoutCount <= previousCount)
+            {
+                continue;
+            }
+
+            var newTimeoutCount = status.TimeoutCount - previousCount;
+            for (var index = 0; index < newTimeoutCount; index++)
+            {
+                AddCommunicationLog(
+                    DateTimeOffset.Now,
+                    "--",
+                    "--",
+                    $"{FormatStationName(status)}响应超时");
+            }
+        }
+    }
+
+    private string GetStatusLogKey(RfidStationPollingStatus status) =>
+        status.EndpointKey?.ToString()
+        ?? (!string.IsNullOrWhiteSpace(status.StationId) ? status.StationId : "unknown");
+
+    private string FormatStationName(RfidStationPollingStatus status)
+    {
+        var station = _stations.FirstOrDefault(item => MatchesStation(status, item));
+        return station is null ? "设备" : FormatStation(station);
     }
 
     private static string FormatLogData(string value) =>

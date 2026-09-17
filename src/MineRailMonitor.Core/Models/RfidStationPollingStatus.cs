@@ -200,32 +200,26 @@ public sealed class RfidStationPollingStatus
         {
             _lastResponseAt = receivedAt;
             _responseCount++;
+
+            // The protocol has no request id. The poller sends requests in FIFO
+            // order, so consume only the oldest request that could have produced
+            // this response. Any later request remains pending and can still
+            // reach the timeout path independently.
             DateTimeOffset? matchingRequestAt = null;
-            foreach (var sentAt in _pendingRequests)
+            if (_pendingRequests.Count > 0 && _pendingRequests.Peek() <= receivedAt)
             {
-                if (sentAt <= receivedAt)
-                {
-                    matchingRequestAt = sentAt;
-                }
+                matchingRequestAt = _pendingRequests.Dequeue();
             }
-            if (!matchingRequestAt.HasValue && _lastRequestAt.HasValue && receivedAt >= _lastRequestAt.Value)
+            else if (_pendingRequests.Count == 0 && _lastRequestAt.HasValue && receivedAt >= _lastRequestAt.Value)
             {
+                // Preserve the existing behavior for a late response after its
+                // request has already been timed out and removed from the queue.
                 matchingRequestAt = _lastRequestAt;
             }
 
             if (matchingRequestAt.HasValue)
             {
                 _lastResponseMilliseconds = (long)(receivedAt - matchingRequestAt.Value).TotalMilliseconds;
-
-                while (_pendingRequests.Count > 0 && _pendingRequests.Peek() <= matchingRequestAt.Value)
-                {
-                    _pendingRequests.Dequeue();
-                }
-            }
-            else if (_lastRequestAt.HasValue && receivedAt >= _lastRequestAt.Value)
-            {
-                _lastResponseMilliseconds = (long)(receivedAt - _lastRequestAt.Value).TotalMilliseconds;
-                _pendingRequests.Clear();
             }
             else
             {

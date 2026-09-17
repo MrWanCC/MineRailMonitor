@@ -186,7 +186,7 @@ public sealed class RfidStationPollerTests
     }
 
     [Fact]
-    public void Poller_uses_the_latest_send_for_that_station_when_requests_overlap()
+    public void Poller_uses_fifo_send_for_that_station_when_requests_overlap()
     {
         var station = CreateStation("RFID-01", "一号站", 0x01, 62001);
         var poller = new RfidStationPoller(
@@ -202,7 +202,47 @@ public sealed class RfidStationPollerTests
         Assert.True(poller.RecordSent(endpoint, station.ProtocolAddress, secondSentAt));
         Assert.True(poller.RecordResponse(endpoint, station.ProtocolAddress, secondSentAt.AddMilliseconds(35)));
 
-        Assert.Equal(35, poller.EndpointStatuses.Values.Single().LastResponseMilliseconds);
+        Assert.Equal(235, poller.EndpointStatuses.Values.Single().LastResponseMilliseconds);
+    }
+
+    [Fact]
+    public void Poller_fifo_response_consumes_one_pending_request_and_preserves_the_other_for_timeout()
+    {
+        var station = CreateStation("RFID-01", "一号站", 0x01, 62001);
+        var poller = new RfidStationPoller(
+            new[] { station },
+            200,
+            new RecordingSender(new CancellationTokenSource(), stopAfter: int.MaxValue),
+            new ControllableTimeProvider(DateTimeOffset.UtcNow));
+        var endpoint = new IPEndPoint(IPAddress.Loopback, 62001);
+        var start = new DateTimeOffset(2026, 9, 17, 9, 0, 0, TimeSpan.Zero);
+        var status = poller.EndpointStatuses.Values.Single();
+
+        Assert.True(poller.RecordSent(endpoint, station.ProtocolAddress, start));
+        Assert.True(poller.RecordSent(endpoint, station.ProtocolAddress, start.AddMilliseconds(200)));
+        Assert.True(poller.RecordResponse(endpoint, station.ProtocolAddress, start.AddMilliseconds(250)));
+
+        poller.EvaluateTimeouts(start.AddSeconds(2), TimeSpan.FromSeconds(1));
+
+        Assert.Equal(1, status.ReceivedCount);
+        Assert.Equal(1, status.TimeoutCount);
+    }
+
+    [Fact]
+    public async Task Poller_emits_the_actual_command_for_each_automatic_send()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var sender = new RecordingSender(cancellation, stopAfter: 2);
+        var time = new ControllableTimeProvider(new DateTimeOffset(2026, 9, 17, 9, 0, 0, TimeSpan.Zero));
+        var provider = new SingleClearProvider(0x01);
+        var station = CreateStation("RFID-01", "一号站", 0x01, 62001);
+        var poller = new RfidStationPoller(new[] { station }, 200, sender, time, provider);
+        var commands = new List<RfidPollCommand>();
+        poller.CommandSent += (_, command, _) => commands.Add(command);
+
+        await poller.RunAsync(cancellation.Token);
+
+        Assert.Equal(new[] { RfidPollCommand.Clear, RfidPollCommand.Read }, commands);
     }
 
     [Fact]

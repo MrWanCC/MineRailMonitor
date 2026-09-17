@@ -167,6 +167,37 @@ public sealed class YardCommunicationManagerTests
     }
 
     [Fact]
+    public async Task Context_publishes_each_manual_command_with_its_real_type_once()
+    {
+        var station = CreateStation("RFID-01", "560", 0x01, 63135);
+        station.Enabled = false;
+        using var context = new YardCommunicationContext(
+            CreateCommunication("560"),
+            new[] { station },
+            CreateSettings(),
+            new InMemoryPassageRecordStore());
+        var commands = new List<RfidPollCommand>();
+        context.StationCommandSent += (_, sentStation, command, _) =>
+        {
+            Assert.Same(station, sentStation);
+            commands.Add(command);
+        };
+
+        await context.StartAsync();
+        try
+        {
+            await context.SendAsync(station, RfidPollCommand.Read);
+            await context.SendAsync(station, RfidPollCommand.Clear);
+        }
+        finally
+        {
+            await context.StopAsync();
+        }
+
+        Assert.Equal(new[] { RfidPollCommand.Read, RfidPollCommand.Clear }, commands);
+    }
+
+    [Fact]
     public async Task A_port_conflict_is_isolated_to_the_conflicting_yard()
     {
         var occupiedPort = GetUnusedPort();

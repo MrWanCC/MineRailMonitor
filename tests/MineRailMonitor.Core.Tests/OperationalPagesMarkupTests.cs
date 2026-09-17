@@ -66,6 +66,8 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("LatestTxHexText", markup, StringComparison.Ordinal);
         Assert.Contains("LatestRxHexText", markup, StringComparison.Ordinal);
         Assert.Contains("FrameParseResultText", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"最近平均响应\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"平均响应时间\"", markup, StringComparison.Ordinal);
         Assert.Contains("LatestTxHexText.Text", code, StringComparison.Ordinal);
         Assert.Contains("LatestRxHexText.Text", code, StringComparison.Ordinal);
         Assert.Contains("FrameRfidSlotsItemsControl.ItemsSource", code, StringComparison.Ordinal);
@@ -86,6 +88,21 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("RfidPollCommand.Clear", code, StringComparison.Ordinal);
         Assert.Contains("_communicationPage.SetAdminMode(_adminModeService.IsAdmin)", mainWindowCode, StringComparison.Ordinal);
         Assert.Contains("发送清空命令需要管理员模式", mainWindowCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Communication_page_uses_actual_command_events_without_reconstructing_tx_from_counts()
+    {
+        var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "CommunicationPage.xaml.cs"));
+        var mainWindowCode = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));
+
+        Assert.Contains("AddCommandSent", code, StringComparison.Ordinal);
+        Assert.Contains("RfidPollCommand.Clear", code, StringComparison.Ordinal);
+        Assert.Contains("$\"发送{commandText}命令\"", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("_sentLogCounts", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetReadRequestHex", code, StringComparison.Ordinal);
+        Assert.Contains("StationCommandSent", mainWindowCode, StringComparison.Ordinal);
+        Assert.Contains("_communicationPage.AddCommandSent(station, command, sentAt)", mainWindowCode, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -102,6 +102,8 @@ public sealed class YardCommunicationManager : IDisposable
 
     public event Action<YardCommunicationContext, byte, RfidPollCommand, DateTimeOffset>? CommandSent;
 
+    public event Action<YardCommunicationContext, RfidStationConfig, RfidPollCommand, DateTimeOffset>? StationCommandSent;
+
     public YardCommunicationContext? GetContext(string yardId)
     {
         if (string.IsNullOrWhiteSpace(yardId))
@@ -341,6 +343,7 @@ public sealed class YardCommunicationManager : IDisposable
         context.DatagramReceived += OnContextDatagramReceived;
         context.ReceiveError += OnContextReceiveError;
         context.CommandSent += OnContextCommandSent;
+        context.StationCommandSent += OnContextStationCommandSent;
     }
 
     private void DetachContext(YardCommunicationContext context)
@@ -348,6 +351,7 @@ public sealed class YardCommunicationManager : IDisposable
         context.DatagramReceived -= OnContextDatagramReceived;
         context.ReceiveError -= OnContextReceiveError;
         context.CommandSent -= OnContextCommandSent;
+        context.StationCommandSent -= OnContextStationCommandSent;
     }
 
     public static YardCommunicationManager CreateLegacyShared(
@@ -394,6 +398,13 @@ public sealed class YardCommunicationManager : IDisposable
         RfidPollCommand command,
         DateTimeOffset sentAt) =>
         CommandSent?.Invoke(context, stationAddress, command, sentAt);
+
+    private void OnContextStationCommandSent(
+        YardCommunicationContext context,
+        RfidStationConfig station,
+        RfidPollCommand command,
+        DateTimeOffset sentAt) =>
+        StationCommandSent?.Invoke(context, station, command, sentAt);
 
     private void ThrowIfDisposed()
     {

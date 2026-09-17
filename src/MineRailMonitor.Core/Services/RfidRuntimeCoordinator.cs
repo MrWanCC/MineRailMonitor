@@ -82,6 +82,8 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
     public event Action<byte, RfidPollCommand, DateTimeOffset>? CommandSent;
 
+    public event Action<RfidStationConfig, RfidPollCommand, DateTimeOffset>? StationCommandSent;
+
     public void UpdateDefaults(RfidSettings settings)
     {
         lock (_syncRoot)
@@ -384,6 +386,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         if (marked)
         {
             CommandSent?.Invoke(station.ProtocolAddress, command, sentAt);
+            StationCommandSent?.Invoke(station, command, sentAt);
         }
     }
 

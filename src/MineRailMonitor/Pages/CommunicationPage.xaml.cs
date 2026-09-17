@@ -18,7 +18,6 @@ public partial class CommunicationPage : UserControl
     private readonly ObservableCollection<CommunicationLogRow> _communicationLogRows = new();
     private readonly ObservableCollection<string> _frameRfidSlots = new();
     private readonly Dictionary<RfidStationEndpointKey, long> _invalidFrameCounts = new();
-    private readonly Dictionary<string, long> _sentLogCounts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _timeoutLogCounts = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<RfidStationConfig> _stations = Array.Empty<RfidStationConfig>();
     private IReadOnlyList<StationConfig> _yardConfigs = Array.Empty<StationConfig>();
@@ -169,6 +168,31 @@ public partial class CommunicationPage : UserControl
         ClearTestButton.ToolTip = isAdmin
             ? "发送清空命令前需要确认"
             : "进入管理员模式后可发送清空命令";
+    }
+
+    public void AddCommandSent(RfidStationConfig station, RfidPollCommand command, DateTimeOffset sentAt)
+    {
+        if (station is null || !GetVisibleStations().Any(item =>
+                string.Equals(item.StationId, station.StationId, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var commandText = command == RfidPollCommand.Read ? "读取" : "清空";
+        var endpointText = station.TryResolveEndpoint(out var endpoint)
+            ? FormatEndpoint(endpoint)
+            : "端点无效";
+        var txHex = station.TryResolveEndpoint(out _)
+            ? BitConverter.ToString(RfidRequestFrameBuilder.Build(station, command)).Replace('-', ' ')
+            : "-";
+
+        SelectedStationText.Text = FormatStation(station);
+        LatestTxTimeText.Text = FormatTime(sentAt);
+        LatestTxSummaryText.Text = $"发送至：{endpointText}";
+        LatestTxLengthText.Text = $"命令：{commandText} · 协议地址 {station.ProtocolAddress:X2}";
+        LatestTxHexText.Text = txHex;
+        AddCommunicationLog(sentAt, "TX", txHex, $"发送{commandText}命令");
+        AddLog($"TX {sentAt:HH:mm:ss.fff}    {FormatStation(station)}    {commandText} 请求已发送");
     }
 
     public void AddDatagram(
@@ -393,18 +417,7 @@ public partial class CommunicationPage : UserControl
         try
         {
             await _sendTestAsync(station, command);
-            var commandText = command == RfidPollCommand.Read ? "读取" : "清空";
-            var sentAt = DateTimeOffset.Now;
-            var txHex = station.TryResolveEndpoint(out _)
-                ? BitConverter.ToString(RfidRequestFrameBuilder.Build(station, command)).Replace('-', ' ')
-                : "-";
             SelectedStationText.Text = FormatStation(station);
-            LatestTxTimeText.Text = FormatTime(sentAt);
-            LatestTxSummaryText.Text = $"发送至：{FormatEndpoint(station.TryResolveEndpoint(out var endpoint) ? endpoint : new IPEndPoint(IPAddress.None, 0))}";
-            LatestTxLengthText.Text = $"命令：{commandText} · 协议地址 {station.ProtocolAddress:X2}";
-            LatestTxHexText.Text = txHex;
-            AddCommunicationLog(sentAt, "TX", txHex, $"发送{commandText}命令");
-            AddLog($"TX {DateTime.Now:HH:mm:ss.fff}    {FormatStation(station)}    {commandText} 请求已发送");
             RefreshStationRows();
             SetListenerStatus($"测试报文已发送：{FormatStation(station)}");
         }
@@ -456,15 +469,15 @@ public partial class CommunicationPage : UserControl
             .Where(status => status is not null)
             .Cast<RfidStationPollingStatus>()
             .ToArray();
-        var onlineCount = statuses.Count(status => status.IsOnline);
+        var statusSummary = RfidStationStatusSummary.Calculate(statuses);
         var timeoutCount = statuses.Sum(status => status.TimeoutCount);
         var responseTimes = statuses
             .Where(status => status.LastResponseMilliseconds.HasValue)
             .Select(status => status.LastResponseMilliseconds!.Value)
             .ToArray();
         OverviewStationCountText.Text = visibleStations.Count.ToString(CultureInfo.InvariantCulture);
-        OverviewOnlineCountText.Text = onlineCount.ToString(CultureInfo.InvariantCulture);
-        OverviewOfflineCountText.Text = Math.Max(0, visibleStations.Count - onlineCount).ToString(CultureInfo.InvariantCulture);
+        OverviewOnlineCountText.Text = statusSummary.OnlineCount.ToString(CultureInfo.InvariantCulture);
+        OverviewOfflineCountText.Text = statusSummary.OfflineCount.ToString(CultureInfo.InvariantCulture);
         OverviewResponseTimeText.Text = responseTimes.Length == 0
             ? "-"
             : $"{responseTimes.Average().ToString("0", CultureInfo.InvariantCulture)}ms";
@@ -557,15 +570,15 @@ public partial class CommunicationPage : UserControl
             .Where(status => status is not null)
             .Cast<RfidStationPollingStatus>()
             .ToArray();
-        var onlineCount = statuses.Count(status => status.IsOnline);
+        var statusSummary = RfidStationStatusSummary.Calculate(statuses);
 
         TotalSentCountText.Text = statuses.Sum(status => status.SentCount).ToString(CultureInfo.InvariantCulture);
         TotalReceivedCountText.Text = statuses.Sum(status => status.ReceivedCount).ToString(CultureInfo.InvariantCulture);
         TotalTimeoutCountText.Text = statuses.Sum(status => status.TimeoutCount).ToString(CultureInfo.InvariantCulture);
         TotalInvalidFrameCountText.Text = _invalidFrameCount.ToString(CultureInfo.InvariantCulture);
-        OnlineRateText.Text = visibleStations.Count == 0
-            ? "0%"
-            : $"{(onlineCount * 100d / visibleStations.Count).ToString("0.0", CultureInfo.InvariantCulture)}%";
+        OnlineRateText.Text = statusSummary.OnlineRatePercentage is double onlineRate
+            ? $"{onlineRate.ToString("0.0", CultureInfo.InvariantCulture)}%"
+            : "-";
     }
 
     private long GetInvalidFrameCount(RfidStationConfig station) =>
@@ -630,16 +643,9 @@ public partial class CommunicationPage : UserControl
         PacketLogCountText.Text = $"{_packetLog.Count.ToString(CultureInfo.InvariantCulture)} / 50";
     }
 
-    private void AddCommunicationLog(DateTimeOffset at, string direction, string data, string description, bool updateLatestTx = false)
+    private void AddCommunicationLog(DateTimeOffset at, string direction, string data, string description)
     {
         _communicationLogRows.Insert(0, new CommunicationLogRow(at, direction, FormatLogData(data), description));
-        if (direction == "TX" && updateLatestTx)
-        {
-            LatestTxTimeText.Text = FormatTime(at);
-            LatestTxSummaryText.Text = "发送读取命令";
-            LatestTxLengthText.Text = "自动轮询";
-            LatestTxHexText.Text = FormatLogData(data);
-        }
 
         while (_communicationLogRows.Count > 50)
         {
@@ -652,17 +658,7 @@ public partial class CommunicationPage : UserControl
         foreach (var status in statuses)
         {
             var statusKey = GetStatusLogKey(status);
-            _sentLogCounts[statusKey] = status.SentCount;
             _timeoutLogCounts[statusKey] = status.TimeoutCount;
-            if (status.SentCount > 0)
-            {
-                AddCommunicationLog(
-                    status.LastSentAt ?? DateTimeOffset.Now,
-                    "TX",
-                    GetReadRequestHex(status),
-                    "发送读取命令",
-                    updateLatestTx: true);
-            }
 
             if (status.TimeoutCount > 0)
             {
@@ -680,20 +676,8 @@ public partial class CommunicationPage : UserControl
         foreach (var status in statuses)
         {
             var statusKey = GetStatusLogKey(status);
-            var previousSentCount = _sentLogCounts.TryGetValue(statusKey, out var sentCount) ? sentCount : status.SentCount;
             var previousTimeoutCount = _timeoutLogCounts.TryGetValue(statusKey, out var timeoutCount) ? timeoutCount : status.TimeoutCount;
-            var newSentCount = status.SentCount - previousSentCount;
             var newTimeoutCount = status.TimeoutCount - previousTimeoutCount;
-
-            for (var index = 0; index < Math.Min(newSentCount, 50L); index++)
-            {
-                AddCommunicationLog(
-                    status.LastSentAt ?? DateTimeOffset.Now,
-                    "TX",
-                    GetReadRequestHex(status),
-                    "发送读取命令",
-                    updateLatestTx: true);
-            }
 
             for (var index = 0; index < Math.Min(newTimeoutCount, 50L); index++)
             {
@@ -704,7 +688,6 @@ public partial class CommunicationPage : UserControl
                     "设备响应超时");
             }
 
-            _sentLogCounts[statusKey] = status.SentCount;
             _timeoutLogCounts[statusKey] = status.TimeoutCount;
         }
     }
@@ -712,14 +695,6 @@ public partial class CommunicationPage : UserControl
     private string GetStatusLogKey(RfidStationPollingStatus status) =>
         status.EndpointKey?.ToString()
         ?? (!string.IsNullOrWhiteSpace(status.StationId) ? status.StationId : "unknown");
-
-    private string GetReadRequestHex(RfidStationPollingStatus status)
-    {
-        var station = _stations.FirstOrDefault(item => MatchesStation(status, item));
-        return station is null
-            ? "-"
-            : BitConverter.ToString(RfidRequestFrameBuilder.Build(station, RfidPollCommand.Read)).Replace('-', ' ');
-    }
 
     private static string FormatLogData(string value) =>
         value.Length <= 42 ? value : $"{value.Substring(0, 42)} …";

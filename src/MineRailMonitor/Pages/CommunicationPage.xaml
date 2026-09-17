@@ -194,7 +194,7 @@
                         <Path Data="{StaticResource QueryIconGeometry}" Width="32" Height="32" Stretch="Uniform" HorizontalAlignment="Left" VerticalAlignment="Center" Stroke="{StaticResource AccentBrush}" StrokeThickness="1.7" />
                         <StackPanel Margin="48,0,0,0" VerticalAlignment="Center">
                             <TextBlock x:Name="OverviewResponseTimeText" Text="-" Foreground="{StaticResource AccentBrush}" FontSize="22" FontWeight="SemiBold" />
-                            <TextBlock Text="平均响应时间" Style="{StaticResource CommunicationMetricLabelStyle}" />
+                            <TextBlock Text="最近平均响应" Style="{StaticResource CommunicationMetricLabelStyle}" />
                             <TextBlock x:Name="OverviewTimeoutCountRun" Visibility="Collapsed" />
                         </StackPanel>
                     </Grid>

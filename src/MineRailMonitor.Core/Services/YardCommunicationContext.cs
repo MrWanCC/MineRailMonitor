@@ -53,6 +53,7 @@ public sealed class YardCommunicationContext : IDisposable
             if (_runtimeCoordinator is not null)
             {
                 _runtimeCoordinator.CommandSent += OnRuntimeCommandSent;
+                _runtimeCoordinator.StationCommandSent += OnRuntimeStationCommandSent;
             }
         }
         catch (Exception exception)
@@ -146,6 +147,8 @@ public sealed class YardCommunicationContext : IDisposable
 
     public event Action<YardCommunicationContext, byte, RfidPollCommand, DateTimeOffset>? CommandSent;
 
+    public event Action<YardCommunicationContext, RfidStationConfig, RfidPollCommand, DateTimeOffset>? StationCommandSent;
+
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -193,6 +196,7 @@ public sealed class YardCommunicationContext : IDisposable
                     _timeProvider,
                     _runtimeCoordinator,
                     _runtimeCoordinator?.OfflineTimeout);
+                poller.CommandSent += OnPollerCommandSent;
                 var pollerCts = new CancellationTokenSource();
                 lock (_syncRoot)
                 {
@@ -250,6 +254,10 @@ public sealed class YardCommunicationContext : IDisposable
             }
         }
         pollerCts?.Dispose();
+        if (poller is not null)
+        {
+            poller.CommandSent -= OnPollerCommandSent;
+        }
         transport?.Dispose();
     }
 
@@ -319,7 +327,9 @@ public sealed class YardCommunicationContext : IDisposable
             RfidRequestFrameBuilder.Build(station, command),
             endpoint,
             cancellationToken).ConfigureAwait(false);
-        _poller?.RecordSent(endpoint, station.ProtocolAddress, _timeProvider.UtcNow);
+        var sentAt = _timeProvider.UtcNow;
+        _poller?.RecordSent(endpoint, station.ProtocolAddress, sentAt);
+        PublishStationCommandSent(station, command, sentAt);
     }
 
     public void Dispose()
@@ -337,6 +347,7 @@ public sealed class YardCommunicationContext : IDisposable
         if (_runtimeCoordinator is not null)
         {
             _runtimeCoordinator.CommandSent -= OnRuntimeCommandSent;
+            _runtimeCoordinator.StationCommandSent -= OnRuntimeStationCommandSent;
         }
         StopAsync().GetAwaiter().GetResult();
     }
@@ -379,11 +390,45 @@ public sealed class YardCommunicationContext : IDisposable
         {
             Interlocked.Increment(ref _clearCount);
         }
+        PublishCommandSent(stationAddress, command, sentAt);
+    }
+
+    private void OnPollerCommandSent(RfidStationConfig station, RfidPollCommand command, DateTimeOffset sentAt)
+    {
+        // Clear is already published by the runtime coordinator after its
+        // lifecycle transition. Publish automatic reads here so every actual
+        // wire command reaches diagnostics exactly once.
+        if (command == RfidPollCommand.Read)
+        {
+            PublishStationCommandSent(station, command, sentAt);
+        }
+    }
+
+    private void OnRuntimeStationCommandSent(
+        RfidStationConfig station,
+        RfidPollCommand command,
+        DateTimeOffset sentAt) =>
+        PublishStationCommandSent(station, command, sentAt);
+
+    private void PublishCommandSent(byte stationAddress, RfidPollCommand command, DateTimeOffset sentAt)
+    {
         lock (_syncRoot)
         {
             _lastCommand = command.ToString();
         }
         CommandSent?.Invoke(this, stationAddress, command, sentAt);
+    }
+
+    private void PublishStationCommandSent(
+        RfidStationConfig station,
+        RfidPollCommand command,
+        DateTimeOffset sentAt)
+    {
+        lock (_syncRoot)
+        {
+            _lastCommand = command.ToString();
+        }
+        StationCommandSent?.Invoke(this, station, command, sentAt);
     }
 
     private void SetError(string message)

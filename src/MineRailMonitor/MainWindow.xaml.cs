@@ -653,6 +653,7 @@ public partial class MainWindow : Window
         manager.DatagramReceived += OnYardDatagramReceived;
         manager.ReceiveError += OnYardReceiveError;
         manager.CommandSent += OnYardCommandSent;
+        manager.StationCommandSent += OnYardStationCommandSent;
         _yardCommunicationManager = manager;
 
         foreach (var context in manager.Contexts.Values)
@@ -795,6 +796,16 @@ public partial class MainWindow : Window
         {
             _acceptanceRuntimeStateWriter?.Write("clear-command-sent");
         }
+    }
+
+    private void OnYardStationCommandSent(
+        YardCommunicationContext context,
+        RfidStationConfig station,
+        RfidPollCommand command,
+        DateTimeOffset sentAt)
+    {
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+            _communicationPage.AddCommandSent(station, command, sentAt)));
     }
 
     private void OnAdminModeStateChanged(object? sender, PropertyChangedEventArgs e)

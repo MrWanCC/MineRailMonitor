@@ -66,6 +66,8 @@ public sealed class RfidStationPoller : IRfidStationPoller
 
     public IReadOnlyDictionary<RfidStationEndpointKey, RfidStationPollingStatus> EndpointStatuses => _statuses;
 
+    public event Action<RfidStationConfig, RfidPollCommand, DateTimeOffset>? CommandSent;
+
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         var index = 0;
@@ -93,6 +95,7 @@ public sealed class RfidStationPoller : IRfidStationPoller
                     cancellationToken).ConfigureAwait(false);
                 var requestedAt = _timeProvider.UtcNow;
                 status.RecordSent(requestedAt);
+                CommandSent?.Invoke(station, command, requestedAt);
                 if (_commandProvider is IRfidEndpointPollCommandProvider endpointCommandProvider)
                 {
                     endpointCommandProvider.MarkCommandSent(station, command, requestedAt);

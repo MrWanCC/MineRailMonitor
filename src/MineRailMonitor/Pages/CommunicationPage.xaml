@@ -468,10 +468,10 @@
                     </Grid>
                     <Grid Grid.Row="2" Background="{StaticResource DataGridHeaderBrush}">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="78" />
+                            <ColumnDefinition Width="94" />
                             <ColumnDefinition Width="42" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="116" />
+                            <ColumnDefinition Width="128" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="时间" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
                         <TextBlock Grid.Column="1" Text="方向" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
@@ -484,10 +484,10 @@
                             <DataTemplate>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="78" />
+                                        <ColumnDefinition Width="94" />
                                         <ColumnDefinition Width="42" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="116" />
+                                        <ColumnDefinition Width="128" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
                                     <TextBlock Grid.Column="1" Text="{Binding DirectionText}" Foreground="{Binding DirectionBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />

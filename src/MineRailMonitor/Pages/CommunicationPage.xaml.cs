@@ -18,6 +18,7 @@ public partial class CommunicationPage : UserControl
     private readonly ObservableCollection<CommunicationLogRow> _communicationLogRows = new();
     private readonly ObservableCollection<string> _frameRfidSlots = new();
     private readonly Dictionary<RfidStationEndpointKey, long> _invalidFrameCounts = new();
+    private readonly Dictionary<string, long> _sentLogCounts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _timeoutLogCounts = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<RfidStationConfig> _stations = Array.Empty<RfidStationConfig>();
     private IReadOnlyList<StationConfig> _yardConfigs = Array.Empty<StationConfig>();
@@ -135,12 +136,11 @@ public partial class CommunicationPage : UserControl
         var nextStatuses = statuses.Where(status => status is not null).ToArray();
         if (_hasObservedStationStatuses)
         {
-            AddTimeoutLogEntries(nextStatuses);
+            AddCommunicationActivityLogEntries(nextStatuses);
         }
-
-        foreach (var status in nextStatuses)
+        else
         {
-            _timeoutLogCounts[GetStatusLogKey(status)] = status.TimeoutCount;
+            InitializeCommunicationLogSnapshot(nextStatuses);
         }
 
         _hasObservedStationStatuses = true;
@@ -630,40 +630,82 @@ public partial class CommunicationPage : UserControl
         PacketLogCountText.Text = $"{_packetLog.Count.ToString(CultureInfo.InvariantCulture)} / 50";
     }
 
-    private void AddCommunicationLog(DateTimeOffset at, string direction, string data, string description)
+    private void AddCommunicationLog(DateTimeOffset at, string direction, string data, string description, bool updateLatestTx = false)
     {
         _communicationLogRows.Insert(0, new CommunicationLogRow(at, direction, FormatLogData(data), description));
+        if (direction == "TX" && updateLatestTx)
+        {
+            LatestTxTimeText.Text = FormatTime(at);
+            LatestTxSummaryText.Text = "发送读取命令";
+            LatestTxLengthText.Text = "自动轮询";
+            LatestTxHexText.Text = FormatLogData(data);
+        }
+
         while (_communicationLogRows.Count > 50)
         {
             _communicationLogRows.RemoveAt(_communicationLogRows.Count - 1);
         }
     }
 
-    private void AddTimeoutLogEntries(IReadOnlyList<RfidStationPollingStatus> statuses)
+    private void InitializeCommunicationLogSnapshot(IReadOnlyList<RfidStationPollingStatus> statuses)
     {
         foreach (var status in statuses)
         {
             var statusKey = GetStatusLogKey(status);
-            if (!_timeoutLogCounts.TryGetValue(statusKey, out var previousCount))
+            _sentLogCounts[statusKey] = status.SentCount;
+            _timeoutLogCounts[statusKey] = status.TimeoutCount;
+            if (status.SentCount > 0)
             {
-                _timeoutLogCounts[statusKey] = status.TimeoutCount;
-                continue;
+                AddCommunicationLog(
+                    status.LastSentAt ?? DateTimeOffset.Now,
+                    "TX",
+                    GetReadRequestHex(status),
+                    "发送读取命令",
+                    updateLatestTx: true);
             }
 
-            if (status.TimeoutCount <= previousCount)
+            if (status.TimeoutCount > 0)
             {
-                continue;
+                AddCommunicationLog(
+                    status.LastSentAt ?? DateTimeOffset.Now,
+                    "--",
+                    "--",
+                    "设备响应超时");
+            }
+        }
+    }
+
+    private void AddCommunicationActivityLogEntries(IReadOnlyList<RfidStationPollingStatus> statuses)
+    {
+        foreach (var status in statuses)
+        {
+            var statusKey = GetStatusLogKey(status);
+            var previousSentCount = _sentLogCounts.TryGetValue(statusKey, out var sentCount) ? sentCount : status.SentCount;
+            var previousTimeoutCount = _timeoutLogCounts.TryGetValue(statusKey, out var timeoutCount) ? timeoutCount : status.TimeoutCount;
+            var newSentCount = status.SentCount - previousSentCount;
+            var newTimeoutCount = status.TimeoutCount - previousTimeoutCount;
+
+            for (var index = 0; index < Math.Min(newSentCount, 50L); index++)
+            {
+                AddCommunicationLog(
+                    status.LastSentAt ?? DateTimeOffset.Now,
+                    "TX",
+                    GetReadRequestHex(status),
+                    "发送读取命令",
+                    updateLatestTx: true);
             }
 
-            var newTimeoutCount = status.TimeoutCount - previousCount;
-            for (var index = 0; index < newTimeoutCount; index++)
+            for (var index = 0; index < Math.Min(newTimeoutCount, 50L); index++)
             {
                 AddCommunicationLog(
                     DateTimeOffset.Now,
                     "--",
                     "--",
-                    $"{FormatStationName(status)}响应超时");
+                    "设备响应超时");
             }
+
+            _sentLogCounts[statusKey] = status.SentCount;
+            _timeoutLogCounts[statusKey] = status.TimeoutCount;
         }
     }
 
@@ -671,10 +713,12 @@ public partial class CommunicationPage : UserControl
         status.EndpointKey?.ToString()
         ?? (!string.IsNullOrWhiteSpace(status.StationId) ? status.StationId : "unknown");
 
-    private string FormatStationName(RfidStationPollingStatus status)
+    private string GetReadRequestHex(RfidStationPollingStatus status)
     {
         var station = _stations.FirstOrDefault(item => MatchesStation(status, item));
-        return station is null ? "设备" : FormatStation(station);
+        return station is null
+            ? "-"
+            : BitConverter.ToString(RfidRequestFrameBuilder.Build(station, RfidPollCommand.Read)).Replace('-', ' ');
     }
 
     private static string FormatLogData(string value) =>

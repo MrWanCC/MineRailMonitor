@@ -655,41 +655,48 @@ public partial class CommunicationPage : UserControl
 
     private void InitializeCommunicationLogSnapshot(IReadOnlyList<RfidStationPollingStatus> statuses)
     {
-        foreach (var status in statuses)
-        {
-            var statusKey = GetStatusLogKey(status);
-            _timeoutLogCounts[statusKey] = status.TimeoutCount;
-
-            if (status.TimeoutCount > 0)
-            {
-                AddCommunicationLog(
-                    status.LastSentAt ?? DateTimeOffset.Now,
-                    "--",
-                    "--",
-                    "设备响应超时");
-            }
-        }
+        AddTimeoutCommunicationLogEntries(statuses, includeExistingTimeouts: true);
     }
 
     private void AddCommunicationActivityLogEntries(IReadOnlyList<RfidStationPollingStatus> statuses)
     {
+        AddTimeoutCommunicationLogEntries(statuses, includeExistingTimeouts: false);
+    }
+
+    private void AddTimeoutCommunicationLogEntries(
+        IReadOnlyList<RfidStationPollingStatus> statuses,
+        bool includeExistingTimeouts)
+    {
+        var visibleStations = GetVisibleStations();
         foreach (var status in statuses)
         {
             var statusKey = GetStatusLogKey(status);
             var previousTimeoutCount = _timeoutLogCounts.TryGetValue(statusKey, out var timeoutCount) ? timeoutCount : status.TimeoutCount;
             var newTimeoutCount = status.TimeoutCount - previousTimeoutCount;
+            var timeoutCountToLog = includeExistingTimeouts
+                ? (status.TimeoutCount > 0 ? 1 : 0)
+                : newTimeoutCount;
+            var station = visibleStations.FirstOrDefault(station => MatchesStation(status, station));
 
-            for (var index = 0; index < Math.Min(newTimeoutCount, 50L); index++)
+            for (var index = 0; station is not null && index < Math.Min(Math.Max(timeoutCountToLog, 0), 50L); index++)
             {
                 AddCommunicationLog(
-                    DateTimeOffset.Now,
+                    status.LastErrorAt ?? status.LastSentAt ?? DateTimeOffset.Now,
                     "--",
                     "--",
-                    "设备响应超时");
+                    FormatTimeoutDescription(station));
             }
 
             _timeoutLogCounts[statusKey] = status.TimeoutCount;
         }
+    }
+
+    private static string FormatTimeoutDescription(RfidStationConfig station)
+    {
+        var endpointText = station.TryResolveEndpoint(out var endpoint)
+            ? $" · {FormatEndpoint(endpoint)} · 协议地址 {station.ProtocolAddress:X2}"
+            : string.Empty;
+        return $"设备响应超时：{FormatStation(station)}{endpointText}";
     }
 
     private string GetStatusLogKey(RfidStationPollingStatus status) =>

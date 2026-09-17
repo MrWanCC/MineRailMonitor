@@ -106,6 +106,20 @@ public sealed class OperationalPagesMarkupTests
     }
 
     [Fact]
+    public void Communication_timeout_logs_are_scoped_identified_and_deduplicated()
+    {
+        var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "CommunicationPage.xaml.cs"));
+
+        Assert.Contains("AddTimeoutCommunicationLogEntries", code, StringComparison.Ordinal);
+        Assert.Contains("visibleStations.FirstOrDefault(station => MatchesStation(status, station))", code, StringComparison.Ordinal);
+        Assert.Contains("status.LastErrorAt ?? status.LastSentAt", code, StringComparison.Ordinal);
+        Assert.Contains("设备响应超时：", code, StringComparison.Ordinal);
+        Assert.Contains("FormatEndpoint(endpoint)", code, StringComparison.Ordinal);
+        Assert.Contains("var newTimeoutCount = status.TimeoutCount - previousTimeoutCount", code, StringComparison.Ordinal);
+        Assert.Contains("_timeoutLogCounts[statusKey] = status.TimeoutCount", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Rfid_statistics_page_exposes_filters_metrics_trend_distribution_and_records()
     {
         var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml"));

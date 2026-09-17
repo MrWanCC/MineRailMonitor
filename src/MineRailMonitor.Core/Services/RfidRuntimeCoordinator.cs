@@ -76,6 +76,10 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
     public IReadOnlyDictionary<byte, StationRuntimeState> States => _states;
 
+    public IReadOnlyDictionary<RfidStationEndpointKey, StationRuntimeState> EndpointStates => _statesByEndpoint;
+
+    public TimeSpan OfflineTimeout => _policy.OfflineTimeout;
+
     public event Action<byte, RfidPollCommand, DateTimeOffset>? CommandSent;
 
     public void UpdateDefaults(RfidSettings settings)

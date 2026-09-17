@@ -54,6 +54,14 @@ public sealed class YardCommunicationClosedLoopTests
             Assert.True(context620.ResponseCount > 0);
             Assert.Equal(0x01, context560.PollingStatuses.Single().StationAddress);
             Assert.Equal(0x01, context620.PollingStatuses.Single().StationAddress);
+            Assert.True(context560.PollingStatuses.Single().SentCount > 0);
+            Assert.True(context620.PollingStatuses.Single().SentCount > 0);
+            Assert.True(context560.PollingStatuses.Single().ReceivedCount > 0);
+            Assert.True(context620.PollingStatuses.Single().ReceivedCount > 0);
+            Assert.True(context560.PollingStatuses.Single().IsOnline);
+            Assert.True(context620.PollingStatuses.Single().IsOnline);
+            Assert.Equal(0, context560.PollingStatuses.Single().TimeoutCount);
+            Assert.Equal(0, context620.PollingStatuses.Single().TimeoutCount);
 
             await WaitUntilAsync(() => simulator560.ClearCount > 0);
             var runtime620 = context620.RuntimeStates.Single();

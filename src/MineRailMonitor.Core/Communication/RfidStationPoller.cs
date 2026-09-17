@@ -12,6 +12,7 @@ public sealed class RfidStationPoller : IRfidStationPoller
     private readonly IRfidRequestSender _sender;
     private readonly IRfidTimeProvider _timeProvider;
     private readonly IRfidPollCommandProvider? _commandProvider;
+    private readonly TimeSpan _requestTimeout;
     private readonly IReadOnlyList<RfidStationEndpointKey> _stationKeys;
     private readonly Dictionary<RfidStationEndpointKey, RfidStationPollingStatus> _statuses;
     private readonly RfidProtocolAddressCollectionView<RfidStationPollingStatus> _statusView;
@@ -21,13 +22,19 @@ public sealed class RfidStationPoller : IRfidStationPoller
         int pollIntervalMs,
         IRfidRequestSender sender,
         IRfidTimeProvider timeProvider,
-        IRfidPollCommandProvider? commandProvider = null)
+        IRfidPollCommandProvider? commandProvider = null,
+        TimeSpan? requestTimeout = null)
     {
         if (stations is null) throw new ArgumentNullException(nameof(stations));
         if (pollIntervalMs <= 0) throw new ArgumentOutOfRangeException(nameof(pollIntervalMs));
         _sender = sender ?? throw new ArgumentNullException(nameof(sender));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _commandProvider = commandProvider;
+        _requestTimeout = requestTimeout ?? RfidRuntimePolicy.Default.OfflineTimeout;
+        if (_requestTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(requestTimeout));
+        }
         _stations = stations.Where(station => station.Enabled).ToArray();
         if (_stations.Count == 0) throw new ArgumentException("At least one enabled RFID station is required.", nameof(stations));
         var duplicateCommunicationKeys = RfidStationConfig.FindDuplicateCommunicationKeys(_stations);
@@ -64,6 +71,7 @@ public sealed class RfidStationPoller : IRfidStationPoller
         var index = 0;
         while (!cancellationToken.IsCancellationRequested)
         {
+            EvaluateTimeouts(_timeProvider.UtcNow, _requestTimeout);
             var station = _stations[index];
             var key = _stationKeys[index];
             var command = _commandProvider is IRfidEndpointPollCommandProvider endpointProvider
@@ -84,9 +92,7 @@ public sealed class RfidStationPoller : IRfidStationPoller
                     endpoint,
                     cancellationToken).ConfigureAwait(false);
                 var requestedAt = _timeProvider.UtcNow;
-                status.LastRequestAt = requestedAt;
-                status.RequestCount++;
-                status.LastError = null;
+                status.RecordSent(requestedAt);
                 if (_commandProvider is IRfidEndpointPollCommandProvider endpointCommandProvider)
                 {
                     endpointCommandProvider.MarkCommandSent(station, command, requestedAt);
@@ -102,8 +108,7 @@ public sealed class RfidStationPoller : IRfidStationPoller
             }
             catch (Exception exception)
             {
-                status.LastErrorAt = _timeProvider.UtcNow;
-                status.LastError = exception.Message;
+                status.RecordSendError(_timeProvider.UtcNow, exception.Message);
             }
             index = (index + 1) % _stations.Count;
             if (!cancellationToken.IsCancellationRequested)
@@ -120,21 +125,66 @@ public sealed class RfidStationPoller : IRfidStationPoller
             return false;
         }
 
-        var stationIndex = _stations
-            .Select((item, index) => new { Station = item, Index = index })
-            .FirstOrDefault(item =>
-            item.Station.ProtocolAddress == protocolAddress &&
-            item.Station.TryResolveEndpoint(out var endpoint) &&
-            endpoint.Port == sourceEndpoint.Port &&
-            endpoint.Address.Equals(sourceEndpoint.Address));
-        if (stationIndex is null || !_statuses.TryGetValue(_stationKeys[stationIndex.Index], out var status))
+        if (!TryGetStatus(sourceEndpoint, protocolAddress, out var status))
         {
             return false;
         }
 
-        status.LastResponseAt = receivedAt;
-        status.ResponseCount++;
+        status.RecordResponse(receivedAt);
         return true;
+    }
+
+    public bool RecordSent(IPEndPoint destinationEndpoint, byte protocolAddress, DateTimeOffset sentAt)
+    {
+        if (destinationEndpoint is null || !TryGetStatus(destinationEndpoint, protocolAddress, out var status))
+        {
+            return false;
+        }
+
+        status.RecordSent(sentAt);
+        return true;
+    }
+
+    public void EvaluateTimeouts(DateTimeOffset now, TimeSpan timeout)
+    {
+        foreach (var status in _statuses.Values)
+        {
+            status.RecordTimeoutsIfDue(now, timeout);
+        }
+    }
+
+    public void SynchronizeOnlineStates(IReadOnlyDictionary<RfidStationEndpointKey, StationRuntimeState> runtimeStates)
+    {
+        if (runtimeStates is null)
+        {
+            throw new ArgumentNullException(nameof(runtimeStates));
+        }
+
+        foreach (var status in _statuses.Values)
+        {
+            if (status.EndpointKey.HasValue && runtimeStates.TryGetValue(status.EndpointKey.Value, out var state))
+            {
+                status.SetOnlineState(state.CommunicationState == StationCommunicationState.Online);
+            }
+        }
+    }
+
+    private bool TryGetStatus(IPEndPoint endpoint, byte protocolAddress, out RfidStationPollingStatus status)
+    {
+        var stationIndex = _stations
+            .Select((item, index) => new { Station = item, Index = index })
+            .FirstOrDefault(item =>
+                item.Station.ProtocolAddress == protocolAddress &&
+                item.Station.TryResolveEndpoint(out var configuredEndpoint) &&
+                configuredEndpoint.Port == endpoint.Port &&
+                configuredEndpoint.Address.Equals(endpoint.Address));
+        if (stationIndex is not null && _statuses.TryGetValue(_stationKeys[stationIndex.Index], out status!))
+        {
+            return true;
+        }
+
+        status = null!;
+        return false;
     }
 
     private static RfidStationEndpointKey CreateStationKey(RfidStationConfig station, int index)

@@ -21,6 +21,7 @@ public partial class CommunicationPage : UserControl
     private IReadOnlyList<RfidStationPollingStatus> _stationStatuses = Array.Empty<RfidStationPollingStatus>();
     private HashSet<string>? _displayScopeStationIds;
     private bool _isYardFilterSync;
+    private string? _selectedStationId;
     private Func<RfidStationConfig, RfidPollCommand, Task>? _sendTestAsync;
 
     public CommunicationPage()
@@ -258,6 +259,18 @@ public partial class CommunicationPage : UserControl
         }
     }
 
+    private void OnStationSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (StationStatusGrid.SelectedItem is not StationStatusRow row)
+        {
+            UpdateSelectedDiagnostic(null, null);
+            return;
+        }
+
+        _selectedStationId = row.StationId;
+        UpdateSelectedDiagnostic(row.Station, row.Status);
+    }
+
     private string GetSelectedYardId() =>
         (YardFilter.SelectedItem as RfidStationYardOption)?.Id ?? RfidStationYardOption.AllId;
 
@@ -335,14 +348,87 @@ public partial class CommunicationPage : UserControl
 
     private void RefreshStationRows()
     {
-        var rows = GetVisibleStations().Select(station =>
+        var visibleStations = GetVisibleStations();
+        var rows = visibleStations.Select(station =>
         {
             var status = _stationStatuses.FirstOrDefault(item => MatchesStation(item, station));
             return new StationStatusRow(station, status);
         }).ToArray();
 
         StationStatusGrid.ItemsSource = rows;
+        var selectedRow = rows.FirstOrDefault(row =>
+            string.Equals(row.StationId, _selectedStationId, StringComparison.OrdinalIgnoreCase))
+            ?? rows.FirstOrDefault();
+        _selectedStationId = selectedRow?.StationId;
+        StationStatusGrid.SelectedItem = selectedRow;
+        UpdateSelectedDiagnostic(selectedRow?.Station, selectedRow?.Status);
+        UpdateDiagnosticsOverview(visibleStations, rows);
         NoStationText.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UpdateDiagnosticsOverview(
+        IReadOnlyList<RfidStationConfig> visibleStations,
+        IReadOnlyList<StationStatusRow> rows)
+    {
+        var statuses = rows
+            .Select(row => row.Status)
+            .Where(status => status is not null)
+            .Cast<RfidStationPollingStatus>()
+            .ToArray();
+        OverviewStationCountText.Text = visibleStations.Count.ToString(CultureInfo.InvariantCulture);
+        OverviewOnlineCountText.Text = statuses.Count(status => status.IsOnline).ToString(CultureInfo.InvariantCulture);
+        OverviewOfflineCountText.Text = statuses.Count(status => !status.IsOnline).ToString(CultureInfo.InvariantCulture);
+        OverviewTimeoutCountText.Text = statuses.Sum(status => status.TimeoutCount).ToString(CultureInfo.InvariantCulture);
+    }
+
+    private void UpdateSelectedDiagnostic(RfidStationConfig? station, RfidStationPollingStatus? status)
+    {
+        if (station is null)
+        {
+            SelectedDiagnosticStationText.Text = "-";
+            SelectedDiagnosticYardText.Text = "-";
+            SelectedDiagnosticIpText.Text = "-";
+            SelectedDiagnosticPortText.Text = "-";
+            SelectedDiagnosticProtocolText.Text = "-";
+            SelectedDiagnosticStateText.Text = "-";
+            SelectedDiagnosticStateText.Foreground = (Brush)FindResource("TextSecondaryBrush");
+            SelectedDiagnosticLastSentText.Text = "-";
+            SelectedDiagnosticLastReceivedText.Text = "-";
+            SelectedDiagnosticResponseText.Text = "-";
+            SelectedDiagnosticConsecutiveTimeoutText.Text = "0";
+            SelectedDiagnosticErrorText.Text = "无";
+            SelectedDiagnosticCountsText.Text = "发送 0 · 接收 0 · 超时 0";
+            return;
+        }
+
+        SelectedDiagnosticStationText.Text = FormatStation(station);
+        SelectedDiagnosticYardText.Text = string.IsNullOrWhiteSpace(station.YardId) ? "-" : station.YardId;
+        if (station.TryResolveEndpoint(out var endpoint))
+        {
+            SelectedDiagnosticIpText.Text = endpoint.Address.ToString();
+            SelectedDiagnosticPortText.Text = endpoint.Port.ToString(CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            SelectedDiagnosticIpText.Text = "端点无效";
+            SelectedDiagnosticPortText.Text = "-";
+        }
+
+        SelectedDiagnosticProtocolText.Text = $"0x{station.ProtocolAddress:X2}";
+        SelectedDiagnosticStateText.Text = FormatStatus(status);
+        SelectedDiagnosticStateText.Foreground = status?.IsOnline == true
+            ? (Brush)FindResource("SuccessBrush")
+            : (Brush)FindResource("WarningBrush");
+        SelectedDiagnosticLastSentText.Text = FormatTime(status?.LastSentAt);
+        SelectedDiagnosticLastReceivedText.Text = FormatTime(status?.LastReceivedAt);
+        SelectedDiagnosticResponseText.Text = status?.LastResponseMilliseconds is long milliseconds
+            ? $"{milliseconds} ms"
+            : "-";
+        SelectedDiagnosticConsecutiveTimeoutText.Text = (status?.ConsecutiveTimeoutCount ?? 0)
+            .ToString(CultureInfo.InvariantCulture);
+        SelectedDiagnosticErrorText.Text = status?.LastError ?? "无";
+        SelectedDiagnosticCountsText.Text =
+            $"发送 {status?.SentCount ?? 0} · 接收 {status?.ReceivedCount ?? 0} · 超时 {status?.TimeoutCount ?? 0}";
     }
 
     private IReadOnlyList<RfidStationConfig> GetVisibleStations()
@@ -378,17 +464,13 @@ public partial class CommunicationPage : UserControl
 
     private static bool MatchesStation(RfidStationPollingStatus status, RfidStationConfig station)
     {
-        if (!string.IsNullOrWhiteSpace(status.StationId))
+        if (status.EndpointKey.HasValue && station.TryResolveEndpoint(out var endpoint))
         {
-            return string.Equals(status.StationId, station.StationId, StringComparison.OrdinalIgnoreCase);
+            return status.EndpointKey.Value == new RfidStationEndpointKey(endpoint, station.ProtocolAddress);
         }
 
-        if (!status.EndpointKey.HasValue || !station.TryResolveEndpoint(out var endpoint))
-        {
-            return false;
-        }
-
-        return status.EndpointKey.Value == new RfidStationEndpointKey(endpoint, station.ProtocolAddress);
+        return !string.IsNullOrWhiteSpace(status.StationId) &&
+            string.Equals(status.StationId, station.StationId, StringComparison.OrdinalIgnoreCase);
     }
 
     private void AddLog(string line)
@@ -477,21 +559,44 @@ public partial class CommunicationPage : UserControl
     {
         public StationStatusRow(RfidStationConfig station, RfidStationPollingStatus? status)
         {
+            Station = station;
+            Status = status;
+            StationId = station.StationId;
             StationText = FormatStation(station);
             EndpointText = station.TryResolveEndpoint(out var endpoint) ? FormatEndpoint(endpoint) : "端点无效";
             ProtocolAddressText = station.ProtocolAddress.ToString("X2", CultureInfo.InvariantCulture);
-            LastRequestText = FormatTime(status?.LastRequestAt);
-            LastResponseText = FormatTime(status?.LastResponseAt);
-            StatusText = status?.LastError is not null
-                ? "异常"
-                : status?.LastResponseAt.HasValue == true ? "在线" : "等待";
+            LastSentText = FormatTime(status?.LastSentAt);
+            LastReceivedText = FormatTime(status?.LastReceivedAt);
+            ResponseMillisecondsText = status?.LastResponseMilliseconds is long milliseconds
+                ? $"{milliseconds} ms"
+                : "-";
+            SentCountText = (status?.SentCount ?? 0).ToString(CultureInfo.InvariantCulture);
+            ReceivedCountText = (status?.ReceivedCount ?? 0).ToString(CultureInfo.InvariantCulture);
+            TimeoutCountText = (status?.TimeoutCount ?? 0).ToString(CultureInfo.InvariantCulture);
+            ConsecutiveTimeoutCountText = (status?.ConsecutiveTimeoutCount ?? 0).ToString(CultureInfo.InvariantCulture);
+            LastErrorText = status?.LastError ?? "-";
+            StatusText = FormatStatus(status);
         }
 
+        public RfidStationConfig Station { get; }
+        public RfidStationPollingStatus? Status { get; }
+        public string StationId { get; }
         public string StationText { get; }
         public string EndpointText { get; }
         public string ProtocolAddressText { get; }
-        public string LastRequestText { get; }
-        public string LastResponseText { get; }
+        public string LastSentText { get; }
+        public string LastReceivedText { get; }
+        public string ResponseMillisecondsText { get; }
+        public string SentCountText { get; }
+        public string ReceivedCountText { get; }
+        public string TimeoutCountText { get; }
+        public string ConsecutiveTimeoutCountText { get; }
+        public string LastErrorText { get; }
         public string StatusText { get; }
     }
+
+    private static string FormatStatus(RfidStationPollingStatus? status) =>
+        status is null || !status.LastSentAt.HasValue
+            ? "等待"
+            : status.IsOnline ? "在线" : "离线";
 }

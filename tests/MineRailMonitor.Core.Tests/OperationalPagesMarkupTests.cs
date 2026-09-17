@@ -17,6 +17,14 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("发送读取", markup, StringComparison.Ordinal);
         Assert.Contains("发送清空", markup, StringComparison.Ordinal);
         Assert.Contains("StationStatusGrid", markup, StringComparison.Ordinal);
+        Assert.Contains("CommunicationOverviewBar", markup, StringComparison.Ordinal);
+        Assert.Contains("OverviewStationCountText", markup, StringComparison.Ordinal);
+        Assert.Contains("OverviewOnlineCountText", markup, StringComparison.Ordinal);
+        Assert.Contains("OverviewOfflineCountText", markup, StringComparison.Ordinal);
+        Assert.Contains("OverviewTimeoutCountText", markup, StringComparison.Ordinal);
+        Assert.Contains("SelectedDiagnosticCard", markup, StringComparison.Ordinal);
+        Assert.Contains("SelectedDiagnosticCountsText", markup, StringComparison.Ordinal);
+        Assert.Contains("ConsecutiveTimeoutCountText", markup, StringComparison.Ordinal);
         Assert.Contains("LatestRxText", markup, StringComparison.Ordinal);
         Assert.Contains("ConfigureStations", code, StringComparison.Ordinal);
         Assert.Contains("_sendTestAsync", code, StringComparison.Ordinal);
@@ -29,6 +37,10 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("_displayScopeStationIds", code, StringComparison.Ordinal);
         Assert.Contains("GetVisibleStations", code, StringComparison.Ordinal);
         Assert.Contains("ResetScopePresentation", code, StringComparison.Ordinal);
+        Assert.Contains("UpdateDiagnosticsOverview", code, StringComparison.Ordinal);
+        Assert.Contains("UpdateSelectedDiagnostic", code, StringComparison.Ordinal);
+        Assert.Contains("OnStationSelectionChanged", code, StringComparison.Ordinal);
+        Assert.Contains("RfidStationEndpointKey", code, StringComparison.Ordinal);
         Assert.DoesNotContain("item.StationAddress == station.ProtocolAddress", code, StringComparison.Ordinal);
     }
 

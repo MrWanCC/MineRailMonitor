@@ -191,7 +191,8 @@ public sealed class YardCommunicationContext : IDisposable
                     _settings.PollIntervalMs,
                     transport,
                     _timeProvider,
-                    _runtimeCoordinator);
+                    _runtimeCoordinator,
+                    _runtimeCoordinator?.OfflineTimeout);
                 var pollerCts = new CancellationTokenSource();
                 lock (_syncRoot)
                 {
@@ -257,7 +258,17 @@ public sealed class YardCommunicationContext : IDisposable
         await StartAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public void Evaluate(DateTimeOffset now) => _runtimeCoordinator?.Evaluate(now);
+    public void Evaluate(DateTimeOffset now)
+    {
+        _runtimeCoordinator?.Evaluate(now);
+        if (_poller is null || _runtimeCoordinator is null)
+        {
+            return;
+        }
+
+        _poller.EvaluateTimeouts(now, _runtimeCoordinator.OfflineTimeout);
+        _poller.SynchronizeOnlineStates(_runtimeCoordinator.EndpointStates);
+    }
 
     public void UpdateSettings(RfidSettings settings)
     {
@@ -308,6 +319,7 @@ public sealed class YardCommunicationContext : IDisposable
             RfidRequestFrameBuilder.Build(station, command),
             endpoint,
             cancellationToken).ConfigureAwait(false);
+        _poller?.RecordSent(endpoint, station.ProtocolAddress, _timeProvider.UtcNow);
     }
 
     public void Dispose()

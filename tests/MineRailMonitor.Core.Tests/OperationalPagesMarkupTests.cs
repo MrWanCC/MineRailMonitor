@@ -112,6 +112,41 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("CreateTxBlackBoxRecord", mainWindowCode, StringComparison.Ordinal);
         Assert.Contains("CreateRxBlackBoxRecord", mainWindowCode, StringComparison.Ordinal);
         Assert.Contains("_rawPacketBlackBoxWriter.TryEnqueue", mainWindowCode, StringComparison.Ordinal);
+        Assert.Contains("RawPacketBlackBoxRecordFactory", mainWindowCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Main_window_disposes_manager_before_unsubscribing_black_box_events()
+    {
+        var mainWindowCode = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));
+        var firstDispose = mainWindowCode.IndexOf("_yardCommunicationManager.Dispose();", StringComparison.Ordinal);
+        var firstUnsubscribe = mainWindowCode.IndexOf(
+            "_yardCommunicationManager.DatagramReceived -= OnYardDatagramReceived;",
+            StringComparison.Ordinal);
+        var lastDispose = mainWindowCode.LastIndexOf("_yardCommunicationManager.Dispose();", StringComparison.Ordinal);
+        var lastUnsubscribe = mainWindowCode.LastIndexOf(
+            "_yardCommunicationManager.DatagramReceived -= OnYardDatagramReceived;",
+            StringComparison.Ordinal);
+
+        Assert.True(firstDispose >= 0);
+        Assert.True(firstUnsubscribe > firstDispose);
+        Assert.True(lastDispose >= 0);
+        Assert.True(lastUnsubscribe > lastDispose);
+        Assert.Contains("_rawPacketBlackBoxWriter.Dispose();", mainWindowCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Black_box_station_resolution_requires_protocol_address()
+    {
+        var factoryCode = File.ReadAllText(Locate(
+            "src",
+            "MineRailMonitor.Infrastructure",
+            "BlackBox",
+            "RawPacketBlackBoxRecordFactory.cs"));
+
+        Assert.Contains("if (!protocolAddress.HasValue)", factoryCode, StringComparison.Ordinal);
+        Assert.Contains("return null", factoryCode, StringComparison.Ordinal);
+        Assert.Contains("station.ProtocolAddress == protocolAddress.Value", factoryCode, StringComparison.Ordinal);
     }
 
     [Fact]

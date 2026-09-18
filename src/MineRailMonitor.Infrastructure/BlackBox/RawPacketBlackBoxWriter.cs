@@ -180,7 +180,11 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
             if (existing is not null)
             {
                 _writers.Remove(yardKey);
-                CloseWriter(existing);
+                var closeException = CloseWriter(existing);
+                if (closeException is not null)
+                {
+                    SetLastErrorUnsafe($"黑匣子文件关闭失败：{GetErrorMessage(closeException)}");
+                }
             }
 
             var dateDirectory = Path.Combine(RootDirectory, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
@@ -200,17 +204,23 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
     private void RemoveWriterAfterFailure(string yardId, Exception exception)
     {
         var yardKey = SanitizeYardId(yardId);
+        Exception? closeException = null;
         lock (_syncRoot)
         {
             if (_writers.TryGetValue(yardKey, out var writer))
             {
                 _writers.Remove(yardKey);
-                CloseWriter(writer);
+                closeException = CloseWriter(writer);
             }
         }
 
         Interlocked.Increment(ref _droppedCount);
-        SetLastError(GetErrorMessage(exception));
+        var message = GetErrorMessage(exception);
+        if (closeException is not null)
+        {
+            message = $"{message}；关闭黑匣子文件失败：{GetErrorMessage(closeException)}";
+        }
+        SetLastError(message);
     }
 
     private void PurgeIfNeeded(bool force)
@@ -267,33 +277,45 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
 
     private void CloseAllWriters()
     {
+        CachedWriter[] writers;
         lock (_syncRoot)
         {
-            foreach (var writer in _writers.Values.ToArray())
-            {
-                CloseWriter(writer);
-            }
+            writers = _writers.Values.ToArray();
             _writers.Clear();
+        }
+
+        foreach (var writer in writers)
+        {
+            var closeException = CloseWriter(writer);
+            if (closeException is not null)
+            {
+                SetLastError($"黑匣子文件关闭失败：{GetErrorMessage(closeException)}");
+            }
         }
     }
 
-    private static void CloseWriter(CachedWriter writer)
+    private static Exception? CloseWriter(CachedWriter writer)
     {
+        Exception? firstException = null;
         try
         {
             writer.Writer.Flush();
         }
-        catch
+        catch (Exception exception)
         {
+            firstException = exception;
         }
 
         try
         {
             writer.Writer.Dispose();
         }
-        catch
+        catch (Exception exception)
         {
+            firstException ??= exception;
         }
+
+        return firstException;
     }
 
     private void RecordDrop(string message)
@@ -306,9 +328,11 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
     {
         lock (_syncRoot)
         {
-            _lastError = message;
+            SetLastErrorUnsafe(message);
         }
     }
+
+    private void SetLastErrorUnsafe(string message) => _lastError = message;
 
     private void ClearLastError()
     {

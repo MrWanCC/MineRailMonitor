@@ -628,12 +628,12 @@ public partial class MainWindow : Window
     {
         if (_yardCommunicationManager is not null)
         {
+            _yardCommunicationManager.Dispose();
             _yardCommunicationManager.DatagramReceived -= OnYardDatagramReceived;
             _yardCommunicationManager.DatagramSent -= OnYardDatagramSent;
             _yardCommunicationManager.ReceiveError -= OnYardReceiveError;
             _yardCommunicationManager.CommandSent -= OnYardCommandSent;
             _yardCommunicationManager.StationCommandSent -= OnYardStationCommandSent;
-            _yardCommunicationManager.Dispose();
         }
         _yardCommunicationManager = null;
         _acceptanceRuntimeStateWriter?.Dispose();
@@ -791,61 +791,12 @@ public partial class MainWindow : Window
     private RawPacketBlackBoxRecord CreateRxBlackBoxRecord(
         YardCommunicationContext context,
         RfidUdpDatagramEventArgs args)
-    {
-        var protocolAddress = args.Data.Length >= 3 ? args.Data[2] : (byte?)null;
-        var station = FindBlackBoxStation(context, args.RemoteEndPoint, protocolAddress);
-        return new RawPacketBlackBoxRecord
-        {
-            Time = args.ReceivedAt,
-            Direction = "RX",
-            YardId = context.YardId,
-            StationId = station?.StationId,
-            ProtocolAddress = protocolAddress?.ToString("X2"),
-            LocalEndPoint = context.ListenerEndPoint?.ToString(),
-            RemoteEndPoint = args.RemoteEndPoint.ToString(),
-            Length = args.Data.Length,
-            Hex = FormatHex(args.Data),
-            Valid = args.IsValid,
-            ValidationError = args.ValidationError
-        };
-    }
+        => RawPacketBlackBoxRecordFactory.FromReceived(context, args);
 
     private RawPacketBlackBoxRecord CreateTxBlackBoxRecord(
         YardCommunicationContext context,
         RfidUdpDatagramSentEventArgs args)
-    {
-        var protocolAddress = args.Data.Length >= 3 ? args.Data[2] : (byte?)null;
-        var station = FindBlackBoxStation(context, args.DestinationEndPoint, protocolAddress);
-        var command = args.Data.Length > 4 && args.Data[4] == 0x01 ? "Clear" : "Read";
-        return new RawPacketBlackBoxRecord
-        {
-            Time = args.SentAt,
-            Direction = "TX",
-            YardId = context.YardId,
-            StationId = station?.StationId,
-            ProtocolAddress = protocolAddress?.ToString("X2"),
-            LocalEndPoint = args.LocalEndPoint?.ToString(),
-            RemoteEndPoint = args.DestinationEndPoint.ToString(),
-            Length = args.Data.Length,
-            Hex = FormatHex(args.Data),
-            Command = command
-        };
-    }
-
-    private static RfidStationConfig? FindBlackBoxStation(
-        YardCommunicationContext context,
-        IPEndPoint endpoint,
-        byte? protocolAddress)
-    {
-        return context.Stations.FirstOrDefault(station =>
-            station.TryResolveEndpoint(out var stationEndpoint) &&
-            stationEndpoint.Address.Equals(endpoint.Address) &&
-            stationEndpoint.Port == endpoint.Port &&
-            (!protocolAddress.HasValue || station.ProtocolAddress == protocolAddress.Value));
-    }
-
-    private static string FormatHex(byte[] data) =>
-        BitConverter.ToString(data).Replace('-', ' ');
+        => RawPacketBlackBoxRecordFactory.FromSent(context, args);
 
     private void OnOpenBlackBoxDirectoryRequested()
     {
@@ -884,12 +835,12 @@ public partial class MainWindow : Window
         _clockTimer.Stop();
         if (_yardCommunicationManager is not null)
         {
+            _yardCommunicationManager.Dispose();
             _yardCommunicationManager.DatagramReceived -= OnYardDatagramReceived;
             _yardCommunicationManager.DatagramSent -= OnYardDatagramSent;
             _yardCommunicationManager.ReceiveError -= OnYardReceiveError;
             _yardCommunicationManager.CommandSent -= OnYardCommandSent;
             _yardCommunicationManager.StationCommandSent -= OnYardStationCommandSent;
-            _yardCommunicationManager.Dispose();
         }
         _rawPacketBlackBoxWriter.Dispose();
         _acceptanceRuntimeStateWriter?.Write("closed");

@@ -1,4 +1,6 @@
 using System.Text;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using MineRailMonitor.Infrastructure.BlackBox;
 
 namespace MineRailMonitor.Infrastructure.Tests;
@@ -6,7 +8,7 @@ namespace MineRailMonitor.Infrastructure.Tests;
 public sealed class RawPacketBlackBoxWriterTests
 {
     [Fact]
-    public void Writes_jsonl_records_partitioned_by_record_date_and_yard()
+    public void BlackBox_writes_one_valid_json_line_per_packet()
     {
         using var directory = new TemporaryDirectory();
         var recordTime = new DateTimeOffset(2026, 9, 18, 10, 20, 30, TimeSpan.FromHours(8));
@@ -18,9 +20,24 @@ public sealed class RawPacketBlackBoxWriterTests
         var path = Path.Combine(directory.Path, "2026-09-18", "560.jsonl");
         var lines = File.ReadAllLines(path, Encoding.UTF8);
         Assert.Single(lines);
-        Assert.Contains("\"schemaVersion\":1", lines[0], StringComparison.Ordinal);
-        Assert.Contains("\"yardId\":\"560\"", lines[0], StringComparison.Ordinal);
-        Assert.Contains("\"direction\":\"TX\"", lines[0], StringComparison.Ordinal);
+        var json = JsonConvert.DeserializeObject<JObject>(lines[0]);
+        Assert.NotNull(json);
+        Assert.Equal(1, json!["schemaVersion"]!.Value<int>());
+        Assert.Equal("560", json["yard"]!.Value<string>());
+        Assert.Equal("127.0.0.1:62001", json["local"]!.Value<string>());
+        Assert.Equal("127.0.0.1:10001", json["remote"]!.Value<string>());
+        Assert.Equal("TX", json["direction"]!.Value<string>());
+        foreach (var propertyName in new[]
+                 {
+                     "schemaVersion", "time", "direction", "yard", "stationId", "local", "remote",
+                     "protocolAddress", "length", "valid", "validationError", "command", "hex"
+                 })
+        {
+            Assert.NotNull(json[propertyName]);
+        }
+        Assert.Null(json["yardId"]);
+        Assert.Null(json["localEndPoint"]);
+        Assert.Null(json["remoteEndPoint"]);
         Assert.Equal(1, writer.GetSnapshot().WrittenCount);
     }
 
@@ -35,8 +52,8 @@ public sealed class RawPacketBlackBoxWriterTests
         Assert.True(writer.TryEnqueue(CreateRecord(recordTime, "620", "RX")));
         writer.Dispose();
 
-        Assert.True(File.Exists(Path.Combine(directory.Path, "2026-09-18", "560.jsonl")));
-        Assert.True(File.Exists(Path.Combine(directory.Path, "2026-09-18", "620.jsonl")));
+        Assert.Single(ReadJsonLines(directory.Path, "560"));
+        Assert.Single(ReadJsonLines(directory.Path, "620"));
     }
 
     [Fact]
@@ -102,6 +119,25 @@ public sealed class RawPacketBlackBoxWriterTests
     }
 
     [Fact]
+    public void BlackBox_flushes_pending_records_on_dispose()
+    {
+        using var directory = new TemporaryDirectory();
+        var recordTime = new DateTimeOffset(2026, 9, 18, 10, 20, 30, TimeSpan.Zero);
+        using var writer = new RawPacketBlackBoxWriter(directory.Path);
+
+        for (var index = 0; index < 100; index++)
+        {
+            Assert.True(writer.TryEnqueue(CreateRecord(recordTime, "560", "RX")));
+        }
+
+        writer.Dispose();
+
+        var lines = ReadJsonLines(directory.Path, "560");
+        Assert.Equal(100, lines.Count);
+        Assert.All(lines, json => Assert.Equal(1, json["schemaVersion"]!.Value<int>()));
+    }
+
+    [Fact]
     public async Task Retention_uses_injected_clock_and_runs_again_when_clock_date_changes()
     {
         using var directory = new TemporaryDirectory();
@@ -125,6 +161,38 @@ public sealed class RawPacketBlackBoxWriterTests
 
         Assert.False(Directory.Exists(Path.Combine(directory.Path, "2026-09-18")));
         Assert.True(File.Exists(Path.Combine(directory.Path, "2026-09-19", "560.jsonl")));
+    }
+
+    [Fact]
+    public void BlackBox_retention_removes_only_expired_date_directories()
+    {
+        using var directory = new TemporaryDirectory();
+        var today = new DateTimeOffset(2026, 9, 18, 9, 0, 0, TimeSpan.Zero);
+        var retainedBoundary = today.AddDays(-29).ToString("yyyy-MM-dd");
+        var expiredBoundary = today.AddDays(-30).ToString("yyyy-MM-dd");
+        var todayDirectory = Path.Combine(directory.Path, today.ToString("yyyy-MM-dd"));
+        var retainedDirectory = Path.Combine(directory.Path, retainedBoundary);
+        var expiredDirectory = Path.Combine(directory.Path, expiredBoundary);
+        var nonDateDirectory = Path.Combine(directory.Path, "not-a-date");
+        Directory.CreateDirectory(todayDirectory);
+        Directory.CreateDirectory(retainedDirectory);
+        Directory.CreateDirectory(expiredDirectory);
+        Directory.CreateDirectory(nonDateDirectory);
+        File.WriteAllText(Path.Combine(retainedDirectory, "keep.txt"), "keep");
+        File.WriteAllText(Path.Combine(expiredDirectory, "delete.txt"), "delete");
+        File.WriteAllText(Path.Combine(nonDateDirectory, "keep.txt"), "keep");
+
+        using var writer = new RawPacketBlackBoxWriter(
+            directory.Path,
+            retentionDays: 30,
+            nowProvider: () => today);
+        Assert.True(writer.TryEnqueue(CreateRecord(today, "560", "RX")));
+        writer.Dispose();
+
+        Assert.True(Directory.Exists(todayDirectory));
+        Assert.True(Directory.Exists(retainedDirectory));
+        Assert.False(Directory.Exists(expiredDirectory));
+        Assert.True(Directory.Exists(nonDateDirectory));
     }
 
     [Fact]
@@ -161,6 +229,20 @@ public sealed class RawPacketBlackBoxWriterTests
             Valid = true,
             Command = direction == "TX" ? "Read" : null
         };
+
+    private static IReadOnlyList<JObject> ReadJsonLines(string rootDirectory, string yardId)
+    {
+        var dateDirectory = Directory.GetDirectories(rootDirectory).Single(path =>
+            DateTime.TryParseExact(
+                new DirectoryInfo(path).Name,
+                "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out _));
+        return File.ReadAllLines(Path.Combine(dateDirectory, yardId + ".jsonl"))
+            .Select(line => JsonConvert.DeserializeObject<JObject>(line)!)
+            .ToArray();
+    }
 
     private static async Task WaitForAsync(Func<bool> condition)
     {

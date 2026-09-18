@@ -1019,6 +1019,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (FaultModeComboBox.SelectedValue is string modeText &&
+            Enum.TryParse<SimulatorFaultMode>(modeText, out var selectedMode))
+        {
+            FaultDelayTextBox.IsEnabled = selectedMode == SimulatorFaultMode.Delay;
+        }
+
         TryApplyFaultConfigurationFromUi();
     }
 

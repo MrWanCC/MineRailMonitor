@@ -74,6 +74,25 @@ public sealed class SimulatorMarkupTests
         Assert.DoesNotContain("_stationInputs", code, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Fault_mode_selection_enables_delay_editor_before_validation()
+    {
+        var code = File.ReadAllText(Locate("src", "MineRailMonitor.Simulator", "MainWindow.xaml.cs"));
+        var handlerStart = code.IndexOf("private void OnFaultModeSelectionChanged", StringComparison.Ordinal);
+        var handlerEnd = code.IndexOf("private void OnFaultDelayTextChanged", handlerStart, StringComparison.Ordinal);
+
+        Assert.True(handlerStart >= 0);
+        Assert.True(handlerEnd > handlerStart);
+
+        var handler = code.Substring(handlerStart, handlerEnd - handlerStart);
+        var enableIndex = handler.IndexOf("FaultDelayTextBox.IsEnabled", StringComparison.Ordinal);
+        var applyIndex = handler.IndexOf("TryApplyFaultConfigurationFromUi", StringComparison.Ordinal);
+
+        Assert.True(enableIndex >= 0);
+        Assert.True(applyIndex > enableIndex);
+        Assert.Contains("SimulatorFaultMode.Delay", handler, StringComparison.Ordinal);
+    }
+
     private static string Locate(params string[] segments)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

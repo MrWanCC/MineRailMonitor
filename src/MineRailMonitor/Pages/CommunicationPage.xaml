@@ -637,7 +637,7 @@
                         </StackPanel>
                     </StackPanel>
                     <Button x:Name="OpenBlackBoxDirectoryButton" Content="打开黑匣子目录"
-                            Style="{StaticResource SecondaryButtonStyle}" Padding="9,3"
+                            Style="{StaticResource CommunicationActionButtonStyle}" Width="112" Padding="9,3"
                             Click="OnOpenBlackBoxDirectoryClick" />
                 </StackPanel>
             </Grid>

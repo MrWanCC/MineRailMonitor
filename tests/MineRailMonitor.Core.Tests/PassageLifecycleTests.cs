@@ -98,7 +98,7 @@ public sealed class PassageLifecycleTests
         coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(31), new ushort[] { 0x0002 }));
 
         Assert.Equal(PassageLifecycleState.Recognizing, state.LifecycleState);
-        Assert.Equal(RfidStationVisualState.Recognizing, state.VisualState);
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
     }
 
     [Fact]

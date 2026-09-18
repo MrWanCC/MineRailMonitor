@@ -182,6 +182,81 @@ public sealed class PassageRecordStoreTests
         Assert.Equal(new[] { alarm.PassageId, warning.PassageId }, result.Items.Select(record => record.PassageId));
     }
 
+    [Fact]
+    public void Passage_record_preserves_alarm_acknowledgement_and_recovery_timestamps()
+    {
+        var acknowledgedAt = Today.AddMinutes(1);
+        var recoveredAt = Today.AddMinutes(2);
+        var record = new PassageRecord(
+            Guid.Parse("c1111111-1111-1111-1111-111111111111"),
+            "RFID-01",
+            0x01,
+            0x0003,
+            new ushort[] { 0x0003 },
+            11,
+            PassageOutcome.UncouplingAlarm,
+            Today,
+            Today,
+            alarmAcknowledgedAt: acknowledgedAt,
+            alarmRecoveredAt: recoveredAt);
+
+        Assert.True(record.RequiresAlarmAcknowledgement);
+        Assert.True(record.IsAlarmAcknowledged);
+        Assert.True(record.IsAlarmRecovered);
+        Assert.Equal(acknowledgedAt, record.AlarmAcknowledgedAt);
+        Assert.Equal(recoveredAt, record.AlarmRecoveredAt);
+    }
+
+    [Fact]
+    public void In_memory_alarm_acknowledgement_is_idempotent_and_excludes_warnings()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var alarm = CreateRecord(
+            Guid.Parse("c2222222-2222-2222-2222-222222222222"),
+            0x01,
+            Today,
+            PassageOutcome.UncouplingAlarm);
+        var warning = CreateRecordWithStation(
+            Guid.Parse("c3333333-3333-3333-3333-333333333333"),
+            "RFID-02",
+            0x02,
+            Today,
+            new[] { "识别不完整" });
+        store.Save(alarm);
+        store.Save(warning);
+
+        Assert.Equal(alarm.PassageId, Assert.Single(store.GetUnacknowledgedAlarms()).PassageId);
+
+        var firstAcknowledgedAt = Today.AddMinutes(1);
+        store.MarkAlarmAcknowledged(alarm.PassageId, firstAcknowledgedAt);
+        store.MarkAlarmAcknowledged(alarm.PassageId, Today.AddMinutes(2));
+
+        var savedAlarm = store.GetDetails(alarm.PassageId)!;
+        Assert.Equal(firstAcknowledgedAt, savedAlarm.AlarmAcknowledgedAt);
+        Assert.Empty(store.GetUnacknowledgedAlarms());
+        Assert.Throws<InvalidOperationException>(() => store.MarkAlarmAcknowledged(warning.PassageId, firstAcknowledgedAt));
+    }
+
+    [Fact]
+    public void In_memory_uncoupling_alarm_recovery_is_recorded_when_clear_completes()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var alarm = CreateRecord(
+            Guid.Parse("c4444444-4444-4444-4444-444444444444"),
+            0x01,
+            Today,
+            PassageOutcome.UncouplingAlarm);
+        store.Save(alarm);
+
+        var recoveredAt = Today.AddMinutes(3);
+        store.MarkCleared(alarm.PassageId, recoveredAt);
+
+        var saved = store.GetDetails(alarm.PassageId)!;
+        Assert.Equal(PassageClearState.Cleared, saved.ClearState);
+        Assert.Equal(recoveredAt, saved.AlarmRecoveredAt);
+        Assert.Null(saved.AlarmAcknowledgedAt);
+    }
+
     private static PassageRecord CreateRecord(
         Guid passageId,
         byte stationAddress,

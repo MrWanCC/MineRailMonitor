@@ -55,7 +55,42 @@ public sealed class InMemoryPassageRecordStore : IPassageRecordStore
                 return;
             }
 
-            _records[index] = CopyRecord(record, PassageClearState.Cleared, clearedAt);
+            _records[index] = CopyRecord(
+                record,
+                PassageClearState.Cleared,
+                clearedAt,
+                record.AlarmAcknowledgedAt,
+                record.RequiresAlarmAcknowledgement ? clearedAt : null);
+        }
+    }
+
+    public void MarkAlarmAcknowledged(Guid passageId, DateTimeOffset acknowledgedAt)
+    {
+        lock (_syncRoot)
+        {
+            var index = _records.FindIndex(record => record.PassageId == passageId);
+            if (index < 0)
+            {
+                throw new InvalidOperationException($"PassageRecord not found: {passageId}");
+            }
+
+            var record = _records[index];
+            if (!record.RequiresAlarmAcknowledgement)
+            {
+                throw new InvalidOperationException("只有脱节报警记录需要人工确认。");
+            }
+
+            if (record.AlarmAcknowledgedAt.HasValue)
+            {
+                return;
+            }
+
+            _records[index] = CopyRecord(
+                record,
+                record.ClearState,
+                record.ClearedAt,
+                acknowledgedAt,
+                record.AlarmRecoveredAt);
         }
     }
 
@@ -64,6 +99,17 @@ public sealed class InMemoryPassageRecordStore : IPassageRecordStore
         lock (_syncRoot)
         {
             return _records.Where(record => record.ClearState == PassageClearState.PendingClear).ToArray();
+        }
+    }
+
+    public IReadOnlyList<PassageRecord> GetUnacknowledgedAlarms()
+    {
+        lock (_syncRoot)
+        {
+            return _records
+                .Where(record => record.RequiresAlarmAcknowledgement && !record.AlarmAcknowledgedAt.HasValue)
+                .OrderBy(record => record.CompletedAt)
+                .ToArray();
         }
     }
 
@@ -147,7 +193,12 @@ public sealed class InMemoryPassageRecordStore : IPassageRecordStore
     private static string NormalizeStationId(string? stationId) =>
         string.IsNullOrWhiteSpace(stationId) ? PassageRecord.LegacyStationId : stationId!.Trim();
 
-    private static PassageRecord CopyRecord(PassageRecord record, PassageClearState clearState, DateTimeOffset? clearedAt) =>
+    private static PassageRecord CopyRecord(
+        PassageRecord record,
+        PassageClearState clearState,
+        DateTimeOffset? clearedAt,
+        DateTimeOffset? alarmAcknowledgedAt,
+        DateTimeOffset? alarmRecoveredAt) =>
         new(
             record.PassageId,
             record.StationId,
@@ -163,5 +214,7 @@ public sealed class InMemoryPassageRecordStore : IPassageRecordStore
             record.RfidObservations,
             clearState,
             clearedAt,
-            record.CreatedAt);
+            record.CreatedAt,
+            alarmAcknowledgedAt,
+            alarmRecoveredAt);
 }

@@ -19,7 +19,9 @@ public sealed class PassageRecord
         IEnumerable<PassageRfidObservation>? rfidObservations = null,
         PassageClearState clearState = PassageClearState.PendingClear,
         DateTimeOffset? clearedAt = null,
-        DateTimeOffset? createdAt = null)
+        DateTimeOffset? createdAt = null,
+        DateTimeOffset? alarmAcknowledgedAt = null,
+        DateTimeOffset? alarmRecoveredAt = null)
     {
         if (passageId == Guid.Empty)
         {
@@ -65,6 +67,8 @@ public sealed class PassageRecord
         ClearState = clearState;
         ClearedAt = clearedAt;
         CreatedAt = createdAt ?? completedAt;
+        AlarmAcknowledgedAt = alarmAcknowledgedAt;
+        AlarmRecoveredAt = alarmRecoveredAt;
     }
 
     public Guid PassageId { get; }
@@ -106,4 +110,14 @@ public sealed class PassageRecord
     public DateTimeOffset? ClearedAt { get; }
 
     public DateTimeOffset CreatedAt { get; }
+
+    public DateTimeOffset? AlarmAcknowledgedAt { get; }
+
+    public DateTimeOffset? AlarmRecoveredAt { get; }
+
+    public bool RequiresAlarmAcknowledgement => Outcome == PassageOutcome.UncouplingAlarm;
+
+    public bool IsAlarmAcknowledged => RequiresAlarmAcknowledgement && AlarmAcknowledgedAt.HasValue;
+
+    public bool IsAlarmRecovered => RequiresAlarmAcknowledgement && AlarmRecoveredAt.HasValue;
 }

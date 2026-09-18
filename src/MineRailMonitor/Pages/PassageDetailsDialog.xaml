@@ -69,6 +69,8 @@
                             <RowDefinition Height="30" />
                             <RowDefinition Height="30" />
                             <RowDefinition Height="30" />
+                            <RowDefinition Height="30" />
+                            <RowDefinition Height="30" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
@@ -97,8 +99,16 @@
                         <TextBlock Text="报警说明" Grid.Row="4" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
                         <TextBlock x:Name="AlarmValue" Grid.Row="4" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
 
-                        <TextBlock Text="识别告警" Grid.Row="5" Style="{StaticResource DialogFieldLabelStyle}" Margin="0,7,8,0" />
-                        <TextBlock x:Name="WarningValue" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Style="{StaticResource DialogFieldValueStyle}"
+                        <TextBlock Text="报警状态" Grid.Row="5" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="AlarmStatusValue" Grid.Row="5" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="确认时间" Grid.Row="5" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="AlarmAcknowledgedAtValue" Grid.Row="5" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+
+                        <TextBlock Text="恢复时间" Grid.Row="6" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="AlarmRecoveredAtValue" Grid.Row="6" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+
+                        <TextBlock Text="识别告警" Grid.Row="7" Style="{StaticResource DialogFieldLabelStyle}" Margin="0,7,8,0" />
+                        <TextBlock x:Name="WarningValue" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="3" Style="{StaticResource DialogFieldValueStyle}"
                                    Margin="0,7,0,0" TextWrapping="Wrap" />
                     </Grid>
 

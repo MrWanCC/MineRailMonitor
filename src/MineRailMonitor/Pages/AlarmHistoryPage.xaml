@@ -194,7 +194,16 @@
                             <DataGridTextColumn Header="缺少节数" Binding="{Binding MissingCountText}" Width="0.75*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                             <DataGridTextColumn Header="告警级别" Binding="{Binding AlertLevelText}" Width="0.75*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                             <DataGridTextColumn Header="报警原因" Binding="{Binding AlarmReasonText}" Width="1.15*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTextColumn Header="报警状态" Binding="{Binding AlarmStatusText}" Width="1.15*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                             <DataGridTextColumn Header="清除状态" Binding="{Binding ClearStateText}" Width="0.9*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTemplateColumn Header="确认" Width="0.65*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Content="确认" Tag="{Binding}" Style="{StaticResource AlarmActionButtonStyle}"
+                                                Visibility="{Binding AcknowledgeButtonVisibility}" Click="OnAlarmAcknowledgeClick" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                             <DataGridTemplateColumn Header="详情" Width="0.65*">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>

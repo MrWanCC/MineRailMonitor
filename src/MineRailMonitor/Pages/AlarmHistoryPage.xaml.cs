@@ -15,6 +15,7 @@ public partial class AlarmHistoryPage : UserControl
 {
     private const int PageSize = 20;
     private readonly IPassageRecordStore _recordStore;
+    private readonly Action<Guid, DateTimeOffset>? _acknowledgeAlarmRequested;
     private IReadOnlyList<RfidStationConfig> _stations;
     private IReadOnlyDictionary<string, string> _stationNames;
     private IReadOnlyList<StationConfig> _yardConfigs = Array.Empty<StationConfig>();
@@ -25,9 +26,13 @@ public partial class AlarmHistoryPage : UserControl
     private int _pageIndex;
     private int _totalCount;
 
-    public AlarmHistoryPage(IPassageRecordStore recordStore, IEnumerable<RfidStationConfig>? stations = null)
+    public AlarmHistoryPage(
+        IPassageRecordStore recordStore,
+        IEnumerable<RfidStationConfig>? stations = null,
+        Action<Guid, DateTimeOffset>? acknowledgeAlarmRequested = null)
     {
         _recordStore = recordStore ?? throw new ArgumentNullException(nameof(recordStore));
+        _acknowledgeAlarmRequested = acknowledgeAlarmRequested;
         _stations = (stations ?? Array.Empty<RfidStationConfig>()).Where(station => station is not null).ToArray();
         _stationNames = BuildStationNames(_stations);
         _yardFilterOptions = RfidYardFilter.BuildOptions(null, _stations);
@@ -212,6 +217,29 @@ public partial class AlarmHistoryPage : UserControl
         dialog.ShowDialog();
     }
 
+    private void OnAlarmAcknowledgeClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as Button)?.Tag is not AlarmRow row || !row.CanAcknowledge)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_acknowledgeAlarmRequested is null)
+            {
+                throw new InvalidOperationException("当前页面未配置报警确认处理器。");
+            }
+
+            _acknowledgeAlarmRequested(row.Record.PassageId, DateTimeOffset.Now);
+            Refresh();
+        }
+        catch (Exception exception)
+        {
+            QueryErrorText.Text = exception.Message;
+        }
+    }
+
     private void RebuildStationFilter()
     {
         var selectedStationId = (StationFilter.SelectedItem as ComboBoxItem)?.Tag as string;
@@ -374,6 +402,9 @@ public partial class AlarmHistoryPage : UserControl
             AlarmReasonText = record.AlarmMessage ??
                 (record.WarningMessages.Count == 0 ? "识别告警" : string.Join("；", record.WarningMessages));
             ClearStateText = FormatClearState(record.ClearState);
+            AlarmStatusText = FormatAlarmStatus(record);
+            CanAcknowledge = record.RequiresAlarmAcknowledgement && !record.AlarmAcknowledgedAt.HasValue;
+            AcknowledgeButtonVisibility = CanAcknowledge ? Visibility.Visible : Visibility.Collapsed;
         }
 
         public PassageRecord Record { get; }
@@ -385,6 +416,25 @@ public partial class AlarmHistoryPage : UserControl
         public string AlertLevelText { get; }
         public string AlarmReasonText { get; }
         public string ClearStateText { get; }
+        public string AlarmStatusText { get; }
+        public bool CanAcknowledge { get; }
+        public Visibility AcknowledgeButtonVisibility { get; }
+
+        private static string FormatAlarmStatus(PassageRecord record)
+        {
+            if (!record.RequiresAlarmAcknowledgement)
+            {
+                return "无需确认";
+            }
+
+            return (record.AlarmAcknowledgedAt.HasValue, record.AlarmRecoveredAt.HasValue) switch
+            {
+                (false, false) => "待确认 · 报警中",
+                (true, false) => "已确认 · 报警中",
+                (false, true) => "待确认 · 已恢复",
+                _ => "已确认 · 已恢复"
+            };
+        }
     }
 
 }

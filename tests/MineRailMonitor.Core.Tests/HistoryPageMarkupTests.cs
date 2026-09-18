@@ -31,6 +31,8 @@ public sealed class HistoryPageMarkupTests
 
         Assert.Contains("SqlitePassageRecordStore", markup, StringComparison.Ordinal);
         Assert.Contains("RestorePendingClear", markup, StringComparison.Ordinal);
+        Assert.Contains("GetUnacknowledgedAlarms", markup, StringComparison.Ordinal);
+        Assert.Contains("RestoreUnacknowledgedAlarms", markup, StringComparison.Ordinal);
         Assert.Contains("YardCommunicationManager", markup, StringComparison.Ordinal);
         Assert.True(markup.IndexOf("RestorePendingClear", StringComparison.Ordinal) < markup.IndexOf("StartAllAsync", StringComparison.Ordinal));
     }
@@ -111,6 +113,28 @@ public sealed class HistoryPageMarkupTests
         Assert.Contains("Dispatcher.BeginInvoke", alarmCode, StringComparison.Ordinal);
         Assert.Contains("DispatcherPriority.Input", alarmCode, StringComparison.Ordinal);
         Assert.Contains("VisualTreeHelper.GetParent", alarmCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Alarm_history_exposes_acknowledgement_and_recovery_status()
+    {
+        var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "AlarmHistoryPage.xaml"));
+        var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "AlarmHistoryPage.xaml.cs"));
+        var dialogMarkup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "PassageDetailsDialog.xaml"));
+        var dialogCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "PassageDetailsDialog.xaml.cs"));
+
+        Assert.Contains("报警状态", markup, StringComparison.Ordinal);
+        Assert.Contains("AcknowledgeButtonVisibility", markup, StringComparison.Ordinal);
+        Assert.Contains("OnAlarmAcknowledgeClick", markup, StringComparison.Ordinal);
+        Assert.Contains("AlarmStatusText", code, StringComparison.Ordinal);
+        Assert.Contains("无需确认", code, StringComparison.Ordinal);
+        Assert.Contains("AlarmAcknowledgedAt", code, StringComparison.Ordinal);
+        Assert.Contains("AlarmRecoveredAt", code, StringComparison.Ordinal);
+        Assert.Contains("AlarmStatusValue", dialogMarkup, StringComparison.Ordinal);
+        Assert.Contains("AlarmAcknowledgedAtValue", dialogMarkup, StringComparison.Ordinal);
+        Assert.Contains("AlarmRecoveredAtValue", dialogMarkup, StringComparison.Ordinal);
+        Assert.Contains("AlarmAcknowledgedAt", dialogCode, StringComparison.Ordinal);
+        Assert.Contains("AlarmRecoveredAt", dialogCode, StringComparison.Ordinal);
     }
 
     private static string Locate(params string[] parts)

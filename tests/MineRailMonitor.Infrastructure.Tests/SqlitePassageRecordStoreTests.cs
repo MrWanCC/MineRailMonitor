@@ -10,18 +10,20 @@ public sealed class SqlitePassageRecordStoreTests
     private static readonly DateTimeOffset Today = new(2026, 9, 9, 10, 0, 0, TimeSpan.FromHours(8));
 
     [Fact]
-    public void Constructor_creates_schema_v1_and_applies_connection_pragmas()
+    public void Constructor_creates_schema_v3_and_applies_connection_pragmas()
     {
         using var database = new TemporaryDatabase();
 
         using var connection = database.OpenConnection();
-        Assert.Equal(2L, ExecuteScalar<long>(connection, "PRAGMA user_version;"));
+        Assert.Equal(3L, ExecuteScalar<long>(connection, "PRAGMA user_version;"));
         Assert.Equal(2L, ExecuteScalar<long>(connection, "PRAGMA synchronous;"));
         Assert.Equal(1L, ExecuteScalar<long>(connection, "PRAGMA foreign_keys;"));
         Assert.Equal(5000L, ExecuteScalar<long>(connection, "PRAGMA busy_timeout;"));
         Assert.Equal("wal", ExecuteScalar<string>(connection, "PRAGMA journal_mode;").ToLowerInvariant());
         Assert.Equal(1L, ExecuteScalar<long>(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='passage_record';"));
         Assert.Equal(1L, ExecuteScalar<long>(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='passage_rfid';"));
+        Assert.True(HasColumn(connection, "passage_record", "alarm_acknowledged_at"));
+        Assert.True(HasColumn(connection, "passage_record", "alarm_recovered_at"));
     }
 
     [Fact]
@@ -86,16 +88,133 @@ public sealed class SqlitePassageRecordStoreTests
         using var database = new TemporaryDatabase();
         var pending = CreateRecord(Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"), 0x01, Today);
         var cleared = CreateRecord(Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"), 0x02, Today);
+        var alarm = CreateRecord(Guid.Parse("f0eeeeee-eeee-eeee-eeee-eeeeeeeeeeee"), 0x03, Today, PassageOutcome.UncouplingAlarm);
         database.Store.Save(pending);
         database.Store.Save(cleared);
+        database.Store.Save(alarm);
         var clearedAt = Today.AddMinutes(1);
 
         database.Store.MarkCleared(cleared.PassageId, clearedAt);
+        database.Store.MarkCleared(alarm.PassageId, clearedAt);
 
         var pendingRows = database.Store.GetPendingClear();
         Assert.Equal(pending.PassageId, Assert.Single(pendingRows).PassageId);
         Assert.Equal(PassageClearState.Cleared, database.Store.GetDetails(cleared.PassageId)!.ClearState);
         Assert.Equal(clearedAt, database.Store.GetDetails(cleared.PassageId)!.ClearedAt);
+        Assert.Equal(clearedAt, database.Store.GetDetails(alarm.PassageId)!.AlarmRecoveredAt);
+    }
+
+    [Fact]
+    public void Save_round_trips_alarm_acknowledgement_and_recovery_timestamps()
+    {
+        using var database = new TemporaryDatabase();
+        var acknowledgedAt = Today.AddMinutes(1);
+        var recoveredAt = Today.AddMinutes(2);
+        var alarm = CreateRecord(
+            Guid.Parse("d1111111-1111-1111-1111-111111111111"),
+            0x01,
+            Today,
+            PassageOutcome.UncouplingAlarm,
+            acknowledgedAt,
+            recoveredAt);
+
+        database.Store.Save(alarm);
+
+        var saved = database.Store.GetDetails(alarm.PassageId)!;
+        Assert.Equal(acknowledgedAt, saved.AlarmAcknowledgedAt);
+        Assert.Equal(recoveredAt, saved.AlarmRecoveredAt);
+    }
+
+    [Fact]
+    public void Mark_alarm_acknowledged_is_first_write_wins_and_rejects_warnings()
+    {
+        using var database = new TemporaryDatabase();
+        var alarm = CreateRecord(
+            Guid.Parse("d2222222-2222-2222-2222-222222222222"),
+            0x01,
+            Today,
+            PassageOutcome.UncouplingAlarm);
+        var warning = CreateRecordWithStation(
+            Guid.Parse("d3333333-3333-3333-3333-333333333333"),
+            "RFID-02",
+            0x02,
+            Today,
+            PassageOutcome.Completed,
+            new[] { "识别不完整" });
+        database.Store.Save(alarm);
+        database.Store.Save(warning);
+
+        var firstAcknowledgedAt = Today.AddMinutes(1);
+        database.Store.MarkAlarmAcknowledged(alarm.PassageId, firstAcknowledgedAt);
+        database.Store.MarkAlarmAcknowledged(alarm.PassageId, Today.AddMinutes(2));
+
+        Assert.Equal(firstAcknowledgedAt, database.Store.GetDetails(alarm.PassageId)!.AlarmAcknowledgedAt);
+        Assert.Throws<InvalidOperationException>(() =>
+            database.Store.MarkAlarmAcknowledged(warning.PassageId, firstAcknowledgedAt));
+    }
+
+    [Fact]
+    public void Get_unacknowledged_alarms_excludes_acknowledged_alarms_and_warnings()
+    {
+        using var database = new TemporaryDatabase();
+        var pending = CreateRecord(
+            Guid.Parse("d4444444-4444-4444-4444-444444444444"),
+            0x01,
+            Today,
+            PassageOutcome.UncouplingAlarm);
+        var acknowledged = CreateRecord(
+            Guid.Parse("d5555555-5555-5555-5555-555555555555"),
+            0x02,
+            Today.AddMinutes(1),
+            PassageOutcome.UncouplingAlarm);
+        var warning = CreateRecordWithStation(
+            Guid.Parse("d6666666-6666-6666-6666-666666666666"),
+            "RFID-03",
+            0x03,
+            Today.AddMinutes(2),
+            PassageOutcome.Completed,
+            new[] { "识别不完整" });
+        database.Store.Save(pending);
+        database.Store.Save(acknowledged);
+        database.Store.Save(warning);
+        database.Store.MarkAlarmAcknowledged(acknowledged.PassageId, Today.AddMinutes(3));
+
+        var result = database.Store.GetUnacknowledgedAlarms();
+
+        Assert.Equal(pending.PassageId, Assert.Single(result).PassageId);
+    }
+
+    [Fact]
+    public void V2_cleared_uncoupling_alarm_migrates_as_acknowledged_and_recovered()
+    {
+        using var legacy = new LegacyV2Database(
+            PassageOutcome.UncouplingAlarm,
+            PassageClearState.Cleared,
+            Today);
+        using var store = new SqlitePassageRecordStore(legacy.Path);
+
+        var record = store.GetDetails(legacy.PassageId)!;
+
+        using var migratedConnection = legacy.OpenConnection();
+        Assert.Equal(3L, ExecuteScalar<long>(migratedConnection, "PRAGMA user_version;"));
+        Assert.Equal(Today, record.AlarmAcknowledgedAt);
+        Assert.Equal(Today, record.AlarmRecoveredAt);
+        Assert.Empty(store.GetUnacknowledgedAlarms());
+    }
+
+    [Fact]
+    public void V2_pending_clear_uncoupling_alarm_remains_unacknowledged_and_unrecovered()
+    {
+        using var legacy = new LegacyV2Database(
+            PassageOutcome.UncouplingAlarm,
+            PassageClearState.PendingClear,
+            Today);
+        using var store = new SqlitePassageRecordStore(legacy.Path);
+
+        var record = Assert.Single(store.GetUnacknowledgedAlarms());
+
+        Assert.Null(record.AlarmAcknowledgedAt);
+        Assert.Null(record.AlarmRecoveredAt);
     }
 
     [Fact]
@@ -272,7 +391,7 @@ PRAGMA user_version=1;";
             using var versionCommand = migratedConnection.CreateCommand();
             versionCommand.CommandText = "PRAGMA user_version;";
 
-            Assert.Equal(2L, Convert.ToInt64(versionCommand.ExecuteScalar(), CultureInfo.InvariantCulture));
+            Assert.Equal(3L, Convert.ToInt64(versionCommand.ExecuteScalar(), CultureInfo.InvariantCulture));
             Assert.Equal(PassageRecord.LegacyStationId, record.StationId);
             var unixEpoch = new DateTimeOffset(1970, 1, 1, 0, 0, 0, TimeSpan.Zero);
             Assert.Equal(1, store.GetStatistics(unixEpoch.AddMilliseconds(1000)).ByStation[PassageRecord.LegacyStationId]);
@@ -364,7 +483,9 @@ PRAGMA user_version=1;";
         Guid passageId,
         byte stationAddress,
         DateTimeOffset completedAt,
-        PassageOutcome outcome = PassageOutcome.Completed)
+        PassageOutcome outcome = PassageOutcome.Completed,
+        DateTimeOffset? alarmAcknowledgedAt = null,
+        DateTimeOffset? alarmRecoveredAt = null)
     {
         var startedAt = completedAt.AddSeconds(-10);
         var details = new[]
@@ -384,7 +505,9 @@ PRAGMA user_version=1;";
             completedAt,
             outcome == PassageOutcome.Completed ? Array.Empty<string>() : new[] { "脱节报警" },
             outcome == PassageOutcome.Completed ? null : "脱节报警",
-            details);
+            details,
+            alarmAcknowledgedAt: alarmAcknowledgedAt,
+            alarmRecoveredAt: alarmRecoveredAt);
     }
 
     private static PassageRecord CreateRecordWithStation(
@@ -422,9 +545,25 @@ PRAGMA user_version=1;";
         return (T)Convert.ChangeType(command.ExecuteScalar()!, typeof(T));
     }
 
+    private static bool HasColumn(SQLiteConnection connection, string tableName, string columnName)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private sealed class TemporaryDatabase : IDisposable
     {
-        private readonly string _directory = Path.Combine(Path.GetTempPath(), "MineRailMonitor", Guid.NewGuid().ToString("N"));
+        private readonly string _directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MineRailMonitor", Guid.NewGuid().ToString("N"));
 
         public TemporaryDatabase()
         {
@@ -454,4 +593,96 @@ PRAGMA user_version=1;";
             Directory.Delete(_directory);
         }
     }
+
+    private sealed class LegacyV2Database : IDisposable
+    {
+        private readonly string _directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MineRailMonitor", Guid.NewGuid().ToString("N"));
+
+        public LegacyV2Database(PassageOutcome outcome, PassageClearState clearState, DateTimeOffset completedAt)
+        {
+            Directory.CreateDirectory(_directory);
+            Path = System.IO.Path.Combine(_directory, "passages.db");
+            PassageId = Guid.NewGuid();
+
+            using var connection = new SQLiteConnection($"Data Source={Path};Version=3;");
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = @"
+CREATE TABLE passage_record
+(
+    passage_id TEXT NOT NULL PRIMARY KEY,
+    station_id TEXT NULL,
+    station_address INTEGER NOT NULL,
+    head_rfid INTEGER NULL,
+    expected_vehicle_count INTEGER NOT NULL,
+    detected_vehicle_count INTEGER NOT NULL,
+    result INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    completed_at INTEGER NOT NULL,
+    warning_message TEXT NULL,
+    alarm_message TEXT NULL,
+    clear_state INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    cleared_at INTEGER NULL
+);
+CREATE TABLE passage_rfid
+(
+    passage_id TEXT NOT NULL,
+    sequence_no INTEGER NOT NULL,
+    rfid_value INTEGER NOT NULL,
+    first_seen_at INTEGER NOT NULL,
+    batch_no INTEGER NOT NULL,
+    PRIMARY KEY (passage_id, sequence_no)
+);
+PRAGMA user_version=2;";
+            command.ExecuteNonQuery();
+
+            using var insert = connection.CreateCommand();
+            insert.CommandText = @"
+INSERT INTO passage_record
+(passage_id, station_id, station_address, head_rfid, expected_vehicle_count, detected_vehicle_count,
+ result, started_at, completed_at, warning_message, alarm_message, clear_state, created_at, cleared_at)
+VALUES ($id, $station_id, $address, $head_rfid, 11, 1, $result, $started, $completed,
+        $warning, $alarm, $clear_state, $created, $cleared);";
+            insert.Parameters.AddWithValue("$id", PassageId.ToString("D"));
+            insert.Parameters.AddWithValue("$station_id", "RFID-560-01");
+            insert.Parameters.AddWithValue("$address", 0x01);
+            insert.Parameters.AddWithValue("$head_rfid", 0x0003);
+            insert.Parameters.AddWithValue("$result", (int)outcome);
+            insert.Parameters.AddWithValue("$started", ToUnixMilliseconds(completedAt.AddSeconds(-10)));
+            insert.Parameters.AddWithValue("$completed", ToUnixMilliseconds(completedAt));
+            insert.Parameters.AddWithValue("$warning", outcome == PassageOutcome.Completed ? DBNull.Value : "脱节报警");
+            insert.Parameters.AddWithValue("$alarm", outcome == PassageOutcome.Completed ? DBNull.Value : "脱节报警");
+            insert.Parameters.AddWithValue("$clear_state", (int)clearState);
+            insert.Parameters.AddWithValue("$created", ToUnixMilliseconds(completedAt));
+            insert.Parameters.AddWithValue("$cleared", clearState == PassageClearState.Cleared ? ToUnixMilliseconds(completedAt) : DBNull.Value);
+            insert.ExecuteNonQuery();
+        }
+
+        public string Path { get; }
+
+        public Guid PassageId { get; }
+
+        public SQLiteConnection OpenConnection()
+        {
+            var connection = new SQLiteConnection($"Data Source={Path};Version=3;");
+            connection.Open();
+            return connection;
+        }
+
+        public void Dispose()
+        {
+            foreach (var file in Directory.Exists(_directory) ? Directory.EnumerateFiles(_directory) : Array.Empty<string>())
+            {
+                File.Delete(file);
+            }
+
+            if (Directory.Exists(_directory))
+            {
+                Directory.Delete(_directory);
+            }
+        }
+    }
+
+    private static long ToUnixMilliseconds(DateTimeOffset value) => value.ToUniversalTime().ToUnixTimeMilliseconds();
 }

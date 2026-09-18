@@ -12,7 +12,11 @@ public interface IPassageRecordStore
 
     void MarkCleared(Guid passageId, DateTimeOffset clearedAt);
 
+    void MarkAlarmAcknowledged(Guid passageId, DateTimeOffset acknowledgedAt);
+
     IReadOnlyList<PassageRecord> GetPendingClear();
+
+    IReadOnlyList<PassageRecord> GetUnacknowledgedAlarms();
 
     PassageQueryResult Query(PassageQuery query);
 

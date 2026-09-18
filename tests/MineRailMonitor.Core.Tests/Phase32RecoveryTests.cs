@@ -173,7 +173,12 @@ public sealed class Phase32RecoveryTests
             _inner.MarkCleared(passageId, clearedAt);
         }
 
+        public void MarkAlarmAcknowledged(Guid passageId, DateTimeOffset acknowledgedAt) =>
+            _inner.MarkAlarmAcknowledged(passageId, acknowledgedAt);
+
         public IReadOnlyList<PassageRecord> GetPendingClear() => _inner.GetPendingClear();
+
+        public IReadOnlyList<PassageRecord> GetUnacknowledgedAlarms() => _inner.GetUnacknowledgedAlarms();
 
         public PassageQueryResult Query(PassageQuery query) => _inner.Query(query);
 

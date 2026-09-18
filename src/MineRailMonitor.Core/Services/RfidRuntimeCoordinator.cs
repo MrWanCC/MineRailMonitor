@@ -242,6 +242,30 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         return false;
     }
 
+    private bool TryGetStateForRecord(PassageRecord record, out StationRuntimeState state)
+    {
+        var matches = _bindings
+            .Where(binding => string.Equals(binding.State.StationId, record.StationId, StringComparison.OrdinalIgnoreCase))
+            .Select(binding => binding.State)
+            .ToArray();
+        if (matches.Length == 1)
+        {
+            state = matches[0];
+            return true;
+        }
+
+        if (string.Equals(record.StationId, PassageRecord.LegacyStationId, StringComparison.OrdinalIgnoreCase) &&
+            _statesByProtocol.TryGetValue(record.StationAddress, out var protocolStates) &&
+            protocolStates.Count == 1)
+        {
+            state = protocolStates[0];
+            return true;
+        }
+
+        state = null!;
+        return false;
+    }
+
     private static RfidStationEndpointKey CreateStationKey(RfidStationConfig station, int index)
     {
         if (station.TryResolveEndpoint(out var endpoint))
@@ -329,13 +353,17 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         {
             foreach (var record in pendingRecords.OrderBy(item => item.CompletedAt))
             {
-                if (!TryGetFirstState(record.StationAddress, out var state))
+                if (!TryGetStateForRecord(record, out var state))
                 {
                     continue;
                 }
 
                 state.RecognitionSession = null;
                 state.LastPassageRecord = record;
+                if (record.RequiresAlarmAcknowledgement && !record.AlarmAcknowledgedAt.HasValue)
+                {
+                    state.AddUnacknowledgedAlarm(record.PassageId);
+                }
                 state.CurrentHeadRfid = record.HeadRfid;
                 state.ObservedVehicleSequence = record.ObservedRfids.ToArray();
                 state.SeenRfids = record.ObservedRfids.ToArray();
@@ -357,6 +385,56 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
                 state.LifecycleState = PassageLifecycleState.Clearing;
                 UpdateVisualState(state);
             }
+        }
+    }
+
+    public void RestoreUnacknowledgedAlarms(IEnumerable<PassageRecord> records)
+    {
+        if (records is null) throw new ArgumentNullException(nameof(records));
+        lock (_syncRoot)
+        {
+            foreach (var record in records
+                .Where(item => item.RequiresAlarmAcknowledgement && !item.AlarmAcknowledgedAt.HasValue)
+                .OrderBy(item => item.CompletedAt))
+            {
+                if (!TryGetStateForRecord(record, out var state))
+                {
+                    continue;
+                }
+
+                state.AddUnacknowledgedAlarm(record.PassageId);
+                if (state.LastPassageRecord is null || state.LastPassageRecord.CompletedAt <= record.CompletedAt)
+                {
+                    state.LastPassageRecord = record;
+                    state.AlarmMessage = record.AlarmMessage;
+                }
+
+                UpdateVisualState(state);
+            }
+        }
+    }
+
+    public bool HasUnacknowledgedAlarm(Guid passageId)
+    {
+        lock (_syncRoot)
+        {
+            return _statesByEndpoint.Values.Any(state => state.ContainsUnacknowledgedAlarm(passageId));
+        }
+    }
+
+    public void AcknowledgeAlarm(Guid passageId, DateTimeOffset acknowledgedAt)
+    {
+        lock (_syncRoot)
+        {
+            var state = _statesByEndpoint.Values.FirstOrDefault(item => item.ContainsUnacknowledgedAlarm(passageId));
+            if (state is null)
+            {
+                throw new InvalidOperationException($"未找到待确认的脱节报警：{passageId}");
+            }
+
+            _recordStore.MarkAlarmAcknowledged(passageId, acknowledgedAt);
+            state.RemoveUnacknowledgedAlarm(passageId);
+            UpdateVisualState(state);
         }
     }
 
@@ -474,6 +552,10 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             state.PersistenceErrorMessage = null;
             state.PersistenceAttemptCount = 0;
             state.ClearPersistenceAttemptCount = 0;
+            if (record.RequiresAlarmAcknowledgement && !record.AlarmAcknowledgedAt.HasValue)
+            {
+                state.AddUnacknowledgedAlarm(record.PassageId);
+            }
             state.LifecycleState = record.Outcome == PassageOutcome.UncouplingAlarm
                 ? PassageLifecycleState.Alarm
                 : PassageLifecycleState.Completed;
@@ -557,10 +639,6 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
     private void ResetToIdle(StationRuntimeState state)
     {
-        var keepAlarmVisual = state.VisualState == RfidStationVisualState.Alarm ||
-                              state.LifecycleState == PassageLifecycleState.Alarm ||
-                              state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm;
-
         state.LifecycleState = PassageLifecycleState.Idle;
         state.PendingClear = false;
         state.ConsecutiveEmptyReads = 0;
@@ -579,14 +657,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         state.PersistenceErrorMessage = null;
         state.PersistenceAttemptCount = 0;
         state.ClearPersistenceAttemptCount = 0;
-        if (keepAlarmVisual)
-        {
-            state.VisualState = RfidStationVisualState.Alarm;
-        }
-        else
-        {
-            UpdateVisualState(state);
-        }
+        UpdateVisualState(state);
     }
 
     private void AddWarning(StationRuntimeState state, string warning)
@@ -611,16 +682,9 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         // Keep an uncoupling alarm visible while the clear handshake and empty-slot
         // confirmation are still in progress. The lifecycle continues normally;
         // this only preserves the alarm indication for the visual layer.
-        if (state.LifecycleState == PassageLifecycleState.Alarm ||
-            state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm)
+        if (state.HasUnacknowledgedAlarms || state.LifecycleState == PassageLifecycleState.Alarm)
         {
             state.VisualState = RfidStationVisualState.Alarm;
-            return;
-        }
-
-        if (state.LifecycleState == PassageLifecycleState.Idle &&
-            state.VisualState == RfidStationVisualState.Alarm)
-        {
             return;
         }
 

@@ -232,7 +232,8 @@ public partial class MainWindow : Window
             _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations);
         _alarmHistoryPage = new AlarmHistoryPage(
             _passageRecordStore,
-            _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations);
+            _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations,
+            AcknowledgeAlarm);
         _statisticsPage = new RfidStatisticsPage(
             _passageRecordStore,
             _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations);
@@ -674,9 +675,12 @@ public partial class MainWindow : Window
         manager.StationCommandSent += OnYardStationCommandSent;
         _yardCommunicationManager = manager;
 
+        var pendingClearRecords = _passageRecordStore.GetPendingClear();
+        var unacknowledgedAlarms = _passageRecordStore.GetUnacknowledgedAlarms();
         foreach (var context in manager.Contexts.Values)
         {
-            context.RestorePendingClear(_passageRecordStore.GetPendingClear());
+            context.RestorePendingClear(pendingClearRecords);
+            context.RestoreUnacknowledgedAlarms(unacknowledgedAlarms);
         }
 
         if (_acceptanceOptions.Enabled)
@@ -1180,6 +1184,23 @@ public partial class MainWindow : Window
         }
 
         await context.SendAsync(station, command, CancellationToken.None);
+    }
+
+    private void AcknowledgeAlarm(Guid passageId, DateTimeOffset acknowledgedAt)
+    {
+        var contexts = _yardCommunicationManager?.Contexts.Values
+            .Where(context => context.HasUnacknowledgedAlarm(passageId))
+            .ToArray() ?? Array.Empty<YardCommunicationContext>();
+        if (contexts.Length != 1)
+        {
+            throw new InvalidOperationException($"未找到唯一的待确认报警：{passageId}。");
+        }
+
+        contexts[0].AcknowledgeAlarm(passageId, acknowledgedAt);
+        UpdateRecognitionStatus();
+        UpdateRfidRuntimeUi();
+        RefreshRecentAlarmHistory();
+        _alarmHistoryPage?.Refresh();
     }
 
     private void RefreshHistoricalStatistics()

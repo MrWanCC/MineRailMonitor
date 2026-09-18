@@ -6,7 +6,7 @@ namespace MineRailMonitor.Infrastructure.Persistence;
 
 public sealed class SqlitePassageRecordStore : IPassageRecordStore, IDisposable
 {
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
     private const string ConnectionPragmas =
         "PRAGMA journal_mode=WAL;" +
         "PRAGMA synchronous=FULL;" +
@@ -50,14 +50,14 @@ INSERT OR IGNORE INTO passage_record
     passage_id, station_id, station_address, head_rfid,
     expected_vehicle_count, detected_vehicle_count, result,
     started_at, completed_at, warning_message, alarm_message,
-    clear_state, created_at, cleared_at
+    clear_state, created_at, cleared_at, alarm_acknowledged_at, alarm_recovered_at
 )
 VALUES
 (
     $passage_id, $station_id, $station_address, $head_rfid,
     $expected_vehicle_count, $detected_vehicle_count, $result,
     $started_at, $completed_at, $warning_message, $alarm_message,
-    $clear_state, $created_at, $cleared_at
+    $clear_state, $created_at, $cleared_at, $alarm_acknowledged_at, $alarm_recovered_at
 );";
         AddRecordParameters(command, record);
         var inserted = command.ExecuteNonQuery();
@@ -121,10 +121,16 @@ WHERE station_id = $old_station_id;";
         using var command = connection.CreateCommand();
         command.CommandText = @"
 UPDATE passage_record
-SET clear_state = $clear_state, cleared_at = $cleared_at
+SET clear_state = $clear_state,
+    cleared_at = $cleared_at,
+    alarm_recovered_at = CASE
+        WHEN result = $alarm_result THEN $cleared_at
+        ELSE alarm_recovered_at
+    END
 WHERE passage_id = $passage_id AND clear_state <> $clear_state;";
         command.Parameters.AddWithValue("$clear_state", (int)PassageClearState.Cleared);
         command.Parameters.AddWithValue("$cleared_at", ToUnixMilliseconds(clearedAt));
+        command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
         command.Parameters.AddWithValue("$passage_id", passageId.ToString("D"));
         if (command.ExecuteNonQuery() > 0)
         {
@@ -138,6 +144,66 @@ WHERE passage_id = $passage_id AND clear_state <> $clear_state;";
         {
             throw new InvalidOperationException($"PassageRecord not found: {passageId}");
         }
+    }
+
+    public void MarkAlarmAcknowledged(Guid passageId, DateTimeOffset acknowledgedAt)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+UPDATE passage_record
+SET alarm_acknowledged_at = $acknowledged_at
+WHERE passage_id = $passage_id
+  AND result = $alarm_result
+  AND alarm_acknowledged_at IS NULL;";
+        command.Parameters.AddWithValue("$acknowledged_at", ToUnixMilliseconds(acknowledgedAt));
+        command.Parameters.AddWithValue("$passage_id", passageId.ToString("D"));
+        command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
+        if (command.ExecuteNonQuery() > 0)
+        {
+            return;
+        }
+
+        using var recordCommand = connection.CreateCommand();
+        recordCommand.CommandText = @"
+SELECT result, alarm_acknowledged_at
+FROM passage_record
+WHERE passage_id = $passage_id;";
+        recordCommand.Parameters.AddWithValue("$passage_id", passageId.ToString("D"));
+        using var reader = recordCommand.ExecuteReader();
+        if (!reader.Read())
+        {
+            throw new InvalidOperationException($"PassageRecord not found: {passageId}");
+        }
+
+        if ((PassageOutcome)reader.GetInt32(0) != PassageOutcome.UncouplingAlarm)
+        {
+            throw new InvalidOperationException("只有脱节报警记录需要人工确认。");
+        }
+
+        // Acknowledgement is idempotent and the first timestamp wins.
+    }
+
+    public IReadOnlyList<PassageRecord> GetUnacknowledgedAlarms()
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+SELECT passage_id
+FROM passage_record
+WHERE result = $alarm_result AND alarm_acknowledged_at IS NULL
+ORDER BY completed_at;";
+        command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
+        var ids = new List<Guid>();
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                ids.Add(Guid.Parse(reader.GetString(0)));
+            }
+        }
+
+        return ids.Select(id => LoadRecord(connection, id)!).ToArray();
     }
 
     public IReadOnlyList<PassageRecord> GetPendingClear()
@@ -275,7 +341,9 @@ CREATE TABLE IF NOT EXISTS passage_record
     alarm_message TEXT NULL,
     clear_state INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
-    cleared_at INTEGER NULL
+    cleared_at INTEGER NULL,
+    alarm_acknowledged_at INTEGER NULL,
+    alarm_recovered_at INTEGER NULL
 );
 
 CREATE TABLE IF NOT EXISTS passage_rfid
@@ -296,7 +364,7 @@ CREATE INDEX IF NOT EXISTS ix_passage_record_head_completed ON passage_record(he
 CREATE INDEX IF NOT EXISTS ix_passage_record_result_completed ON passage_record(result, completed_at);
 CREATE INDEX IF NOT EXISTS ix_passage_rfid_passage_id ON passage_rfid(passage_id);
 CREATE INDEX IF NOT EXISTS ix_passage_rfid_value ON passage_rfid(rfid_value);
-PRAGMA user_version=2;";
+PRAGMA user_version=3;";
             command.ExecuteNonQuery();
             transaction.Commit();
         }
@@ -310,6 +378,37 @@ PRAGMA user_version=2;";
             command.CommandText = (hasStationIdColumn ? string.Empty : "ALTER TABLE passage_record ADD COLUMN station_id TEXT NULL;") + @"
 CREATE INDEX IF NOT EXISTS ix_passage_record_station_id_completed ON passage_record(station_id, completed_at);
 PRAGMA user_version=2;";
+            command.ExecuteNonQuery();
+            transaction.Commit();
+            version = 2;
+        }
+
+        if (version == 2)
+        {
+            using var transaction = connection.BeginTransaction();
+            var statements = new List<string>();
+            if (!HasColumn(connection, "passage_record", "alarm_acknowledged_at"))
+            {
+                statements.Add("ALTER TABLE passage_record ADD COLUMN alarm_acknowledged_at INTEGER NULL;");
+            }
+
+            if (!HasColumn(connection, "passage_record", "alarm_recovered_at"))
+            {
+                statements.Add("ALTER TABLE passage_record ADD COLUMN alarm_recovered_at INTEGER NULL;");
+            }
+
+            statements.Add(@"
+UPDATE passage_record
+SET alarm_acknowledged_at = COALESCE(cleared_at, completed_at),
+    alarm_recovered_at = COALESCE(cleared_at, completed_at)
+WHERE result = $alarm_result AND clear_state = $cleared_state;");
+            statements.Add("PRAGMA user_version=3;");
+
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = string.Join(Environment.NewLine, statements);
+            command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
+            command.Parameters.AddWithValue("$cleared_state", (int)PassageClearState.Cleared);
             command.ExecuteNonQuery();
             transaction.Commit();
         }
@@ -338,6 +437,8 @@ PRAGMA user_version=2;";
         command.Parameters.AddWithValue("$clear_state", (int)record.ClearState);
         command.Parameters.AddWithValue("$created_at", ToUnixMilliseconds(record.CreatedAt));
         command.Parameters.AddWithValue("$cleared_at", record.ClearedAt.HasValue ? ToUnixMilliseconds(record.ClearedAt.Value) : DBNull.Value);
+        command.Parameters.AddWithValue("$alarm_acknowledged_at", record.AlarmAcknowledgedAt.HasValue ? ToUnixMilliseconds(record.AlarmAcknowledgedAt.Value) : DBNull.Value);
+        command.Parameters.AddWithValue("$alarm_recovered_at", record.AlarmRecoveredAt.HasValue ? ToUnixMilliseconds(record.AlarmRecoveredAt.Value) : DBNull.Value);
     }
 
     private static string BuildFilter(PassageQuery query, out Dictionary<string, object?> parameters)
@@ -435,7 +536,8 @@ PRAGMA user_version=2;";
         command.CommandText = @"
 SELECT passage_id, station_id, station_address, head_rfid,
        expected_vehicle_count, result, started_at, completed_at,
-       warning_message, alarm_message, clear_state, created_at, cleared_at
+       warning_message, alarm_message, clear_state, created_at, cleared_at,
+       alarm_acknowledged_at, alarm_recovered_at
 FROM passage_record
 WHERE passage_id = $passage_id;";
         command.Parameters.AddWithValue("$passage_id", passageId.ToString("D"));
@@ -462,7 +564,9 @@ WHERE passage_id = $passage_id;";
             details,
             (PassageClearState)reader.GetInt32(10),
             reader.IsDBNull(12) ? null : FromUnixMilliseconds(reader.GetInt64(12)),
-            FromUnixMilliseconds(reader.GetInt64(11)));
+            FromUnixMilliseconds(reader.GetInt64(11)),
+            reader.IsDBNull(13) ? null : FromUnixMilliseconds(reader.GetInt64(13)),
+            reader.IsDBNull(14) ? null : FromUnixMilliseconds(reader.GetInt64(14)));
     }
 
     private static IReadOnlyList<PassageRfidObservation> LoadDetails(SQLiteConnection connection, Guid passageId)

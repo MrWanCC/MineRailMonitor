@@ -28,6 +28,9 @@ public partial class PassageDetailsDialog : Window
         DetectedCountValue.Text = record.DetectedVehicleCount.ToString(CultureInfo.InvariantCulture);
         OutcomeValue.Text = FormatOutcome(record.Outcome);
         ClearStateValue.Text = FormatClearState(record.ClearState);
+        AlarmStatusValue.Text = FormatAlarmStatus(record);
+        AlarmAcknowledgedAtValue.Text = FormatOptionalTime(record.AlarmAcknowledgedAt);
+        AlarmRecoveredAtValue.Text = FormatOptionalTime(record.AlarmRecoveredAt);
         AlarmValue.Text = record.AlarmMessage ?? "-";
         WarningValue.Text = record.WarningMessages.Count == 0 ? "-" : string.Join("；", record.WarningMessages);
 
@@ -53,6 +56,24 @@ public partial class PassageDetailsDialog : Window
     private static string FormatOutcome(PassageOutcome value) => value == PassageOutcome.Completed ? "正常通过" : "脱节报警";
 
     private static string FormatClearState(PassageClearState value) => value == PassageClearState.Cleared ? "已清除" : "待清除";
+
+    private static string FormatAlarmStatus(PassageRecord record)
+    {
+        if (!record.RequiresAlarmAcknowledgement)
+        {
+            return "无需确认";
+        }
+
+        return (record.AlarmAcknowledgedAt.HasValue, record.AlarmRecoveredAt.HasValue) switch
+        {
+            (false, false) => "待确认 · 报警中",
+            (true, false) => "已确认 · 报警中",
+            (false, true) => "待确认 · 已恢复",
+            _ => "已确认 · 已恢复"
+        };
+    }
+
+    private static string FormatOptionalTime(DateTimeOffset? value) => value.HasValue ? FormatTime(value.Value) : "-";
 
     private sealed class RfidDetailRow
     {

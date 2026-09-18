@@ -310,7 +310,23 @@ public sealed class YardCommunicationContext : IDisposable
         _runtimeCoordinator?.ProcessFrame(frame);
 
     public void RestorePendingClear(IEnumerable<PassageRecord> records) =>
-        _runtimeCoordinator?.RestorePendingClear(records);
+        _runtimeCoordinator?.RestorePendingClear(FilterRecordsForContext(records));
+
+    public void RestoreUnacknowledgedAlarms(IEnumerable<PassageRecord> records) =>
+        _runtimeCoordinator?.RestoreUnacknowledgedAlarms(FilterRecordsForContext(records));
+
+    public bool HasUnacknowledgedAlarm(Guid passageId) =>
+        _runtimeCoordinator?.HasUnacknowledgedAlarm(passageId) == true;
+
+    public void AcknowledgeAlarm(Guid passageId, DateTimeOffset acknowledgedAt)
+    {
+        if (_runtimeCoordinator is null)
+        {
+            throw new InvalidOperationException($"站场通信上下文未配置运行时：{YardId}。 ");
+        }
+
+        _runtimeCoordinator.AcknowledgeAlarm(passageId, acknowledgedAt);
+    }
 
     public async Task SendAsync(
         RfidStationConfig station,
@@ -365,6 +381,20 @@ public sealed class YardCommunicationContext : IDisposable
         _stations.Any(station => station.Enabled)
             ? new RfidRuntimeCoordinator(_stations, _settings, _recordStore)
             : null;
+
+    private IEnumerable<PassageRecord> FilterRecordsForContext(IEnumerable<PassageRecord> records)
+    {
+        if (records is null) throw new ArgumentNullException(nameof(records));
+        if (IsLegacySharedListener)
+        {
+            return records;
+        }
+
+        var stationIds = new HashSet<string>(
+            _stations.Select(station => station.StationId),
+            StringComparer.OrdinalIgnoreCase);
+        return records.Where(record => stationIds.Contains(record.StationId));
+    }
 
     private async Task RunPollerAsync(RfidStationPoller poller, CancellationToken cancellationToken)
     {

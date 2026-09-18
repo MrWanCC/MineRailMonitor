@@ -4,6 +4,8 @@ namespace MineRailMonitor.Core.Models;
 
 public sealed class StationRuntimeState
 {
+    private readonly HashSet<Guid> _unacknowledgedAlarmPassageIds = new();
+
     internal StationRuntimeState(byte stationAddress, int expectedVehicleCount, ushort emptyRfidValue)
         : this($"RFID-{stationAddress:X2}", $"RFID-{stationAddress:X2}", stationAddress, expectedVehicleCount, emptyRfidValue)
     {
@@ -78,4 +80,14 @@ public sealed class StationRuntimeState
     public int ClearAttempts { get; internal set; }
 
     public int ConsecutiveEmptyReads { get; internal set; }
+
+    public IReadOnlyCollection<Guid> UnacknowledgedAlarmPassageIds => _unacknowledgedAlarmPassageIds.ToArray();
+
+    public bool HasUnacknowledgedAlarms => _unacknowledgedAlarmPassageIds.Count > 0;
+
+    internal void AddUnacknowledgedAlarm(Guid passageId) => _unacknowledgedAlarmPassageIds.Add(passageId);
+
+    internal bool RemoveUnacknowledgedAlarm(Guid passageId) => _unacknowledgedAlarmPassageIds.Remove(passageId);
+
+    internal bool ContainsUnacknowledgedAlarm(Guid passageId) => _unacknowledgedAlarmPassageIds.Contains(passageId);
 }

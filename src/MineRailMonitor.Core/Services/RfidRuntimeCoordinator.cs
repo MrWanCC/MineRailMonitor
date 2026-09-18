@@ -682,7 +682,9 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         // Keep an uncoupling alarm visible while the clear handshake and empty-slot
         // confirmation are still in progress. The lifecycle continues normally;
         // this only preserves the alarm indication for the visual layer.
-        if (state.HasUnacknowledgedAlarms || state.LifecycleState == PassageLifecycleState.Alarm)
+        if (state.HasUnacknowledgedAlarms
+            || state.LifecycleState == PassageLifecycleState.Alarm
+            || state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm)
         {
             state.VisualState = RfidStationVisualState.Alarm;
             return;

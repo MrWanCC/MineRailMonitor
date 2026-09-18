@@ -171,13 +171,20 @@ public sealed class YardCommunicationManager : IDisposable
         }
 
         ValidateCandidateEndpointConflicts(candidateByYard.Values);
+        var pendingClearRecords = _recordStore.GetPendingClear();
+        var unacknowledgedAlarms = _recordStore.GetUnacknowledgedAlarms();
 
         foreach (var current in _contexts.ToArray())
         {
             if (!candidateByYard.TryGetValue(current.Key, out var candidate) ||
                 !AreConfigurationsEqual(current.Value.Configuration, candidate))
             {
-                await ReplaceContextAsync(current.Key, candidate, cancellationToken).ConfigureAwait(false);
+                await ReplaceContextAsync(
+                    current.Key,
+                    candidate,
+                    pendingClearRecords,
+                    unacknowledgedAlarms,
+                    cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -191,6 +198,8 @@ public sealed class YardCommunicationManager : IDisposable
             var context = CreateContext(candidate.Value);
             _contexts.Add(candidate.Key, context);
             AttachContext(context);
+            context.RestorePendingClear(pendingClearRecords);
+            context.RestoreUnacknowledgedAlarms(unacknowledgedAlarms);
             if (_isStarted)
             {
                 await context.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -289,6 +298,8 @@ public sealed class YardCommunicationManager : IDisposable
     private async Task ReplaceContextAsync(
         string yardId,
         YardCommunicationConfig? configuration,
+        IReadOnlyList<PassageRecord> pendingClearRecords,
+        IReadOnlyList<PassageRecord> unacknowledgedAlarms,
         CancellationToken cancellationToken)
     {
         var current = _contexts[yardId];
@@ -304,6 +315,8 @@ public sealed class YardCommunicationManager : IDisposable
         var replacement = CreateContext(configuration);
         _contexts[configuration.YardId.Trim()] = replacement;
         AttachContext(replacement);
+        replacement.RestorePendingClear(pendingClearRecords);
+        replacement.RestoreUnacknowledgedAlarms(unacknowledgedAlarms);
         if (_isStarted)
         {
             await replacement.StartAsync(cancellationToken).ConfigureAwait(false);

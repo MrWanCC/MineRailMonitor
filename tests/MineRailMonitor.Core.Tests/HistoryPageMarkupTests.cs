@@ -34,6 +34,9 @@ public sealed class HistoryPageMarkupTests
         Assert.Contains("GetUnacknowledgedAlarms", markup, StringComparison.Ordinal);
         Assert.Contains("RestoreUnacknowledgedAlarms", markup, StringComparison.Ordinal);
         Assert.Contains("YardCommunicationManager", markup, StringComparison.Ordinal);
+        Assert.Contains("GetDetails(passageId)", markup, StringComparison.Ordinal);
+        Assert.Contains("MarkAlarmAcknowledged", markup, StringComparison.Ordinal);
+        Assert.Contains("HasUnacknowledgedAlarm", markup, StringComparison.Ordinal);
         Assert.True(markup.IndexOf("RestorePendingClear", StringComparison.Ordinal) < markup.IndexOf("StartAllAsync", StringComparison.Ordinal));
     }
 

@@ -102,6 +102,52 @@ public sealed class YardCommunicationManagerTests
     }
 
     [Fact]
+    public async Task ApplyConfigurations_replacement_restores_unacknowledged_alarm()
+    {
+        var station560 = CreateStation("RFID-01", "560", 0x01, 63126);
+        var station620 = CreateStation("RFID-02", "620", 0x02, 63127);
+        var configuration560 = CreateCommunication("560");
+        var configuration620 = CreateCommunication("620");
+        var store = new InMemoryPassageRecordStore();
+        var passage = new PassageRecord(
+            Guid.NewGuid(),
+            station560.StationId,
+            station560.ProtocolAddress,
+            0x0001,
+            new ushort[] { 0x0001, 0x0011 },
+            11,
+            PassageOutcome.UncouplingAlarm,
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            DateTimeOffset.UtcNow,
+            alarmMessage: "脱节报警");
+        store.Save(passage);
+
+        using var manager = new YardCommunicationManager(
+            new[] { configuration560, configuration620 },
+            new[] { station560, station620 },
+            CreateSettings(),
+            store);
+        var original = manager.GetContext("560")!;
+        original.RestorePendingClear(store.GetPendingClear());
+        original.RestoreUnacknowledgedAlarms(store.GetUnacknowledgedAlarms());
+        Assert.True(original.HasUnacknowledgedAlarm(passage.PassageId));
+
+        var replacementPort = GetUnusedPort();
+        await manager.ApplyConfigurationsAsync(new[]
+        {
+            CreateCommunication("560", replacementPort),
+            configuration620
+        });
+
+        var replacement = manager.GetContext("560")!;
+        Assert.NotSame(original, replacement);
+        Assert.True(replacement.HasUnacknowledgedAlarm(passage.PassageId));
+        var state = Assert.Single(replacement.RuntimeStates);
+        Assert.True(state.PendingClear);
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
+    }
+
+    [Fact]
     public async Task Rejects_duplicate_enabled_listener_endpoints_before_replacing_contexts()
     {
         var station560 = CreateStation("RFID-01", "560", 0x01, 63118);

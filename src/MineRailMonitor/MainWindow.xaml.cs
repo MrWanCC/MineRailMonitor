@@ -1188,15 +1188,39 @@ public partial class MainWindow : Window
 
     private void AcknowledgeAlarm(Guid passageId, DateTimeOffset acknowledgedAt)
     {
+        var record = _passageRecordStore.GetDetails(passageId);
+        if (record is null)
+        {
+            throw new InvalidOperationException($"未找到待确认报警记录：{passageId}。");
+        }
+
+        if (record.Outcome != PassageOutcome.UncouplingAlarm)
+        {
+            throw new InvalidOperationException($"普通告警不可确认：{passageId}。");
+        }
+
+        if (record.AlarmAcknowledgedAt.HasValue)
+        {
+            return;
+        }
+
         var contexts = _yardCommunicationManager?.Contexts.Values
             .Where(context => context.HasUnacknowledgedAlarm(passageId))
             .ToArray() ?? Array.Empty<YardCommunicationContext>();
-        if (contexts.Length != 1)
+        if (contexts.Length > 1)
         {
             throw new InvalidOperationException($"未找到唯一的待确认报警：{passageId}。");
         }
 
-        contexts[0].AcknowledgeAlarm(passageId, acknowledgedAt);
+        if (contexts.Length == 1)
+        {
+            contexts[0].AcknowledgeAlarm(passageId, acknowledgedAt);
+        }
+        else
+        {
+            _passageRecordStore.MarkAlarmAcknowledged(passageId, acknowledgedAt);
+        }
+
         UpdateRecognitionStatus();
         UpdateRfidRuntimeUi();
         RefreshRecentAlarmHistory();

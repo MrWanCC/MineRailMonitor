@@ -56,6 +56,68 @@ public sealed class AlarmAcknowledgementTests
     }
 
     [Fact]
+    public void Acknowledged_alarm_stays_red_during_clear_and_wait_for_empty()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var coordinator = CreateCoordinator(store);
+        var alarmValues = AlarmValues();
+
+        coordinator.ProcessFrame(CreateFrame(0x01, Start, alarmValues));
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(29.9), alarmValues));
+        coordinator.Evaluate(Start.AddSeconds(30));
+
+        var state = coordinator.States[0x01];
+        var passageId = Assert.Single(store.Records).PassageId;
+        coordinator.AcknowledgeAlarm(passageId, Start.AddSeconds(30.1));
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
+
+        coordinator.MarkCommandSent(0x01, RfidPollCommand.Clear, Start.AddSeconds(30.2));
+        Assert.Equal(PassageLifecycleState.Clearing, state.LifecycleState);
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
+
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(30.3), Array.Empty<ushort>()));
+        Assert.Equal(PassageLifecycleState.WaitForEmpty, state.LifecycleState);
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
+
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(30.4), Array.Empty<ushort>()));
+        Assert.Equal(PassageLifecycleState.Idle, state.LifecycleState);
+        Assert.NotEqual(RfidStationVisualState.Alarm, state.VisualState);
+    }
+
+    [Fact]
+    public void Acknowledged_pending_clear_alarm_restores_red_after_restart()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var original = CreateCoordinator(store);
+        var alarmValues = AlarmValues();
+
+        original.ProcessFrame(CreateFrame(0x01, Start, alarmValues));
+        original.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(29.9), alarmValues));
+        original.Evaluate(Start.AddSeconds(30));
+        var passageId = Assert.Single(store.Records).PassageId;
+        original.AcknowledgeAlarm(passageId, Start.AddSeconds(30.1));
+
+        var restored = CreateCoordinator(store);
+        restored.RestorePendingClear(store.GetPendingClear());
+        restored.RestoreUnacknowledgedAlarms(store.GetUnacknowledgedAlarms());
+
+        var state = restored.States[0x01];
+        Assert.False(state.HasUnacknowledgedAlarms);
+        Assert.True(state.PendingClear);
+        Assert.Equal(PassageLifecycleState.Clearing, state.LifecycleState);
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
+
+        restored.MarkCommandSent(0x01, RfidPollCommand.Clear, Start.AddSeconds(30.2));
+        restored.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(30.3), Array.Empty<ushort>()));
+        Assert.Equal(PassageLifecycleState.WaitForEmpty, state.LifecycleState);
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
+
+        restored.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(30.4), Array.Empty<ushort>()));
+        Assert.Equal(PassageLifecycleState.Idle, state.LifecycleState);
+        Assert.NotEqual(RfidStationVisualState.Alarm, state.VisualState);
+    }
+
+    [Fact]
     public void Two_unacknowledged_alarm_passages_require_both_acknowledgements()
     {
         var store = new InMemoryPassageRecordStore();

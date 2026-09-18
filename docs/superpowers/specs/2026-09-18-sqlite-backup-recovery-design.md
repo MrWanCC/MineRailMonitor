@@ -107,7 +107,8 @@ Acceptance 模式当前通过命令行传入独立 `DatabasePath` 和 `LogDirect
 └─ Data/
    ├─ MineRailMonitor.db
    ├─ MineRailMonitor.db-wal
-   └─ MineRailMonitor.db-shm
+   ├─ MineRailMonitor.db-shm
+   └─ .sqlite-recovery-in-progress
 ```
 
 备份：
@@ -140,7 +141,15 @@ MineRailMonitor_20260918_020000.tmp.db
 
 只复制实际存在的 sidecar 文件。缺少 WAL 或 SHM 不应伪造空文件。
 
-正式备份以 `.db` 结尾且位于日期目录中；`.tmp.db` 永远不是健康备份候选，也不参与 retention 计数。
+正式备份必须符合精确命名：
+
+```text
+MineRailMonitor_yyyyMMdd_HHmmss.db
+```
+
+并且位于对应的本地日期目录中。`.tmp.db` 永远不是健康备份候选，也不参与
+retention 计数。异常命名文件不根据猜测纳入候选；`LastWriteTime` 只能作为诊断
+信息，不能作为主排序依据。
 
 ## 5. 健康检查模型
 
@@ -151,33 +160,83 @@ MineRailMonitor_20260918_020000.tmp.db
 健康结果至少包含：
 
 - 数据库路径。
-- 是否不存在。
+- 状态：`Missing`、`Healthy`、`Corrupt` 或 `Unavailable`。
 - 检查时间。
 - quick check 是否通过及返回摘要。
 - foreign key check 是否通过及违规摘要。
 - integrity check 是否执行、是否通过及详细摘要。
-- 总体状态：Missing、Healthy 或 Corrupt。
+- 原始异常类型、SQLite/IO 错误码和可供日志使用的摘要。
 - 面向日志和 Dialog 的错误摘要。
 
 ### 检查规则
 
-数据库不存在：
+`Missing`：
 
+- 主数据库文件不存在，且不存在 `.sqlite-recovery-in-progress`；
 - 不视为损坏。
 - 允许后续创建新数据库。
 - 不触发恢复 Dialog。
 
-数据库存在时：
+`Healthy`：
 
-1. 用独立连接执行 `PRAGMA quick_check;`。
+1. 用 Inspection Connection 执行 `PRAGMA quick_check;`。
 2. 执行 `PRAGMA foreign_key_check;`。
 3. 只有 quick check 返回 `ok` 且 foreign key check 无结果时才判定 Healthy。
-4. quick check 异常、返回非 `ok` 或 foreign key check 有结果时，继续执行 `PRAGMA integrity_check;`，用于确认和记录详细问题。
-5. 打开失败、锁定超时或其他 SQLite 异常均判为 Corrupt/Unavailable，不把异常数据库交给 Store 初始化。
+
+`Corrupt` 只表示已经能够确定数据库内容或 SQLite 文件结构损坏，包括：
+
+- quick check 返回确定的完整性错误；
+- integrity check 确认完整性错误；
+- foreign key check 确认数据完整性违规；
+- 其他可以明确判定为 SQLite corruption 的结果。
+
+quick check 异常、返回非 `ok` 或 foreign key check 有结果时，继续执行
+`PRAGMA integrity_check;`，用于确认并记录详细问题。只有得到上述确定性证据时才进入
+`Corrupt` 和 backup recovery 流程。
+
+`Unavailable` 表示无法可靠判断内容是否损坏，包括：
+
+- database locked、busy timeout；
+- access denied、sharing violation；
+- 路径、磁盘或文件暂时不可访问；
+- 无法归类为确定 corruption 的 IO/SQLite 异常。
+
+`Unavailable` 的行为是：
+
+- 阻止业务启动，不创建 MainWindow；
+- 不移动或覆盖生产数据库；
+- 不进入自动或人工 backup recovery 候选流程；
+- 启动级 UI 只提供重试、打开数据目录和退出。
+
+`Unavailable` 不能被降级成 `Corrupt`，也不能通过“再创建一个空数据库”绕过。
 
 健康检查不得因为“能打开文件”就判定健康，也不得只检查主 `.db` 文件的存在。
 
-健康检查连接应沿用现有 SQLite 连接参数，尤其保持 WAL、`synchronous=FULL`、外键和 `busy_timeout=5000` 语义。
+### Business Connection 与 Inspection Connection
+
+业务 `SqlitePassageRecordStore` 继续使用现有 Business Connection 语义：
+
+```text
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=FULL;
+PRAGMA foreign_keys=ON;
+PRAGMA busy_timeout=5000;
+```
+
+HealthChecker、backup candidate validation 和 staging validation 使用独立的
+Inspection Connection。它不是业务连接，必须满足：
+
+- 不执行 `PRAGMA journal_mode=WAL`；
+- 不修改 journal mode、`user_version` 或 schema；
+- 不执行 schema migration；
+- 只采用非破坏性的只读/只查询检查策略；
+- 检查正式 backup 时不产生 `-wal` / `-shm` sidecar；
+- 不把备份文件或 staging 文件变成可写业务数据库。
+
+生产数据库的 startup inspection 必须能看到已有 WAL 中的已提交数据，但 inspection
+自身不能主动修改 journal mode。System.Data.SQLite connection string/overload、只读
+选项和 WAL 可见性组合留 implementation 阶段通过测试确定；本设计不把业务
+`ConnectionPragmas` 复用为 inspection 配置。
 
 ## 6. SqliteBackupService 设计
 
@@ -285,9 +344,22 @@ health check
 
 对于不存在的数据库：
 
-- 不是故障，不显示损坏 Dialog。
-- 允许 Store 创建正常新数据库。
-- 初始数据库在成功初始化后可由维护协调器创建第一份正式备份；该路径不需要伪造“迁移前备份”。
+- 只有在不存在 recovery marker 时，才按首次安装处理：
+  - 不是故障，不显示损坏 Dialog；
+  - 允许 Store 创建正常新数据库；
+  - 初始数据库在成功初始化后可由维护协调器创建第一份正式备份；该路径不需要伪造“迁移前备份”。
+- 如果存在 recovery marker，即使生产 `.db` 不存在，也绝不能创建空数据库；必须进入“上一次恢复未完成”路径。
+
+### Unavailable 启动路径
+
+健康检查结果为 `Unavailable` 时：
+
+- 不扫描或选择 backup recovery 候选；
+- 不移动、删除、替换或创建生产数据库文件；
+- 不创建 Store、MainWindow 或 YardCommunicationManager；
+- 启动级 UI 只提供重试、打开数据目录和退出。
+
+重试仍得到 `Unavailable` 时保持该路径，不能把暂时不可访问解释为 Corrupt。
 
 ### 损坏数据库路径
 
@@ -315,9 +387,57 @@ health check → Corrupt
 
 用户取消或退出时显式 Shutdown，不能落入创建 MainWindow 的默认路径。
 
-## 10. 备份候选扫描与再次验证
+## 10. Interrupted Recovery / Recovery Marker
 
-`SqliteBackupService` 扫描 `Backups/SQLite` 下的正式 `.db`，按日期目录和文件时间从新到旧排序。
+恢复 marker 路径为：
+
+```text
+<AppContext.BaseDirectory>/Data/.sqlite-recovery-in-progress
+```
+
+它是恢复事务边界的一部分，不是普通日志文件。marker 至少持久化以下信息：
+
+- `recoveryStarted`；
+- `sourceBackupPath`；
+- `corruptBundlePath`；
+- `stagingPath`；
+- `startedAt`（本地时间和可用于诊断的 UTC 时间）。
+
+恢复状态机为：
+
+```text
+candidate validated
+→ staging validated
+→ corrupt bundle 完整保存
+→ 持久化 recovery marker
+→ 开始 sidecar / 生产文件替换
+→ final health check
+→ success
+→ 删除 recovery marker
+```
+
+在第一次破坏性操作（sidecar 移动/删除或生产文件替换）前，marker 必须已经写入并
+持久化。marker 写入失败时停止恢复，不执行任何破坏性操作。corrupt bundle 保存失败
+时同样停止，不得继续覆盖生产文件。
+
+启动时必须先检查 marker，再解释生产数据库是否 `Missing`：
+
+- marker 存在且生产 `.db` 缺失：进入“上一次恢复未完成”路径，禁止首次安装初始化；
+- marker 存在且生产 `.db` 仍存在：仍阻止普通 Healthy 启动，不能直接忽略 marker；
+- marker 存在时，不自动把任意 staging 或生产文件当作已完成恢复。
+
+第一版不要求自动续跑恢复。可以安全地进入 startup recovery/error UI，重新检查
+staging、corrupt bundle、source backup 和 production DB，之后由明确流程完成恢复或
+退出。无论哪种中断边界（保存 corrupt bundle 后、sidecar 移除后、生产替换中），
+都必须保留 marker 和现有证据，直到最终 health check 成功。只有最终 health check
+成功且恢复后的路径已明确成为新的生产数据库时，才允许删除 marker。
+
+## 11. 备份候选扫描与再次验证
+
+`SqliteBackupService` 扫描 `Backups/SQLite` 下符合精确命名的正式 `.db`。候选排序优先
+解析规范文件名 `MineRailMonitor_yyyyMMdd_HHmmss.db` 中的本地时间，从新到旧排序；
+日期目录只作为路径一致性校验。文件名无法按规范解析的文件不作为候选，也不能靠
+`LastWriteTime` 猜测为最新健康备份。
 
 每个候选在恢复前都必须重新执行：
 
@@ -328,7 +448,7 @@ health check → Corrupt
 
 Dialog 显示的“最近健康备份”必须是这次扫描和复核后实际通过的候选。
 
-## 11. SqliteRecoveryService 设计
+## 12. SqliteRecoveryService 设计
 
 建议组件名：`SqliteRecoveryService`。
 
@@ -386,9 +506,11 @@ staging 已验证
 
 不自动回退为“新空库”。
 
-## 12. DatabaseRecoveryDialog
+## 13. DatabaseRecoveryDialog
 
 这是 MainWindow 创建前的启动级 modal，不挂在业务页面或已启动的通信管理器上。
+`Corrupt`、`Unavailable` 和“recovery marker 存在”是不同的 UI 状态，不能共用会
+误导用户的损坏提示。
 
 至少显示：
 
@@ -413,7 +535,21 @@ staging 已验证
 
 没有可用备份时，Dialog 变为“数据库损坏且未找到可用备份”，隐藏恢复按钮，只保留打开目录和退出。
 
-## 13. 组件边界
+对于 `Unavailable`：
+
+- 标题和正文明确显示“数据库当前不可访问，无法判断是否损坏”；
+- 隐藏恢复候选和恢复按钮；
+- 只显示重试、打开数据目录和退出；
+- 重试前后都不移动生产文件，也不创建空数据库。
+
+对于 recovery marker：
+
+- 显示“上一次恢复未完成”及 marker、staging、corrupt bundle、source backup 路径；
+- 不把生产 DB 缺失显示为首次安装；
+- 第一版不自动续跑，用户只能进入明确的恢复/错误处理流程或退出；
+- 在最终 health check 成功前不允许删除 marker。
+
+## 14. 组件边界
 
 ### SqliteDatabaseHealthChecker
 
@@ -442,15 +578,25 @@ staging 已验证
 
 健康检查和恢复决策不得塞进 Store 构造函数，也不得让 Store 自己弹 Dialog。
 
-## 14. MainWindow 与 App 的所有权
+## 15. MainWindow 与 App 的所有权
+
+数据库基础设施的唯一 owner 是 `App`。`MainWindow` 只使用依赖，不拥有、不 Dispose
+数据库基础设施。具体 ownership 为：
+
+- `App` 创建并持有 `SqlitePassageRecordStore`；
+- `App` 创建并持有 `DatabaseMaintenanceCoordinator`；
+- `App` 负责二者的退出顺序和最终 Dispose；
+- `MainWindow` 接收 Store 或受控启动上下文并使用它，但不能再自行创建 Store，
+  也不能创建第二个 coordinator。
 
 目标结构：
 
 ```text
 App.OnStartup
-→ DatabaseStartupGate / maintenance orchestration
-→ 成功后创建 SqlitePassageRecordStore
-→ 将 Store 或等价已验证依赖传给 MainWindow
+→ startup gate / recovery decision
+→ 成功后 App 创建 SqlitePassageRecordStore
+→ App 创建 DatabaseMaintenanceCoordinator
+→ App 将 Store / coordinator 或等价受控依赖传给 MainWindow
 → MainWindow LoadProject
 → 恢复 PendingClear / 未确认报警
 → YardCommunicationManager Start
@@ -458,9 +604,23 @@ App.OnStartup
 
 MainWindow 不再负责决定数据库是否损坏，也不应在构造早期自行打开未经门禁的生产数据库。
 
-完整退出时，仍需保持现有业务关闭顺序：先停止通信和业务运行，再关闭 Store；本设计不改变报警恢复、Raw Packet Black Box 或 560/620 Context 隔离。
+完整退出顺序必须是：
 
-## 15. 正常运行期维护
+```text
+停止 YardCommunicationManager / runtime
+→ DatabaseMaintenanceCoordinator.StopAsync()
+→ 等待正在运行的 backup 安全结束
+→ Dispose DatabaseMaintenanceCoordinator
+→ Dispose SqlitePassageRecordStore / DB infrastructure
+→ application exit
+```
+
+`StopAsync` 必须等待或安全取消 in-flight backup，不能在 backup 仍使用数据库时
+Dispose Store。任何退出路径都不得让 MainWindow 和 App 同时 Dispose Store，也不得
+让 backup scheduler 在 Store Dispose 后继续运行。本设计不改变报警恢复、Raw Packet
+Black Box 或 560/620 Context 隔离。
+
+## 16. 正常运行期维护
 
 维护协调器在业务运行后计算下一次本地 02:00，并通过可取消的单次等待调度备份。到点后：
 
@@ -474,7 +634,7 @@ MainWindow 不再负责决定数据库是否损坏，也不应在构造早期自
 
 备份和 retention 不应在 UDP 线程、poller 线程或 WPF UI 线程执行阻塞磁盘操作。UI 只读取维护状态快照或接收日志状态，不直接持有备份锁。
 
-## 16. Acceptance 模式
+## 17. Acceptance 模式
 
 现有 Acceptance 已使用独立数据库路径、运行时状态路径和日志目录。
 
@@ -489,7 +649,7 @@ MainWindow 不再负责决定数据库是否损坏，也不应在构造早期自
 
 SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，不把生产维护任务混入 Acceptance 流程。
 
-## 17. 日志要求
+## 18. 日志要求
 
 至少记录以下事件：
 
@@ -510,17 +670,20 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 
 日志只记录路径、状态、摘要、时间和错误，不记录整个数据库内容，不输出 RFID Passage 全量数据。
 
-## 18. 失败安全与并发约束
+## 19. 失败安全与并发约束
 
 - 启动门禁是唯一允许决定“是否创建业务运行环境”的边界。
+- `Unavailable` 只允许重试、打开数据目录或退出，永远不进入 recovery candidate 流程。
 - 恢复操作期间禁止创建 Store 和启动通信管理器。
 - 日常备份与 02:00 调度共享一个串行互斥，不允许 startup backup 与定时 backup 并发。
 - 备份失败只影响维护状态，不改变 `YardCommunicationManager`、`RfidRuntimeCoordinator` 或报警状态。
 - 恢复失败不覆盖原库，不启动业务，并保留证据。
 - 生产数据库连接关闭后才允许保存 corrupt bundle 和替换文件。
+- recovery marker 写入并持久化前，不允许执行 sidecar 删除、生产文件移动或生产文件替换。
+- marker 存在时禁止把缺失的生产 DB 当成首次安装，也禁止忽略 marker 直接 Healthy 启动。
 - schema migration 仍由 Store 执行；已有健康库的 startup backup 必须先于 Store 构造。
 
-## 19. 后续实现必须覆盖的测试契约
+## 20. 后续实现必须覆盖的测试契约
 
 本设计阶段不添加测试代码。后续实现计划必须覆盖以下行为。
 
@@ -532,6 +695,11 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 - quick check 失败。
 - foreign key violation。
 - integrity check 摘要可记录。
+- locked/busy 数据库判定为 `Unavailable`，而不是 `Corrupt`。
+- access denied 判定为 `Unavailable`。
+- `Unavailable` 不进入 recovery candidate 流程。
+- 生产数据库已有 WAL 时，inspection 能读到已提交数据。
+- backup/staging inspection 不执行 WAL pragma、不产生 WAL/SHM、不修改文件。
 
 ### Backup
 
@@ -547,10 +715,17 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 ### Recovery
 
 - 选择最新健康备份。
+- 只按规范文件名中的本地时间排序；异常命名文件和单纯 LastWriteTime 不得决定候选顺序。
 - 最新候选损坏时回退到下一个健康候选。
 - staging 验证通过前生产库不改变。
 - 原始 `.db` 被保存。
 - 已存在的 WAL/SHM 被保存。
+- candidate/staging 验证使用非破坏性的 Inspection Connection。
+- recovery marker 至少包含 source backup、corrupt bundle、staging 和 started timestamp。
+- marker + 缺失生产 DB 永远不创建空库。
+- marker + 仍存在生产 DB 也阻止普通启动。
+- corrupt bundle 完成后、sidecar 移除后、生产替换中断后，marker 和证据仍保留。
+- marker 只在最终 health check 成功后删除。
 - 恢复后的生产库再次验证。
 - 恢复失败不启动 runtime。
 - 无健康备份不创建空数据库。
@@ -560,6 +735,13 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 - health gate 发生在 `SqlitePassageRecordStore` 构造前。
 - Store 构造发生在 MainWindow 业务运行环境创建前。
 - 损坏 DB 阻止 MainWindow / RFID runtime 启动。
+
+### Shutdown / ownership
+
+- App 是 Store 和 DatabaseMaintenanceCoordinator 的唯一 owner。
+- shutdown 等待或安全终止 in-flight backup 后才 Dispose Store。
+- coordinator 停止后不再启动新的 backup。
+- 不发生 Store 双重 Dispose 或 backup/shutdown race。
 
 ### Regression
 
@@ -571,7 +753,7 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 - Infrastructure。
 - Acceptance 8/8。
 
-## 20. 现有能力保持不变
+## 21. 现有能力保持不变
 
 实现阶段必须明确验证以下内容没有改变：
 
@@ -585,7 +767,7 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 - Raw Packet Black Box 保持。
 - 560/620 独立 Context 和相同 ProtocolAddress 隔离保持。
 
-## 21. 待 implementation 阶段确认的边界
+## 22. 待 implementation 阶段确认的边界
 
 以下是设计约束，而不是本阶段的实现任务：
 
@@ -594,7 +776,7 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 3. SQLite Online Backup API 的具体 overload、连接生命周期和 atomic rename 实现需要通过 Infrastructure 测试固定。
 4. stale `.tmp.db` 的时间阈值需要在实现阶段以可注入时钟和明确默认值确定，不能把临时文件误删为正式证据。
 
-## 22. 当前设计中已发现的代码冲突
+## 23. 当前设计中已发现的代码冲突
 
 已确认的冲突只有启动所有权和 Store 初始化时机：
 

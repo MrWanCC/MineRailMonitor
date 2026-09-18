@@ -12,4 +12,7 @@ public sealed class SimulatorStation
     public byte CrcHigh { get; set; }
 
     public byte CrcLow { get; set; }
+
+    /// <summary>Runtime-only communication fault policy for this simulated station.</summary>
+    public SimulatorFaultConfiguration FaultConfiguration { get; internal set; } = new(SimulatorFaultMode.Normal);
 }

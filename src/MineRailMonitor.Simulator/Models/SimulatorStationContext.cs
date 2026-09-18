@@ -56,6 +56,17 @@ public sealed class SimulatorStationContext : INotifyPropertyChanged, IDisposabl
 
     public ScenarioPlaybackState Playback { get; }
 
+    public SimulatorFaultConfiguration FaultConfiguration
+    {
+        get
+        {
+            lock (_syncRoot)
+            {
+                return _station.FaultConfiguration;
+            }
+        }
+    }
+
     public bool IsRunning
     {
         get => _isRunning;
@@ -415,6 +426,26 @@ public sealed class SimulatorStationContext : INotifyPropertyChanged, IDisposabl
         }
     }
 
+    public void SetFaultConfiguration(SimulatorFaultConfiguration configuration)
+    {
+        if (configuration is null)
+        {
+            throw new ArgumentNullException(nameof(configuration));
+        }
+
+        ThrowIfDisposed();
+        lock (_syncRoot)
+        {
+            if (ReferenceEquals(_station.FaultConfiguration, configuration))
+            {
+                return;
+            }
+
+            _station.FaultConfiguration = configuration;
+            OnPropertyChanged(nameof(FaultConfiguration));
+        }
+    }
+
     public void ClearLogs()
     {
         lock (_syncRoot)
@@ -460,7 +491,9 @@ public sealed class SimulatorStationContext : INotifyPropertyChanged, IDisposabl
     {
         try
         {
-            await responder.RunAsync(logicResponder.CreateResponse, cancellationToken).ConfigureAwait(false);
+            await responder.RunAsync(
+                (request, _, token) => CreateResponseAsync(logicResponder, request, token),
+                cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -473,6 +506,40 @@ public sealed class SimulatorStationContext : INotifyPropertyChanged, IDisposabl
                 ErrorMessage = $"UDP接收异常：{exception.Message}";
                 AppendLog(ErrorMessage);
             }
+        }
+    }
+
+    private async Task<byte[]?> CreateResponseAsync(
+        RfidSimulatorResponder logicResponder,
+        byte[] request,
+        CancellationToken cancellationToken)
+    {
+        var response = logicResponder.CreateResponse(request);
+        if (response is null)
+        {
+            return null;
+        }
+
+        SimulatorFaultConfiguration configuration;
+        lock (_syncRoot)
+        {
+            configuration = _station.FaultConfiguration;
+        }
+
+        switch (configuration.Mode)
+        {
+            case SimulatorFaultMode.Drop:
+                return null;
+            case SimulatorFaultMode.Delay:
+                await Task.Delay(configuration.DelayMilliseconds, cancellationToken).ConfigureAwait(false);
+                return response;
+            case SimulatorFaultMode.InvalidFrame:
+                var invalidFrame = (byte[])response.Clone();
+                invalidFrame[0] = 0x00;
+                return invalidFrame;
+            case SimulatorFaultMode.Normal:
+            default:
+                return response;
         }
     }
 

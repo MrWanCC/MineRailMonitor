@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Diagnostics;
+using MineRailMonitor.Core.Protocol;
 using MineRailMonitor.Simulator.Models;
 
 namespace MineRailMonitor.Core.Tests;
@@ -225,6 +227,188 @@ public sealed class SimulatorStationContextTests
         }
     }
 
+    [Fact]
+    public async Task Normal_fault_mode_preserves_the_regular_response()
+    {
+        var context = CreateContext(0x01, GetUnusedUdpPort());
+        context.SetSlots(CreateSlots(0x0011));
+
+        try
+        {
+            context.SetFaultConfiguration(new SimulatorFaultConfiguration(SimulatorFaultMode.Normal));
+            await context.StartAsync();
+
+            var response = await SendAsync(context.Config.ListenPort, CreateRequest(0x01));
+
+            Assert.Equal(40, response.Length);
+            Assert.Equal((byte)0xB0, response[0]);
+            Assert.Equal((byte)0xB0, response[1]);
+            Assert.Equal((byte)0x01, response[2]);
+            Assert.Equal((ushort)0x0011, ReadSlot(response, 0));
+        }
+        finally
+        {
+            context.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Drop_fault_mode_suppresses_the_response()
+    {
+        var context = CreateContext(0x01, GetUnusedUdpPort());
+
+        try
+        {
+            context.SetFaultConfiguration(new SimulatorFaultConfiguration(SimulatorFaultMode.Drop));
+            await context.StartAsync();
+
+            var response = await TryReceiveAsync(context.Config.ListenPort, CreateRequest(0x01));
+
+            Assert.Null(response);
+        }
+        finally
+        {
+            context.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Fault_configuration_is_independent_for_two_station_contexts()
+    {
+        var dropped = CreateContext(0x01, GetUnusedUdpPort());
+        var normal = CreateContext(0x02, GetUnusedUdpPort());
+
+        try
+        {
+            dropped.SetFaultConfiguration(new SimulatorFaultConfiguration(SimulatorFaultMode.Drop));
+            normal.SetFaultConfiguration(new SimulatorFaultConfiguration(SimulatorFaultMode.Normal));
+            await dropped.StartAsync();
+            await normal.StartAsync();
+
+            Assert.Null(await TryReceiveAsync(dropped.Config.ListenPort, CreateRequest(0x01)));
+            var normalResponse = await SendAsync(normal.Config.ListenPort, CreateRequest(0x02));
+
+            Assert.Equal((byte)0x02, normalResponse[2]);
+        }
+        finally
+        {
+            dropped.Dispose();
+            normal.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Delay_fault_mode_delays_only_that_station_response()
+    {
+        var delayed = CreateContext(0x01, GetUnusedUdpPort());
+        var normal = CreateContext(0x02, GetUnusedUdpPort());
+        delayed.SetFaultConfiguration(new SimulatorFaultConfiguration(SimulatorFaultMode.Delay, 250));
+
+        try
+        {
+            await delayed.StartAsync();
+            await normal.StartAsync();
+            using var delayedClient = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+            using var normalClient = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+            var stopwatch = Stopwatch.StartNew();
+
+            await delayedClient.SendAsync(CreateRequest(0x01), 40, new IPEndPoint(IPAddress.Loopback, delayed.Config.ListenPort));
+            var delayedReceive = delayedClient.ReceiveAsync();
+            await normalClient.SendAsync(CreateRequest(0x02), 40, new IPEndPoint(IPAddress.Loopback, normal.Config.ListenPort));
+            var normalReceive = normalClient.ReceiveAsync();
+
+            var normalResult = await Task.WhenAny(normalReceive, Task.Delay(TimeSpan.FromMilliseconds(150)));
+            Assert.Same(normalReceive, normalResult);
+            Assert.Equal((byte)0x02, (await normalReceive).Buffer[2]);
+
+            var earlyDelayedResult = await Task.WhenAny(delayedReceive, Task.Delay(TimeSpan.FromMilliseconds(100)));
+            Assert.NotSame(delayedReceive, earlyDelayedResult);
+            var delayedResponse = await delayedReceive;
+            Assert.True(stopwatch.ElapsedMilliseconds >= 180, $"Response arrived after {stopwatch.ElapsedMilliseconds} ms.");
+            Assert.Equal((byte)0x01, delayedResponse.Buffer[2]);
+        }
+        finally
+        {
+            delayed.Dispose();
+            normal.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Invalid_frame_fault_mode_preserves_length_but_is_rejected_by_parser()
+    {
+        var context = CreateContext(0x01, GetUnusedUdpPort());
+        context.SetFaultConfiguration(new SimulatorFaultConfiguration(SimulatorFaultMode.InvalidFrame));
+
+        try
+        {
+            await context.StartAsync();
+            var response = await SendAsync(context.Config.ListenPort, CreateRequest(0x01));
+            var parser = new RfidFrameParser();
+
+            Assert.Equal(40, response.Length);
+            Assert.Equal((byte)0x00, response[0]);
+            Assert.Equal((byte)0xB0, response[1]);
+            Assert.False(parser.TryParse(
+                response,
+                new IPEndPoint(IPAddress.Loopback, context.Config.ListenPort),
+                DateTimeOffset.UtcNow,
+                out _));
+        }
+        finally
+        {
+            context.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Switching_from_drop_to_normal_restores_the_next_response()
+    {
+        var context = CreateContext(0x01, GetUnusedUdpPort());
+
+        try
+        {
+            context.SetFaultConfiguration(new SimulatorFaultConfiguration(SimulatorFaultMode.Drop));
+            await context.StartAsync();
+            Assert.Null(await TryReceiveAsync(context.Config.ListenPort, CreateRequest(0x01)));
+
+            context.SetFaultConfiguration(new SimulatorFaultConfiguration(SimulatorFaultMode.Normal));
+            var response = await SendAsync(context.Config.ListenPort, CreateRequest(0x01));
+
+            Assert.Equal((byte)0x01, response[2]);
+            Assert.Equal(SimulatorFaultMode.Normal, context.FaultConfiguration.Mode);
+        }
+        finally
+        {
+            context.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Clear_request_obeys_drop_and_normal_fault_modes_without_changing_clear_behavior()
+    {
+        var context = CreateContext(0x01, GetUnusedUdpPort());
+        context.SetSlots(CreateSlots(0x0011));
+
+        try
+        {
+            await context.StartAsync();
+            Assert.Equal((ushort)0x0011, ReadSlot(await SendAsync(context.Config.ListenPort, CreateRequest(0x01)), 0));
+
+            context.SetFaultConfiguration(new SimulatorFaultConfiguration(SimulatorFaultMode.Drop));
+            Assert.Null(await TryReceiveAsync(context.Config.ListenPort, CreateRequest(0x01, clear: true)));
+
+            context.SetFaultConfiguration(new SimulatorFaultConfiguration(SimulatorFaultMode.Normal));
+            var response = await SendAsync(context.Config.ListenPort, CreateRequest(0x01, clear: true));
+
+            Assert.Equal((ushort)0x0000, ReadSlot(response, 0));
+        }
+        finally
+        {
+            context.Dispose();
+        }
+    }
+
     private static SimulatorStationContext CreateContext(byte address, int port) => new(new SimulatorStationConfig
     {
         StationName = $"TEST-{address:X2}",
@@ -265,6 +449,30 @@ public sealed class SimulatorStationContextTests
         var completed = await Task.WhenAny(receiveTask, Task.Delay(TimeSpan.FromSeconds(3)));
         Assert.Same(receiveTask, completed);
         return (await receiveTask).Buffer;
+    }
+
+    private static async Task<byte[]?> TryReceiveAsync(int port, byte[] request)
+    {
+        using var client = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        await client.SendAsync(request, request.Length, new IPEndPoint(IPAddress.Loopback, port));
+        var receiveTask = client.ReceiveAsync();
+        var completed = await Task.WhenAny(receiveTask, Task.Delay(TimeSpan.FromMilliseconds(250)));
+        if (completed == receiveTask)
+        {
+            return (await receiveTask).Buffer;
+        }
+
+        client.Close();
+        try
+        {
+            await receiveTask;
+        }
+        catch
+        {
+            // Closing the probe socket is expected when no response arrives.
+        }
+
+        return null;
     }
 
     private static ushort ReadSlot(byte[] frame, int index)

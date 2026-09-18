@@ -201,6 +201,7 @@ public partial class MainWindow : Window
         ScenarioResetButton.Click += (_, _) => ResetScenarioPlayback();
         ScanNextButton.Click += (_, _) => ScanNextTag();
         RemoveTagButton.Click += (_, _) => RemoveTag();
+        RestoreFaultButton.Click += (_, _) => RestoreSelectedStationFault();
         SendOnceButton.Click += async (_, _) => await StartSelectedStation();
         StartLoopButton.Click += async (_, _) => await StartSelectedStation();
         StopLoopButton.Click += (_, _) => StopSelectedStation();
@@ -1011,6 +1012,83 @@ public partial class MainWindow : Window
 
     private void OnConfigurationTextChanged(object sender, TextChangedEventArgs e) => UpdatePreview();
 
+    private void OnFaultModeSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingStation || _selectedStation is null)
+        {
+            return;
+        }
+
+        TryApplyFaultConfigurationFromUi();
+    }
+
+    private void OnFaultDelayTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_loadingStation || _selectedStation is null)
+        {
+            return;
+        }
+
+        TryApplyFaultConfigurationFromUi();
+    }
+
+    private void RestoreSelectedStationFault()
+    {
+        if (_selectedStation is null)
+        {
+            return;
+        }
+
+        _selectedStation.SetFaultConfiguration(new SimulatorFaultConfiguration(SimulatorFaultMode.Normal));
+        _loadingStation = true;
+        FaultModeComboBox.SelectedValue = SimulatorFaultMode.Normal.ToString();
+        FaultDelayTextBox.Text = "0";
+        _loadingStation = false;
+        FaultConfigErrorTextBlock.Text = string.Empty;
+        UpdateFaultInjectionState(_selectedStation.FaultConfiguration);
+    }
+
+    private void TryApplyFaultConfigurationFromUi()
+    {
+        if (_selectedStation is null || FaultModeComboBox.SelectedValue is not string modeText ||
+            !Enum.TryParse<SimulatorFaultMode>(modeText, out var mode))
+        {
+            return;
+        }
+
+        if (!int.TryParse(FaultDelayTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var delay) ||
+            delay is < 0 or > 10000)
+        {
+            FaultConfigErrorTextBlock.Text = "故障延迟必须是 0-10000 毫秒。";
+            return;
+        }
+
+        _selectedStation.SetFaultConfiguration(new SimulatorFaultConfiguration(mode, delay));
+        FaultConfigErrorTextBlock.Text = string.Empty;
+        UpdateFaultInjectionState(_selectedStation.FaultConfiguration);
+    }
+
+    private void UpdateFaultInjectionState(SimulatorFaultConfiguration configuration)
+    {
+        FaultStateTextBlock.Text = configuration.Mode switch
+        {
+            SimulatorFaultMode.Normal => "正常 · 立即响应",
+            SimulatorFaultMode.Drop => "丢包 · 不返回响应",
+            SimulatorFaultMode.Delay => $"延迟 · {configuration.DelayMilliseconds} ms",
+            SimulatorFaultMode.InvalidFrame => "非法帧 · 帧头损坏",
+            _ => "未知"
+        };
+        FaultStateTextBlock.Foreground = new SolidColorBrush(configuration.Mode switch
+        {
+            SimulatorFaultMode.Normal => Color.FromRgb(99, 230, 176),
+            SimulatorFaultMode.Drop => Color.FromRgb(255, 135, 149),
+            SimulatorFaultMode.Delay => Color.FromRgb(241, 216, 74),
+            SimulatorFaultMode.InvalidFrame => Color.FromRgb(255, 135, 149),
+            _ => Color.FromRgb(154, 174, 187)
+        });
+        FaultDelayTextBox.IsEnabled = configuration.Mode == SimulatorFaultMode.Delay;
+    }
+
     private void SetConfigError(string error)
     {
         if (ConfigErrorTextBlock is not null)
@@ -1036,9 +1114,13 @@ public partial class MainWindow : Window
         EmptySlotTextBox.Text = config.EmptySlotValue.ToString("X4", CultureInfo.InvariantCulture);
         CrcHighTextBox.Text = config.CrcHigh.ToString("X2", CultureInfo.InvariantCulture);
         CrcLowTextBox.Text = config.CrcLow.ToString("X2", CultureInfo.InvariantCulture);
+        var faultConfiguration = _selectedStation.FaultConfiguration;
+        FaultModeComboBox.SelectedValue = faultConfiguration.Mode.ToString();
+        FaultDelayTextBox.Text = faultConfiguration.DelayMilliseconds.ToString(CultureInfo.InvariantCulture);
         LoadSelectedSlotsIntoDetails();
         _loadingStation = false;
         SetConfigError(_selectedStation.ErrorMessage);
+        UpdateFaultInjectionState(faultConfiguration);
         UpdatePreview();
         UpdateSelectedTelemetry();
     }

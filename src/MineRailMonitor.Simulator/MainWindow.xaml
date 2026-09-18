@@ -582,6 +582,46 @@
                                                 <Button x:Name="ApplyConfigButton" Content="应用配置" Style="{StaticResource PrimaryButtonStyle}" Height="36" Margin="0,0,4,0" />
                                                 <Button x:Name="SendOnceButton" Grid.Column="1" Content="▶  启动" Style="{StaticResource StartButtonStyle}" Height="36" Margin="4,0,0,0" />
                                             </Grid>
+                                            <Border x:Name="FaultInjectionPanel" Background="#071A2B" BorderBrush="#194B68" BorderThickness="1"
+                                                    CornerRadius="4" Padding="9,8" Margin="0,10,0,0">
+                                                <StackPanel>
+                                                    <Grid>
+                                                        <TextBlock Text="通信故障注入" Style="{StaticResource SectionTitleStyle}" />
+                                                        <TextBlock x:Name="FaultStateTextBlock" Text="正常 · 立即响应" Foreground="#63E6B0"
+                                                                   HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="11" />
+                                                    </Grid>
+                                                    <Grid Margin="0,8,0,0">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="44" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="模式" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                                        <ComboBox x:Name="FaultModeComboBox" Grid.Column="1" SelectedValuePath="Tag"
+                                                                  SelectionChanged="OnFaultModeSelectionChanged">
+                                                            <ComboBoxItem Content="正常" Tag="Normal" />
+                                                            <ComboBoxItem Content="丢包" Tag="Drop" />
+                                                            <ComboBoxItem Content="延迟" Tag="Delay" />
+                                                            <ComboBoxItem Content="非法帧" Tag="InvalidFrame" />
+                                                        </ComboBox>
+                                                    </Grid>
+                                                    <Grid Margin="0,7,0,0">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="44" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="延迟" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                                        <TextBox x:Name="FaultDelayTextBox" Grid.Column="1" Text="0"
+                                                                 TextChanged="OnFaultDelayTextChanged" />
+                                                        <TextBlock Grid.Column="2" Text="ms" Foreground="#83AFC1" VerticalAlignment="Center" Margin="7,0,0,0" />
+                                                    </Grid>
+                                                    <Grid Margin="0,7,0,0">
+                                                        <Button x:Name="RestoreFaultButton" Content="恢复正常" Height="28" Padding="8,2" />
+                                                    </Grid>
+                                                    <TextBlock x:Name="FaultConfigErrorTextBlock" Foreground="#FF8795" FontSize="11"
+                                                               TextWrapping="Wrap" Margin="0,5,0,0" />
+                                                </StackPanel>
+                                            </Border>
                                         </StackPanel>
                                         <Border Grid.Row="1" Background="#071A2B" BorderBrush="#194B68" BorderThickness="1"
                                                 CornerRadius="4" Padding="10,8" Margin="0,10,0,0">

@@ -684,7 +684,8 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         // this only preserves the alarm indication for the visual layer.
         if (state.HasUnacknowledgedAlarms
             || state.LifecycleState == PassageLifecycleState.Alarm
-            || state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm)
+            || (state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm
+                && !state.LastPassageRecord.IsAlarmRecovered))
         {
             state.VisualState = RfidStationVisualState.Alarm;
             return;

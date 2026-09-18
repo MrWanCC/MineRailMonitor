@@ -203,6 +203,35 @@ public sealed class AlarmAcknowledgementTests
     }
 
     [Fact]
+    public void Restored_recovered_unacknowledged_alarm_clears_red_after_acknowledgement()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var original = CreateCoordinator(store);
+        CreateAndClearAlarm(original);
+
+        var passage = Assert.Single(store.Records);
+        Assert.NotNull(passage.AlarmRecoveredAt);
+
+        var restored = CreateCoordinator(store);
+        restored.RestorePendingClear(store.GetPendingClear());
+        restored.RestoreUnacknowledgedAlarms(store.GetUnacknowledgedAlarms());
+
+        var state = restored.States[0x01];
+        Assert.False(state.PendingClear);
+        Assert.True(state.HasUnacknowledgedAlarms);
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
+
+        restored.AcknowledgeAlarm(passage.PassageId, Start.AddMinutes(1));
+
+        Assert.False(state.HasUnacknowledgedAlarms);
+        Assert.NotEqual(RfidStationVisualState.Alarm, state.VisualState);
+        var updated = store.GetDetails(passage.PassageId);
+        Assert.NotNull(updated);
+        Assert.Equal(Start.AddMinutes(1), updated.AlarmAcknowledgedAt);
+        Assert.Equal(passage.AlarmRecoveredAt, updated.AlarmRecoveredAt);
+    }
+
+    [Fact]
     public void Failed_acknowledgement_persistence_keeps_the_runtime_latch()
     {
         var inner = new InMemoryPassageRecordStore();

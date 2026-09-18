@@ -98,6 +98,8 @@ public sealed class YardCommunicationManager : IDisposable
 
     public event Action<YardCommunicationContext, RfidUdpDatagramEventArgs>? DatagramReceived;
 
+    public event Action<YardCommunicationContext, RfidUdpDatagramSentEventArgs>? DatagramSent;
+
     public event Action<YardCommunicationContext, Exception>? ReceiveError;
 
     public event Action<YardCommunicationContext, byte, RfidPollCommand, DateTimeOffset>? CommandSent;
@@ -341,6 +343,7 @@ public sealed class YardCommunicationManager : IDisposable
     private void AttachContext(YardCommunicationContext context)
     {
         context.DatagramReceived += OnContextDatagramReceived;
+        context.DatagramSent += OnContextDatagramSent;
         context.ReceiveError += OnContextReceiveError;
         context.CommandSent += OnContextCommandSent;
         context.StationCommandSent += OnContextStationCommandSent;
@@ -349,6 +352,7 @@ public sealed class YardCommunicationManager : IDisposable
     private void DetachContext(YardCommunicationContext context)
     {
         context.DatagramReceived -= OnContextDatagramReceived;
+        context.DatagramSent -= OnContextDatagramSent;
         context.ReceiveError -= OnContextReceiveError;
         context.CommandSent -= OnContextCommandSent;
         context.StationCommandSent -= OnContextStationCommandSent;
@@ -388,6 +392,9 @@ public sealed class YardCommunicationManager : IDisposable
 
     private void OnContextDatagramReceived(YardCommunicationContext context, RfidUdpDatagramEventArgs args) =>
         DatagramReceived?.Invoke(context, args);
+
+    private void OnContextDatagramSent(YardCommunicationContext context, RfidUdpDatagramSentEventArgs args) =>
+        DatagramSent?.Invoke(context, args);
 
     private void OnContextReceiveError(YardCommunicationContext context, Exception exception) =>
         ReceiveError?.Invoke(context, exception);

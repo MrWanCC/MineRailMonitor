@@ -12,6 +12,45 @@ namespace MineRailMonitor.Core.Tests;
 public sealed class RfidUdpTransportTests
 {
     [Fact]
+    public async Task UdpTransport_sent_event_is_raised_after_successful_send()
+    {
+        var expected = CreateFrame();
+        using var receiver = new RfidUdpTransport(IPAddress.Loopback, 0);
+        using var client = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var sentCompletion = new TaskCompletionSource<RfidUdpDatagramSentEventArgs>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.DatagramSent += (_, args) => sentCompletion.TrySetResult(args);
+
+        await receiver.SendAsync(expected, (IPEndPoint)client.Client.LocalEndPoint!, CancellationToken.None);
+        expected[0] = 0x00;
+        var received = await ReceiveWithTimeoutAsync(client, TimeSpan.FromSeconds(3));
+        var sent = await WithTimeoutAsync(sentCompletion.Task, TimeSpan.FromSeconds(3));
+
+        Assert.Equal(CreateFrame(), received.Buffer);
+        Assert.Equal(CreateFrame(), sent.Data);
+        Assert.Equal(client.Client.LocalEndPoint, sent.DestinationEndPoint);
+        Assert.Equal(receiver.LocalEndPoint, sent.LocalEndPoint);
+        Assert.NotEqual(default, sent.SentAt);
+    }
+
+    [Fact]
+    public async Task UdpTransport_datagram_sent_observer_failure_does_not_fail_successful_send()
+    {
+        using var receiver = new RfidUdpTransport(IPAddress.Loopback, 0);
+        using var client = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        receiver.DatagramSent += (_, _) => throw new InvalidOperationException("observer failure");
+        var request = CreateFrame();
+
+        var exception = await Record.ExceptionAsync(() => receiver.SendAsync(
+            request,
+            (IPEndPoint)client.Client.LocalEndPoint!,
+            CancellationToken.None));
+
+        Assert.Null(exception);
+        Assert.Equal(request, (await ReceiveWithTimeoutAsync(client, TimeSpan.FromSeconds(3))).Buffer);
+    }
+
+    [Fact]
     public async Task ReceivesCompleteDatagramWithoutChangingContent()
     {
         var expected = CreateFrame();
@@ -268,6 +307,18 @@ public sealed class RfidUdpTransportTests
         }
 
         return await task;
+    }
+
+    private static async Task<UdpReceiveResult> ReceiveWithTimeoutAsync(UdpClient client, TimeSpan timeout)
+    {
+        var receiveTask = client.ReceiveAsync();
+        var completed = await Task.WhenAny(receiveTask, Task.Delay(timeout));
+        if (completed != receiveTask)
+        {
+            throw new TimeoutException("Expected UDP datagram was not received in time.");
+        }
+
+        return await receiveTask;
     }
 
     private static int GetUnusedLoopbackPort()

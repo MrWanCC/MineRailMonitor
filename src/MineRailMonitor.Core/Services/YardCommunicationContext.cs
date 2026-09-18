@@ -143,6 +143,8 @@ public sealed class YardCommunicationContext : IDisposable
 
     public event Action<YardCommunicationContext, RfidUdpDatagramEventArgs>? DatagramReceived;
 
+    public event Action<YardCommunicationContext, RfidUdpDatagramSentEventArgs>? DatagramSent;
+
     public event Action<YardCommunicationContext, Exception>? ReceiveError;
 
     public event Action<YardCommunicationContext, byte, RfidPollCommand, DateTimeOffset>? CommandSent;
@@ -177,6 +179,7 @@ public sealed class YardCommunicationContext : IDisposable
         {
             var transport = new RfidUdpTransport(endpoint.Address, endpoint.Port);
             transport.DatagramReceived += OnTransportDatagramReceived;
+            transport.DatagramSent += OnTransportDatagramSent;
             transport.ReceiveError += OnTransportReceiveError;
 
             lock (_syncRoot)
@@ -257,6 +260,12 @@ public sealed class YardCommunicationContext : IDisposable
         if (poller is not null)
         {
             poller.CommandSent -= OnPollerCommandSent;
+        }
+        if (transport is not null)
+        {
+            transport.DatagramReceived -= OnTransportDatagramReceived;
+            transport.DatagramSent -= OnTransportDatagramSent;
+            transport.ReceiveError -= OnTransportReceiveError;
         }
         transport?.Dispose();
     }
@@ -375,6 +384,11 @@ public sealed class YardCommunicationContext : IDisposable
     private void OnTransportDatagramReceived(object? sender, RfidUdpDatagramEventArgs args)
     {
         DatagramReceived?.Invoke(this, args);
+    }
+
+    private void OnTransportDatagramSent(object? sender, RfidUdpDatagramSentEventArgs args)
+    {
+        DatagramSent?.Invoke(this, args);
     }
 
     private void OnTransportReceiveError(Exception exception)

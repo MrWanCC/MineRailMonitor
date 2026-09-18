@@ -198,6 +198,39 @@ public sealed class YardCommunicationManagerTests
     }
 
     [Fact]
+    public async Task Manager_publishes_real_datagram_sent_with_the_owning_context()
+    {
+        var station = CreateStation("RFID-01", "560", 0x01, 63136);
+        station.Enabled = false;
+        using var manager = new YardCommunicationManager(
+            new[] { CreateCommunication("560") },
+            new[] { station },
+            CreateSettings(),
+            new InMemoryPassageRecordStore());
+        var sent = new TaskCompletionSource<(YardCommunicationContext Context, RfidUdpDatagramSentEventArgs Args)>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        manager.DatagramSent += (context, args) => sent.TrySetResult((context, args));
+
+        await manager.StartAllAsync();
+        try
+        {
+            await manager.GetContext("560")!.SendAsync(station, RfidPollCommand.Clear);
+            var completed = await Task.WhenAny(sent.Task, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(sent.Task, completed);
+            var result = await sent.Task;
+
+            Assert.Equal("560", result.Context.YardId);
+            Assert.Equal(station.Port, result.Args.DestinationEndPoint.Port);
+            Assert.Equal(0x01, result.Args.Data[2]);
+            Assert.Equal(0x01, result.Args.Data[4]);
+        }
+        finally
+        {
+            await manager.StopAllAsync();
+        }
+    }
+
+    [Fact]
     public async Task A_port_conflict_is_isolated_to_the_conflicting_yard()
     {
         var occupiedPort = GetUnusedPort();

@@ -8,6 +8,8 @@ public interface IRfidUdpTransport : IDisposable
 
     event EventHandler<RfidUdpDatagramEventArgs>? DatagramReceived;
 
+    event EventHandler<RfidUdpDatagramSentEventArgs>? DatagramSent;
+
     event Action<Exception>? ReceiveError;
 
     Task StartAsync(CancellationToken cancellationToken);

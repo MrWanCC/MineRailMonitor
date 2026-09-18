@@ -29,15 +29,33 @@ public sealed class RfidUdpTransport : IRfidUdpTransport, IRfidRequestSender
 
     public event EventHandler<RfidUdpDatagramEventArgs>? DatagramReceived;
 
+    public event EventHandler<RfidUdpDatagramSentEventArgs>? DatagramSent;
+
     public event Action<Exception>? ReceiveError;
 
-    public Task SendAsync(byte[] request, IPEndPoint destination, CancellationToken cancellationToken)
+    public async Task SendAsync(byte[] request, IPEndPoint destination, CancellationToken cancellationToken)
     {
         if (request is null) throw new ArgumentNullException(nameof(request));
         if (destination is null) throw new ArgumentNullException(nameof(destination));
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        return _client.SendAsync(request, request.Length, destination);
+
+        await _client.SendAsync(request, request.Length, destination).ConfigureAwait(false);
+
+        var args = new RfidUdpDatagramSentEventArgs(
+            request,
+            destination,
+            DateTimeOffset.Now,
+            LocalEndPoint);
+
+        try
+        {
+            DatagramSent?.Invoke(this, args);
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("RFID UDP 发送旁路观察者发生异常，不影响已成功发送的报文：{0}", exception);
+        }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)

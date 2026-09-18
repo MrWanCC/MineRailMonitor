@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net;
 using System.Configuration;
+using System.Diagnostics;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -20,6 +21,7 @@ using MineRailMonitor.Core.Protocol;
 using MineRailMonitor.Core.Recognition;
 using MineRailMonitor.Core.Services;
 using MineRailMonitor.Infrastructure.Configuration;
+using MineRailMonitor.Infrastructure.BlackBox;
 using MineRailMonitor.Infrastructure.Persistence;
 using MineRailMonitor.Pages;
 
@@ -41,6 +43,7 @@ public partial class MainWindow : Window
     private RfidStatisticsPage? _statisticsPage;
     private YardCommunicationManager? _yardCommunicationManager;
     private readonly SqlitePassageRecordStore _passageRecordStore;
+    private readonly RawPacketBlackBoxWriter _rawPacketBlackBoxWriter;
     private AcceptanceRuntimeStateWriter? _acceptanceRuntimeStateWriter;
     private DateTimeOffset _lastStatisticsRefresh = DateTimeOffset.MinValue;
     private DateTimeOffset _lastRecentAlarmRefresh = DateTimeOffset.MinValue;
@@ -87,6 +90,12 @@ public partial class MainWindow : Window
                 ? _acceptanceOptions.DatabasePath!
                 : Path.Combine(AppContext.BaseDirectory, "Data", "MineRailMonitor.db"));
         _communicationPage = new CommunicationPage();
+        var blackBoxRootDirectory = _acceptanceOptions.Enabled
+            ? Path.Combine(_acceptanceOptions.LogDirectory!, "BlackBox")
+            : Path.Combine(AppContext.BaseDirectory, "Logs", "BlackBox");
+        _rawPacketBlackBoxWriter = new RawPacketBlackBoxWriter(blackBoxRootDirectory);
+        _communicationPage.OpenBlackBoxDirectoryRequested += OnOpenBlackBoxDirectoryRequested;
+        _communicationPage.SetBlackBoxStatus(_rawPacketBlackBoxWriter.GetSnapshot());
         _communicationPage.SetAdminMode(_adminModeService.IsAdmin);
         _rfidFrameParser = new RfidFrameParser(new RfidFrameParserOptions
         {
@@ -617,7 +626,15 @@ public partial class MainWindow : Window
         IReadOnlyList<RfidStationConfig> stations,
         RfidSettings runtimeSettings)
     {
-        _yardCommunicationManager?.Dispose();
+        if (_yardCommunicationManager is not null)
+        {
+            _yardCommunicationManager.DatagramReceived -= OnYardDatagramReceived;
+            _yardCommunicationManager.DatagramSent -= OnYardDatagramSent;
+            _yardCommunicationManager.ReceiveError -= OnYardReceiveError;
+            _yardCommunicationManager.CommandSent -= OnYardCommandSent;
+            _yardCommunicationManager.StationCommandSent -= OnYardStationCommandSent;
+            _yardCommunicationManager.Dispose();
+        }
         _yardCommunicationManager = null;
         _acceptanceRuntimeStateWriter?.Dispose();
         _acceptanceRuntimeStateWriter = null;
@@ -651,6 +668,7 @@ public partial class MainWindow : Window
         }
 
         manager.DatagramReceived += OnYardDatagramReceived;
+        manager.DatagramSent += OnYardDatagramSent;
         manager.ReceiveError += OnYardReceiveError;
         manager.CommandSent += OnYardCommandSent;
         manager.StationCommandSent += OnYardStationCommandSent;
@@ -710,6 +728,7 @@ public partial class MainWindow : Window
 
     private void OnYardDatagramReceived(YardCommunicationContext context, RfidUdpDatagramEventArgs args)
     {
+        _rawPacketBlackBoxWriter.TryEnqueue(CreateRxBlackBoxRecord(context, args));
         var hex = BitConverter.ToString(args.Data).Replace('-', ' ');
         var message = $"RFID UDP RX [{context.YardId}] {args.RemoteEndPoint} {args.Data.Length} Bytes {hex}";
         var responseMatched = false;
@@ -764,6 +783,89 @@ public partial class MainWindow : Window
         }));
     }
 
+    private void OnYardDatagramSent(YardCommunicationContext context, RfidUdpDatagramSentEventArgs args)
+    {
+        _rawPacketBlackBoxWriter.TryEnqueue(CreateTxBlackBoxRecord(context, args));
+    }
+
+    private RawPacketBlackBoxRecord CreateRxBlackBoxRecord(
+        YardCommunicationContext context,
+        RfidUdpDatagramEventArgs args)
+    {
+        var protocolAddress = args.Data.Length >= 3 ? args.Data[2] : (byte?)null;
+        var station = FindBlackBoxStation(context, args.RemoteEndPoint, protocolAddress);
+        return new RawPacketBlackBoxRecord
+        {
+            Time = args.ReceivedAt,
+            Direction = "RX",
+            YardId = context.YardId,
+            StationId = station?.StationId,
+            ProtocolAddress = protocolAddress?.ToString("X2"),
+            LocalEndPoint = context.ListenerEndPoint?.ToString(),
+            RemoteEndPoint = args.RemoteEndPoint.ToString(),
+            Length = args.Data.Length,
+            Hex = FormatHex(args.Data),
+            Valid = args.IsValid,
+            ValidationError = args.ValidationError
+        };
+    }
+
+    private RawPacketBlackBoxRecord CreateTxBlackBoxRecord(
+        YardCommunicationContext context,
+        RfidUdpDatagramSentEventArgs args)
+    {
+        var protocolAddress = args.Data.Length >= 3 ? args.Data[2] : (byte?)null;
+        var station = FindBlackBoxStation(context, args.DestinationEndPoint, protocolAddress);
+        var command = args.Data.Length > 4 && args.Data[4] == 0x01 ? "Clear" : "Read";
+        return new RawPacketBlackBoxRecord
+        {
+            Time = args.SentAt,
+            Direction = "TX",
+            YardId = context.YardId,
+            StationId = station?.StationId,
+            ProtocolAddress = protocolAddress?.ToString("X2"),
+            LocalEndPoint = args.LocalEndPoint?.ToString(),
+            RemoteEndPoint = args.DestinationEndPoint.ToString(),
+            Length = args.Data.Length,
+            Hex = FormatHex(args.Data),
+            Command = command
+        };
+    }
+
+    private static RfidStationConfig? FindBlackBoxStation(
+        YardCommunicationContext context,
+        IPEndPoint endpoint,
+        byte? protocolAddress)
+    {
+        return context.Stations.FirstOrDefault(station =>
+            station.TryResolveEndpoint(out var stationEndpoint) &&
+            stationEndpoint.Address.Equals(endpoint.Address) &&
+            stationEndpoint.Port == endpoint.Port &&
+            (!protocolAddress.HasValue || station.ProtocolAddress == protocolAddress.Value));
+    }
+
+    private static string FormatHex(byte[] data) =>
+        BitConverter.ToString(data).Replace('-', ' ');
+
+    private void OnOpenBlackBoxDirectoryRequested()
+    {
+        try
+        {
+            Directory.CreateDirectory(_rawPacketBlackBoxWriter.RootDirectory);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{_rawPacketBlackBoxWriter.RootDirectory}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception exception)
+        {
+            ((App)Application.Current).Logger.Error("打开 RFID 原始报文黑匣子目录失败。", exception);
+            _communicationPage.SetError(exception, null);
+        }
+    }
+
     private void OnYardReceiveError(YardCommunicationContext context, Exception exception)
     {
         ((App)Application.Current).Logger.Error($"RFID UDP 接收异常 [{context.YardId}]。", exception);
@@ -780,7 +882,16 @@ public partial class MainWindow : Window
     {
         _adminModeService.PropertyChanged -= OnAdminModeStateChanged;
         _clockTimer.Stop();
-        _yardCommunicationManager?.Dispose();
+        if (_yardCommunicationManager is not null)
+        {
+            _yardCommunicationManager.DatagramReceived -= OnYardDatagramReceived;
+            _yardCommunicationManager.DatagramSent -= OnYardDatagramSent;
+            _yardCommunicationManager.ReceiveError -= OnYardReceiveError;
+            _yardCommunicationManager.CommandSent -= OnYardCommandSent;
+            _yardCommunicationManager.StationCommandSent -= OnYardStationCommandSent;
+            _yardCommunicationManager.Dispose();
+        }
+        _rawPacketBlackBoxWriter.Dispose();
         _acceptanceRuntimeStateWriter?.Write("closed");
         _acceptanceRuntimeStateWriter?.Dispose();
         _passageRecordStore.Dispose();
@@ -1022,6 +1133,7 @@ public partial class MainWindow : Window
     {
         UpdateClock();
         _yardCommunicationManager?.Evaluate(DateTimeOffset.Now);
+        _communicationPage.SetBlackBoxStatus(_rawPacketBlackBoxWriter.GetSnapshot());
         _acceptanceRuntimeStateWriter?.Write("tick");
         UpdateRecognitionStatus();
         UpdateRfidRuntimeUi();

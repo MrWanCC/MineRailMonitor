@@ -622,9 +622,24 @@
                         <TextBlock x:Name="OnlineRateText" Text="0%" Style="{StaticResource CommunicationMetricValueStyle}" Foreground="{StaticResource SuccessBrush}" />
                     </StackPanel>
                 </Grid>
-                <TextBlock Grid.Column="11" Text="统计自程序启动后累计；选择基站可查看单站诊断和报文解析。"
-                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
-                           HorizontalAlignment="Right" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="11" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <StackPanel Margin="0,0,14,0" VerticalAlignment="Center">
+                        <TextBlock x:Name="BlackBoxStatusText" Text="黑匣子：启动中"
+                                   Foreground="{StaticResource SuccessBrush}" FontSize="10" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="已写入 " Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
+                            <TextBlock x:Name="BlackBoxWrittenCountText" Text="0"
+                                       Foreground="{StaticResource AccentBrush}" FontSize="10" />
+                            <TextBlock Text=" 条" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
+                            <TextBlock x:Name="BlackBoxDroppedCountText" Text="丢弃 0"
+                                       Foreground="{StaticResource AlarmBrush}" FontSize="10" Margin="8,0,0,0"
+                                       Visibility="Collapsed" />
+                        </StackPanel>
+                    </StackPanel>
+                    <Button x:Name="OpenBlackBoxDirectoryButton" Content="打开黑匣子目录"
+                            Style="{StaticResource SecondaryButtonStyle}" Padding="9,3"
+                            Click="OnOpenBlackBoxDirectoryClick" />
+                </StackPanel>
             </Grid>
         </Border>
         <StackPanel Visibility="Collapsed">

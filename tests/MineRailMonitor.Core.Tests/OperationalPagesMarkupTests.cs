@@ -28,6 +28,9 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("TotalSentCountText", markup, StringComparison.Ordinal);
         Assert.Contains("TotalReceivedCountText", markup, StringComparison.Ordinal);
         Assert.Contains("TotalTimeoutCountText", markup, StringComparison.Ordinal);
+        Assert.Contains("BlackBoxStatusText", markup, StringComparison.Ordinal);
+        Assert.Contains("BlackBoxWrittenCountText", markup, StringComparison.Ordinal);
+        Assert.Contains("OpenBlackBoxDirectoryButton", markup, StringComparison.Ordinal);
         Assert.Contains("SelectedDiagnosticCountsText", markup, StringComparison.Ordinal);
         Assert.Contains("ConsecutiveTimeoutCountText", markup, StringComparison.Ordinal);
         Assert.Contains("LatestRxText", markup, StringComparison.Ordinal);
@@ -44,6 +47,8 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("ResetScopePresentation", code, StringComparison.Ordinal);
         Assert.Contains("UpdateDiagnosticsOverview", code, StringComparison.Ordinal);
         Assert.Contains("UpdateSelectedDiagnostic", code, StringComparison.Ordinal);
+        Assert.Contains("SetBlackBoxStatus", code, StringComparison.Ordinal);
+        Assert.Contains("OpenBlackBoxDirectoryRequested", code, StringComparison.Ordinal);
         Assert.Contains("OnStationSelectionChanged", code, StringComparison.Ordinal);
         Assert.Contains("OnStationTestClick", code, StringComparison.Ordinal);
         Assert.Contains("RfidStationEndpointKey", code, StringComparison.Ordinal);
@@ -103,6 +108,10 @@ public sealed class OperationalPagesMarkupTests
         Assert.DoesNotContain("GetReadRequestHex", code, StringComparison.Ordinal);
         Assert.Contains("StationCommandSent", mainWindowCode, StringComparison.Ordinal);
         Assert.Contains("_communicationPage.AddCommandSent(station, command, sentAt)", mainWindowCode, StringComparison.Ordinal);
+        Assert.Contains("DatagramSent", mainWindowCode, StringComparison.Ordinal);
+        Assert.Contains("CreateTxBlackBoxRecord", mainWindowCode, StringComparison.Ordinal);
+        Assert.Contains("CreateRxBlackBoxRecord", mainWindowCode, StringComparison.Ordinal);
+        Assert.Contains("_rawPacketBlackBoxWriter.TryEnqueue", mainWindowCode, StringComparison.Ordinal);
     }
 
     [Fact]

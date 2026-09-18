@@ -9,6 +9,7 @@ using MineRailMonitor.Core.Models;
 using MineRailMonitor.Core.Protocol;
 using MineRailMonitor.Core.Recognition;
 using MineRailMonitor.Core.Services;
+using MineRailMonitor.Infrastructure.BlackBox;
 
 namespace MineRailMonitor.Pages;
 
@@ -29,6 +30,8 @@ public partial class CommunicationPage : UserControl
     private string? _selectedStationId;
     private long _invalidFrameCount;
     private Func<RfidStationConfig, RfidPollCommand, Task>? _sendTestAsync;
+
+    public event Action? OpenBlackBoxDirectoryRequested;
 
     public CommunicationPage()
     {
@@ -169,6 +172,33 @@ public partial class CommunicationPage : UserControl
             ? "发送清空命令前需要确认"
             : "进入管理员模式后可发送清空命令";
     }
+
+    public void SetBlackBoxStatus(RawPacketBlackBoxStatus status)
+    {
+        if (status is null) throw new ArgumentNullException(nameof(status));
+
+        BlackBoxStatusText.Text = !string.IsNullOrWhiteSpace(status.LastError)
+            ? "黑匣子：异常"
+            : status.IsRunning
+                ? "黑匣子：运行中"
+                : "黑匣子：已停止";
+        BlackBoxStatusText.Foreground = !string.IsNullOrWhiteSpace(status.LastError)
+            ? (Brush)FindResource("AlarmBrush")
+            : status.IsRunning
+                ? (Brush)FindResource("SuccessBrush")
+                : (Brush)FindResource("TextSecondaryBrush");
+        BlackBoxStatusText.ToolTip = string.IsNullOrWhiteSpace(status.LastError)
+            ? status.RootDirectory
+            : status.LastError;
+        BlackBoxWrittenCountText.Text = status.WrittenCount.ToString(CultureInfo.InvariantCulture);
+        BlackBoxDroppedCountText.Text = $"丢弃 {status.DroppedCount.ToString(CultureInfo.InvariantCulture)}";
+        BlackBoxDroppedCountText.Visibility = status.DroppedCount > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void OnOpenBlackBoxDirectoryClick(object sender, RoutedEventArgs e) =>
+        OpenBlackBoxDirectoryRequested?.Invoke();
 
     public void AddCommandSent(RfidStationConfig station, RfidPollCommand command, DateTimeOffset sentAt)
     {

@@ -33,6 +33,8 @@ MainWindow
 
 新增 `RfidUdpDatagramSentEventArgs`，携带复制后的 `Data`、复制后的目标 `DestinationEndPoint`、`SentAt` 和可选 `LocalEndPoint`。`RfidUdpTransport.SendAsync` 等待底层 UDP 发送成功后再触发事件，调用者后续修改原数组不会影响事件数据。
 
+`DatagramSent` 是旁路观察事件。发送成功后触发观察事件时，订阅者异常在 transport 内被隔离并记录，不向 `SendAsync` 调用方传播，因此不会把已经成功发出的报文误判为发送失败，也不会影响 Poller 的发送统计。
+
 TX 命令按真实发送帧识别：Byte4（数组索引 4）为 `01` 时为 `Clear`，否则为 `Read`。不从 UI 事件、SentCount 或请求状态推断 TX。
 
 ## 记录与身份
@@ -51,15 +53,18 @@ TX 命令按真实发送帧识别：Byte4（数组索引 4）为 `01` 时为 `Cl
 - 使用 `BlockingCollection<RawPacketBlackBoxRecord>`，默认容量 10000。
 - 单后台消费者，按 Yard/日期各持有一个 `StreamWriter`，`FileMode.Append`，`AutoFlush=true`。
 - 队列满时立即返回，`DroppedCount` 加一，不阻塞 UDP。
+- 某个 Yard/日期的 writer 打开、写入或 Flush 失败时，立即从 writer cache 移除并尽力关闭；当前记录计入丢弃，后续记录重新尝试创建该文件，不让一次 IO 故障永久毒化该 Yard。
 - 文件位于 `<RootDirectory>/yyyy-MM-dd/<safe-yard>.jsonl`；正式模式 RootDirectory 为 `AppContext.BaseDirectory/Logs/BlackBox`，Acceptance 为 `<AcceptanceOptions.LogDirectory>/BlackBox`。
 - Legacy shared listener 使用安全文件名 `LegacySharedListener`。
 - Yard 和日期目录均经过安全化/严格格式化，禁止路径逃逸。
 - `RetentionDays=30` 保留当前日期及之前 29 个日历日期，删除严格早于 `today - 29 days` 的 `yyyy-MM-dd` 目录；非日期目录不删除。
-- 日期由注入的时间提供器或记录时间驱动，跨日时关闭旧 writer 并切换新目录。
+- 文件分区日期严格由 `record.Time` 决定；跨记录日期时关闭旧 writer 并切换新目录。Retention 使用注入的当前时钟，只在 Writer 启动以及该时钟的日历日期变化时执行，禁止每条记录扫描目录。
 
 ## 异常与关闭
 
 - writer 自身的目录、打开、写入和关闭异常被捕获，更新线程安全 `LastError`，当前记录计入丢弃，并继续处理后续记录。
+- Snapshot 至少包含 `IsRunning`、`WrittenCount`、`DroppedCount`、`LastError` 和 `RootDirectory`。`WrittenCount` 是当前进程成功持久化的记录总数；`DroppedCount` 包含队列满和最终 IO 写入失败的记录。任意后续记录成功写入后清除 `LastError`。
+- `TryEnqueue` 与 `CompleteAdding`/`Dispose` 并发时捕获集合关闭竞态，只返回失败并按丢弃规则计数，不向调用方抛出。
 - `Dispose` 幂等：先由 MainWindow 停止通信 Manager，再 `CompleteAdding`、排空队列、Flush 并关闭所有 writer。
 - 黑匣子异常不得传播到 UDP 接收、发送、识别、报警或 Clear 业务路径。
 

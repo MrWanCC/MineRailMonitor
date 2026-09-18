@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using MineRailMonitor.Core.Communication;
+using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
 using MineRailMonitor.Core.Protocol;
 using MineRailMonitor.Core.Services;
@@ -141,6 +142,52 @@ public sealed class YardCommunicationManagerTests
 
         var replacement = manager.GetContext("560")!;
         Assert.NotSame(original, replacement);
+        Assert.True(replacement.HasUnacknowledgedAlarm(passage.PassageId));
+        var state = Assert.Single(replacement.RuntimeStates);
+        Assert.True(state.PendingClear);
+        Assert.Equal(RfidStationVisualState.Alarm, state.VisualState);
+    }
+
+    [Fact]
+    public async Task ApplyConfigurations_reads_recovery_state_after_old_context_stops()
+    {
+        var station560 = CreateStation("RFID-01", "560", 0x01, 63128);
+        var station620 = CreateStation("RFID-02", "620", 0x02, 63129);
+        var configuration560 = CreateCommunication("560");
+        var configuration620 = CreateCommunication("620");
+        var passage = new PassageRecord(
+            Guid.NewGuid(),
+            station560.StationId,
+            station560.ProtocolAddress,
+            0x0001,
+            new ushort[] { 0x0001, 0x0011 },
+            11,
+            PassageOutcome.UncouplingAlarm,
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            DateTimeOffset.UtcNow,
+            alarmMessage: "脱节报警");
+        YardCommunicationContext? original = null;
+        var store = new SnapshotAfterContextStopsStore(() => original?.IsRunning == true);
+        store.Save(passage);
+
+        using var manager = new YardCommunicationManager(
+            new[] { configuration560, configuration620 },
+            new[] { station560, station620 },
+            CreateSettings(),
+            store);
+        original = manager.GetContext("560")!;
+        await original.StartAsync();
+        Assert.True(original.IsRunning);
+
+        await manager.ApplyConfigurationsAsync(new[]
+        {
+            CreateCommunication("560", GetUnusedPort()),
+            configuration620
+        });
+
+        var replacement = manager.GetContext("560")!;
+        Assert.NotSame(original, replacement);
+        Assert.False(store.SnapshotObservedWhileContextRunning);
         Assert.True(replacement.HasUnacknowledgedAlarm(passage.PassageId));
         var state = Assert.Single(replacement.RuntimeStates);
         Assert.True(state.PendingClear);
@@ -418,5 +465,50 @@ public sealed class YardCommunicationManagerTests
     {
         using var socket = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
         return ((IPEndPoint)socket.Client.LocalEndPoint!).Port;
+    }
+
+    private sealed class SnapshotAfterContextStopsStore : IPassageRecordStore
+    {
+        private readonly InMemoryPassageRecordStore _inner = new();
+        private readonly Func<bool> _isContextRunning;
+
+        public SnapshotAfterContextStopsStore(Func<bool> isContextRunning) =>
+            _isContextRunning = isContextRunning;
+
+        public bool SnapshotObservedWhileContextRunning { get; private set; }
+
+        public IReadOnlyList<PassageRecord> Records => _inner.Records;
+
+        public void Save(PassageRecord record) => _inner.Save(record);
+
+        public void Add(PassageRecord record) => _inner.Add(record);
+
+        public void MarkCleared(Guid passageId, DateTimeOffset clearedAt) =>
+            _inner.MarkCleared(passageId, clearedAt);
+
+        public void MarkAlarmAcknowledged(Guid passageId, DateTimeOffset acknowledgedAt) =>
+            _inner.MarkAlarmAcknowledged(passageId, acknowledgedAt);
+
+        public IReadOnlyList<PassageRecord> GetPendingClear() => GetSnapshot(_inner.GetPendingClear);
+
+        public IReadOnlyList<PassageRecord> GetUnacknowledgedAlarms() =>
+            GetSnapshot(_inner.GetUnacknowledgedAlarms);
+
+        public PassageQueryResult Query(PassageQuery query) => _inner.Query(query);
+
+        public PassageRecord? GetDetails(Guid passageId) => _inner.GetDetails(passageId);
+
+        public PassageStatistics GetStatistics(DateTimeOffset localNow) => _inner.GetStatistics(localNow);
+
+        private IReadOnlyList<PassageRecord> GetSnapshot(Func<IReadOnlyList<PassageRecord>> read)
+        {
+            if (_isContextRunning())
+            {
+                SnapshotObservedWhileContextRunning = true;
+                return Array.Empty<PassageRecord>();
+            }
+
+            return read();
+        }
     }
 }

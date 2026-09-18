@@ -48,6 +48,10 @@ public sealed class SimulatorMarkupTests
         Assert.Contains("<RowDefinition Height=\"226\" />", markup, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"RecentRequestPanel\"", markup, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"ConnectionConfigPanel\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"FaultModeComboBox\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"FaultDelayTextBox\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RestoreFaultButton\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"FaultStateTextBlock\"", markup, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"ClearLogButton\"", markup, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SaveLogButton\"", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("MetricCardStyle", markup, StringComparison.Ordinal);
@@ -65,6 +69,8 @@ public sealed class SimulatorMarkupTests
         Assert.Contains("SelectedStation", code, StringComparison.Ordinal);
         Assert.Contains("SimulatorStationPersistence.Load", code, StringComparison.Ordinal);
         Assert.Contains("SimulatorStationPersistence.Save", code, StringComparison.Ordinal);
+        Assert.Contains("mode == SimulatorFaultMode.Delay", code, StringComparison.Ordinal);
+        Assert.Contains("FaultConfigErrorTextBlock.Text = string.Empty", code, StringComparison.Ordinal);
         Assert.DoesNotContain("_stationInputs", code, StringComparison.Ordinal);
     }
 

@@ -95,6 +95,79 @@ public sealed class SimulatorProtocolTests
     }
 
     [Fact]
+    public async Task Async_responder_cancellation_with_pending_delay_completes_cleanly()
+    {
+        using var server = new SimulatorUdpResponder(IPAddress.Loopback, 0);
+        using var cancellation = new CancellationTokenSource();
+        var responseStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serverTask = server.RunAsync(
+            async (request, _, token) =>
+            {
+                responseStarted.TrySetResult(true);
+                var pendingResponse = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var delayedResponse = Task.Delay(TimeSpan.FromSeconds(5));
+                using (token.Register(() =>
+                {
+                    pendingResponse.TrySetCanceled();
+                    Thread.Sleep(100);
+                }))
+                {
+                    await Task.WhenAny(delayedResponse, pendingResponse.Task);
+                    return await pendingResponse.Task;
+                }
+            },
+            cancellation.Token);
+        using var client = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+
+        var request = CreateRequest(0x03);
+        await client.SendAsync(request, request.Length, server.LocalEndPoint);
+        var signalCompleted = await Task.WhenAny(responseStarted.Task, Task.Delay(TimeSpan.FromSeconds(3)));
+        Assert.Same(responseStarted.Task, signalCompleted);
+
+        cancellation.Cancel();
+        var exception = await Record.ExceptionAsync(() => serverTask);
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task Async_responder_continues_receiving_while_previous_response_is_delayed()
+    {
+        using var server = new SimulatorUdpResponder(IPAddress.Loopback, 0);
+        using var cancellation = new CancellationTokenSource();
+        var firstResponseStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serverTask = server.RunAsync(
+            async (request, _, token) =>
+            {
+                if (request[2] == 0x01)
+                {
+                    firstResponseStarted.TrySetResult(true);
+                    await Task.Delay(TimeSpan.FromMilliseconds(500), token);
+                }
+
+                return new[] { request[2] };
+            },
+            cancellation.Token);
+        using var client = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+
+        var firstRequest = CreateRequest(0x01);
+        await client.SendAsync(firstRequest, firstRequest.Length, server.LocalEndPoint);
+        var signalCompleted = await Task.WhenAny(firstResponseStarted.Task, Task.Delay(TimeSpan.FromSeconds(3)));
+        Assert.Same(firstResponseStarted.Task, signalCompleted);
+
+        var secondRequest = CreateRequest(0x02);
+        await client.SendAsync(secondRequest, secondRequest.Length, server.LocalEndPoint);
+        var secondResponse = await ReceiveWithTimeoutAsync(client, TimeSpan.FromMilliseconds(250));
+        Assert.Equal(new byte[] { 0x02 }, secondResponse);
+
+        var firstResponse = await ReceiveWithTimeoutAsync(client, TimeSpan.FromSeconds(2));
+        Assert.Equal(new byte[] { 0x01 }, firstResponse);
+
+        cancellation.Cancel();
+        await serverTask;
+    }
+
+    [Fact]
     public void Build_Returns40BytesWithProtocolMarkers()
     {
         var input = new SimulatorFrameInput

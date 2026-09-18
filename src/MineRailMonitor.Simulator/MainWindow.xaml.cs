@@ -1056,8 +1056,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!int.TryParse(FaultDelayTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var delay) ||
-            delay is < 0 or > 10000)
+        var delay = 0;
+        if (mode == SimulatorFaultMode.Delay &&
+            (!int.TryParse(FaultDelayTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out delay) ||
+             delay is < 0 or > 10000))
         {
             FaultConfigErrorTextBlock.Text = "故障延迟必须是 0-10000 毫秒。";
             return;
@@ -1120,6 +1122,7 @@ public partial class MainWindow : Window
         LoadSelectedSlotsIntoDetails();
         _loadingStation = false;
         SetConfigError(_selectedStation.ErrorMessage);
+        FaultConfigErrorTextBlock.Text = string.Empty;
         UpdateFaultInjectionState(faultConfiguration);
         UpdatePreview();
         UpdateSelectedTelemetry();

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
 
 namespace MineRailMonitor.Simulator.Communication;
 
@@ -60,6 +61,7 @@ public sealed class SimulatorUdpResponder : IDisposable
         using var registration = cancellationToken.Register(_client.Close);
         var pendingResponses = new List<Task>();
         var receiveTask = _client.ReceiveAsync();
+        Exception? failure = null;
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -85,6 +87,13 @@ public sealed class SimulatorUdpResponder : IDisposable
         catch (SocketException) when (cancellationToken.IsCancellationRequested)
         {
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
         finally
         {
             _client.Close();
@@ -99,19 +108,38 @@ public sealed class SimulatorUdpResponder : IDisposable
             {
             }
 
-            if (pendingResponses.Count > 0)
+            var pendingFailure = await ObservePendingResponsesAsync(pendingResponses, cancellationToken).ConfigureAwait(false);
+            failure ??= pendingFailure;
+        }
+
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+    }
+
+    private static async Task<Exception?> ObservePendingResponsesAsync(
+        IEnumerable<Task> pendingResponses,
+        CancellationToken cancellationToken)
+    {
+        Exception? firstFailure = null;
+        foreach (var responseTask in pendingResponses)
+        {
+            try
             {
-                try
-                {
-                    await Task.WhenAll(pendingResponses).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Awaiting the set observes every response task. The original receive or
-                    // response exception, if any, is preserved by the outer flow.
-                }
+                await responseTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Cancellation is the expected completion path during responder shutdown.
+            }
+            catch (Exception exception)
+            {
+                firstFailure ??= exception;
             }
         }
+
+        return firstFailure;
     }
 
     private async Task ProcessRequestAsync(

@@ -38,7 +38,7 @@
 
 核心不变量：
 
-1. 从不覆盖唯一副本。
+1. 在形成完整可验证的 corrupt bundle 前，从不对生产数据库执行破坏性替换；替换后原始数据安全由该 bundle 提供。
 2. 任何备份在成为正式备份前必须验证。
 3. 损坏的生产数据库及其实际存在的 WAL/SHM 必须保留取证副本。
 4. 备份失败不得停止正在运行的 RFID 系统。
@@ -269,11 +269,11 @@ Inspection Connection。它不是业务连接，必须满足：
 
 ### 失败规则
 
-任何打开、Online Backup、写入、验证或 rename 失败：
+任何打开、Online Backup、写入、验证或正式备份 rename 失败：
 
 - 删除当前临时文件（删除失败只记录日志）。
 - 记录 Logger.Error 或 Logger.Warning。
-- 不修改生产数据库。
+- 不进入生产数据库恢复替换流程；正常备份失败不修改生产数据库。
 - 不清理旧的健康正式备份。
 - 不停止正在运行的 RFID 系统。
 - 不把失败文件加入恢复候选。
@@ -481,28 +481,38 @@ Backups/SQLite/2026-09-18/MineRailMonitor_20260918_020000.db
 - 如果存在，复制 `MineRailMonitor.db-wal`。
 - 如果存在，复制 `MineRailMonitor.db-shm`。
 
-只有实际存在的文件才复制。主库复制失败时停止恢复，不得继续覆盖生产数据库。
+只有实际存在的文件才复制。主库或实际存在的 WAL/SHM 复制失败时停止恢复，不得继续进入破坏性替换。
 
 ### 替换阶段
 
 ```text
 staging 已验证
 → corrupt bundle 已保存
+→ recovery marker 已持久化
 → 确保旧 WAL/SHM 不会污染新库
 → 替换 MineRailMonitor.db
 → 对新生产库执行最终 health check
 ```
 
-恢复来源是正式 `.db`，不应把备份目录中的 sidecar 带入生产目录。替换前旧生产 WAL/SHM 已在 corrupt bundle 中保存，并从生产路径移走或清理，防止与恢复后的主库混用。
+破坏性替换开始之前，生产 `.db`、WAL、SHM 不得被修改；此时 staging 必须已验证、
+corrupt bundle 必须完整保存、recovery marker 必须成功持久化。恢复来源是正式 `.db`，
+不应把备份目录中的 sidecar 带入生产目录。
+
+破坏性替换开始之后，旧生产数据库可能已经不再位于原生产路径；原始生产数据的安全
+保证来自替换前保存的完整 corrupt bundle，而不是“原生产路径永远不被覆盖”。旧生产
+WAL/SHM 已在 bundle 中保存后，才允许从生产路径移走或清理，防止与恢复后的主库混用。
 
 最终健康检查失败时：
 
 - 不创建 Store。
+- 不创建 MainWindow 正常业务环境。
 - 不启动 RFID。
+- 不创建空数据库。
 - Logger.Error 记录失败原因。
-- 保留原 corrupt bundle。
+- 保留完整 corrupt bundle。
+- 保留 recovery marker。
 - 保留恢复失败证据（失败 staging 或最终文件的可追溯副本）。
-- UI 显示恢复失败，并只允许退出或打开目录。
+- 进入明确的恢复失败 UI，只允许进入明确的恢复/错误处理流程、打开目录或退出。
 
 不自动回退为“新空库”。
 
@@ -677,7 +687,8 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 - 恢复操作期间禁止创建 Store 和启动通信管理器。
 - 日常备份与 02:00 调度共享一个串行互斥，不允许 startup backup 与定时 backup 并发。
 - 备份失败只影响维护状态，不改变 `YardCommunicationManager`、`RfidRuntimeCoordinator` 或报警状态。
-- 恢复失败不覆盖原库，不启动业务，并保留证据。
+- 破坏性替换前不修改生产 `.db`、WAL、SHM；替换后以完整 corrupt bundle 保证原始数据可追溯。
+- final health check 失败时不启动业务，保留 corrupt bundle、recovery marker 和失败证据。
 - 生产数据库连接关闭后才允许保存 corrupt bundle 和替换文件。
 - recovery marker 写入并持久化前，不允许执行 sidecar 删除、生产文件移动或生产文件替换。
 - marker 存在时禁止把缺失的生产 DB 当成首次安装，也禁止忽略 marker 直接 Healthy 启动。

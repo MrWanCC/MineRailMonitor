@@ -212,6 +212,22 @@ public sealed class RawPacketBlackBoxWriterTests
         Assert.Null(writer.GetSnapshot().LastError);
     }
 
+    [Fact]
+    public void Writer_cache_methods_do_not_use_the_status_lock()
+    {
+        var source = File.ReadAllText(LocateWriterSource());
+
+        Assert.Contains("private readonly object _statusSyncRoot = new();", source, StringComparison.Ordinal);
+        Assert.Contains("lock (_statusSyncRoot)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("lock (_syncRoot)", source, StringComparison.Ordinal);
+
+        foreach (var methodName in new[] { "GetOrCreateWriter", "RemoveWriterAfterFailure", "CloseAllWriters" })
+        {
+            var methodBody = ExtractMethodBody(source, methodName);
+            Assert.DoesNotContain("lock (", methodBody, StringComparison.Ordinal);
+        }
+    }
+
     private static RawPacketBlackBoxRecord CreateRecord(
         DateTimeOffset time,
         string yardId,
@@ -256,6 +272,51 @@ public sealed class RawPacketBlackBoxWriterTests
 
             await Task.Delay(10);
         }
+    }
+
+    private static string LocateWriterSource()
+    {
+        var directory = AppContext.BaseDirectory;
+        while (!string.IsNullOrEmpty(directory))
+        {
+            var candidate = Path.Combine(
+                directory,
+                "src",
+                "MineRailMonitor.Infrastructure",
+                "BlackBox",
+                "RawPacketBlackBoxWriter.cs");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = Directory.GetParent(directory)?.FullName;
+        }
+
+        throw new FileNotFoundException("Could not locate RawPacketBlackBoxWriter.cs.");
+    }
+
+    private static string ExtractMethodBody(string source, string methodName)
+    {
+        var signature = source.IndexOf(methodName + "(", StringComparison.Ordinal);
+        Assert.True(signature >= 0, $"Could not find method {methodName}.");
+        var openingBrace = source.IndexOf('{', signature);
+        Assert.True(openingBrace >= 0, $"Could not find method body for {methodName}.");
+
+        var depth = 0;
+        for (var index = openingBrace; index < source.Length; index++)
+        {
+            if (source[index] == '{')
+            {
+                depth++;
+            }
+            else if (source[index] == '}' && --depth == 0)
+            {
+                return source.Substring(openingBrace, index - openingBrace + 1);
+            }
+        }
+
+        throw new InvalidOperationException($"Could not close method body for {methodName}.");
     }
 
     private sealed class TemporaryDirectory : IDisposable

@@ -10,7 +10,7 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
     public const int DefaultQueueCapacity = 10000;
     public const int DefaultRetentionDays = 30;
 
-    private readonly object _syncRoot = new();
+    private readonly object _statusSyncRoot = new();
     private readonly BlockingCollection<RawPacketBlackBoxRecord> _queue;
     private readonly Dictionary<string, CachedWriter> _writers = new(StringComparer.OrdinalIgnoreCase);
     private readonly int _retentionDays;
@@ -86,7 +86,7 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
     public RawPacketBlackBoxStatus GetSnapshot()
     {
         string? lastError;
-        lock (_syncRoot)
+        lock (_statusSyncRoot)
         {
             lastError = _lastError;
         }
@@ -170,48 +170,42 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
 
     private CachedWriter GetOrCreateWriter(string yardKey, DateTime date)
     {
-        lock (_syncRoot)
+        if (_writers.TryGetValue(yardKey, out var existing) && existing.Date == date)
         {
-            if (_writers.TryGetValue(yardKey, out var existing) && existing.Date == date)
-            {
-                return existing;
-            }
-
-            if (existing is not null)
-            {
-                _writers.Remove(yardKey);
-                var closeException = CloseWriter(existing);
-                if (closeException is not null)
-                {
-                    SetLastErrorUnsafe($"黑匣子文件关闭失败：{GetErrorMessage(closeException)}");
-                }
-            }
-
-            var dateDirectory = Path.Combine(RootDirectory, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
-            Directory.CreateDirectory(dateDirectory);
-            var filePath = Path.Combine(dateDirectory, yardKey + ".jsonl");
-            var stream = new FileStream(filePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-            var writer = new StreamWriter(stream, new UTF8Encoding(false), 4096, leaveOpen: false)
-            {
-                AutoFlush = true
-            };
-            var cached = new CachedWriter(date, writer);
-            _writers[yardKey] = cached;
-            return cached;
+            return existing;
         }
+
+        if (existing is not null)
+        {
+            _writers.Remove(yardKey);
+            var closeException = CloseWriter(existing);
+            if (closeException is not null)
+            {
+                SetLastError($"黑匣子文件关闭失败：{GetErrorMessage(closeException)}");
+            }
+        }
+
+        var dateDirectory = Path.Combine(RootDirectory, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(dateDirectory);
+        var filePath = Path.Combine(dateDirectory, yardKey + ".jsonl");
+        var stream = new FileStream(filePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        var writer = new StreamWriter(stream, new UTF8Encoding(false), 4096, leaveOpen: false)
+        {
+            AutoFlush = true
+        };
+        var cached = new CachedWriter(date, writer);
+        _writers[yardKey] = cached;
+        return cached;
     }
 
     private void RemoveWriterAfterFailure(string yardId, Exception exception)
     {
         var yardKey = SanitizeYardId(yardId);
         Exception? closeException = null;
-        lock (_syncRoot)
+        if (_writers.TryGetValue(yardKey, out var writer))
         {
-            if (_writers.TryGetValue(yardKey, out var writer))
-            {
-                _writers.Remove(yardKey);
-                closeException = CloseWriter(writer);
-            }
+            _writers.Remove(yardKey);
+            closeException = CloseWriter(writer);
         }
 
         Interlocked.Increment(ref _droppedCount);
@@ -278,11 +272,8 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
     private void CloseAllWriters()
     {
         CachedWriter[] writers;
-        lock (_syncRoot)
-        {
-            writers = _writers.Values.ToArray();
-            _writers.Clear();
-        }
+        writers = _writers.Values.ToArray();
+        _writers.Clear();
 
         foreach (var writer in writers)
         {
@@ -326,7 +317,7 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
 
     private void SetLastError(string message)
     {
-        lock (_syncRoot)
+        lock (_statusSyncRoot)
         {
             SetLastErrorUnsafe(message);
         }
@@ -336,7 +327,7 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
 
     private void ClearLastError()
     {
-        lock (_syncRoot)
+        lock (_statusSyncRoot)
         {
             _lastError = null;
         }

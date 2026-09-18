@@ -733,6 +733,11 @@ public partial class MainWindow : Window
     private void OnYardDatagramReceived(YardCommunicationContext context, RfidUdpDatagramEventArgs args)
     {
         _rawPacketBlackBoxWriter.TryEnqueue(CreateRxBlackBoxRecord(context, args));
+        if (!context.IsRunning)
+        {
+            return;
+        }
+
         var hex = BitConverter.ToString(args.Data).Replace('-', ' ');
         var message = $"RFID UDP RX [{context.YardId}] {args.RemoteEndPoint} {args.Data.Length} Bytes {hex}";
         var responseMatched = false;

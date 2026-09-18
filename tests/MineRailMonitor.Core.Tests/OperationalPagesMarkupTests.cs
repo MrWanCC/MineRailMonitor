@@ -136,6 +136,60 @@ public sealed class OperationalPagesMarkupTests
     }
 
     [Fact]
+    public void ReplaceContext_stops_before_detaching_datagram_events()
+    {
+        var managerCode = File.ReadAllText(Locate(
+            "src",
+            "MineRailMonitor.Core",
+            "Services",
+            "YardCommunicationManager.cs"));
+        var start = managerCode.IndexOf("private async Task ReplaceContextAsync", StringComparison.Ordinal);
+        var end = managerCode.IndexOf(
+            "private static bool AreConfigurationsEqual",
+            start,
+            StringComparison.Ordinal);
+        var method = managerCode.Substring(start, end - start);
+
+        var detachBusiness = method.IndexOf("DetachBusinessEvents(current)", StringComparison.Ordinal);
+        var stop = method.IndexOf("await current.StopAsync()", StringComparison.Ordinal);
+        var detachDatagram = method.IndexOf("DetachDatagramEvents(current)", StringComparison.Ordinal);
+        var dispose = method.IndexOf("current.Dispose()", StringComparison.Ordinal);
+
+        Assert.True(start >= 0);
+        Assert.True(end > start);
+        Assert.DoesNotContain("DetachContext(current)", method, StringComparison.Ordinal);
+        Assert.True(detachBusiness >= 0);
+        Assert.True(stop > detachBusiness);
+        Assert.True(detachDatagram > stop);
+        Assert.True(dispose > detachDatagram);
+    }
+
+    [Fact]
+    public void Stopped_context_rx_is_blackbox_only()
+    {
+        var mainWindowCode = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));
+        var start = mainWindowCode.IndexOf("private void OnYardDatagramReceived", StringComparison.Ordinal);
+        var end = mainWindowCode.IndexOf("private void OnYardDatagramSent", start, StringComparison.Ordinal);
+        var method = mainWindowCode.Substring(start, end - start);
+
+        var blackBox = method.IndexOf(
+            "_rawPacketBlackBoxWriter.TryEnqueue(CreateRxBlackBoxRecord",
+            StringComparison.Ordinal);
+        var stoppedGuard = method.IndexOf("if (!context.IsRunning)", StringComparison.Ordinal);
+        var response = method.IndexOf("context.RecordResponse", StringComparison.Ordinal);
+        var parser = method.IndexOf("_rfidFrameParser.TryParse", StringComparison.Ordinal);
+        var dispatcher = method.IndexOf("Dispatcher.BeginInvoke", StringComparison.Ordinal);
+
+        Assert.True(start >= 0);
+        Assert.True(end > start);
+        Assert.True(blackBox >= 0);
+        Assert.True(stoppedGuard > blackBox);
+        Assert.True(response > stoppedGuard);
+        Assert.True(parser > stoppedGuard);
+        Assert.True(dispatcher > stoppedGuard);
+    }
+
+    [Fact]
     public void Black_box_station_resolution_requires_protocol_address()
     {
         var factoryCode = File.ReadAllText(Locate(

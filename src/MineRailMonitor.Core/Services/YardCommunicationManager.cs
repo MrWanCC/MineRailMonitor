@@ -294,7 +294,9 @@ public sealed class YardCommunicationManager : IDisposable
         CancellationToken cancellationToken)
     {
         var current = _contexts[yardId];
-        DetachContext(current);
+        DetachBusinessEvents(current);
+        await current.StopAsync().ConfigureAwait(false);
+        DetachDatagramEvents(current);
         current.Dispose();
         _contexts.Remove(yardId);
 
@@ -357,11 +359,21 @@ public sealed class YardCommunicationManager : IDisposable
 
     private void DetachContext(YardCommunicationContext context)
     {
-        context.DatagramReceived -= OnContextDatagramReceived;
-        context.DatagramSent -= OnContextDatagramSent;
+        DetachBusinessEvents(context);
+        DetachDatagramEvents(context);
+    }
+
+    private void DetachBusinessEvents(YardCommunicationContext context)
+    {
         context.ReceiveError -= OnContextReceiveError;
         context.CommandSent -= OnContextCommandSent;
         context.StationCommandSent -= OnContextStationCommandSent;
+    }
+
+    private void DetachDatagramEvents(YardCommunicationContext context)
+    {
+        context.DatagramReceived -= OnContextDatagramReceived;
+        context.DatagramSent -= OnContextDatagramSent;
     }
 
     public static YardCommunicationManager CreateLegacyShared(

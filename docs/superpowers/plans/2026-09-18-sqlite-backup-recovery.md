@@ -89,6 +89,8 @@ public sealed class SqliteDatabaseHealthResult
     public string ForeignKeyCheckSummary { get; }
     public string? ErrorType { get; }
     public string? ErrorMessage { get; }
+    public int? ErrorCode { get; }
+    public string? ErrorCodeName { get; }
     public int? SchemaVersion { get; }
 }
 
@@ -107,17 +109,19 @@ public sealed class SqliteBackupResult
 
 public sealed class SqliteRecoveryMarker
 {
+    public bool RecoveryStarted { get; }
     public string SourceBackupPath { get; }
     public string CorruptBundlePath { get; }
     public string StagingPath { get; }
     public DateTimeOffset StartedAt { get; }
+    public string BundleManifestSha256 { get; }
 }
 
 public sealed class SqliteRecoveryResult
 {
     public bool Succeeded { get; }
-    public string? CorruptBundlePath { get; }
-    public string? FailureReason { get; }
+    public string? ErrorMessage { get; }
+    public SqliteRecoveryMarker? Marker { get; }
 }
 
 public enum DatabaseStartupDecisionKind
@@ -165,8 +169,10 @@ public interface ISqliteBackupService
 
 正式 `.db` backup 在 promotion 前必须已经通过 `FullValidation`。
 
-`DatabaseMaintenanceCoordinator` 和 `DatabaseStartupGate` 只接收 `ISqliteBackupService`；
-不 cast 为 concrete `SqliteBackupService`，Coordinator 也不重新实现 filename parsing。
+`DatabaseMaintenanceCoordinator` 接收 `ISqliteBackupService` 和
+`ISqliteDatabaseHealthChecker`；不 cast 为 concrete `SqliteBackupService`，Coordinator
+也不重新实现 filename parsing。`ScanCandidates` 只发现严格命名 candidate，不能代替
+每日决策时对今日 candidate 的 `FullValidation`。
 
 ## Task 1: SQLite Health Model and Inspection Connection
 
@@ -532,6 +538,7 @@ public sealed class DatabaseMaintenanceCoordinator : IDisposable
         string productionDatabasePath,
         string backupRootDirectory,
         ISqliteBackupService backupService,
+        ISqliteDatabaseHealthChecker healthChecker,
         SqliteRetentionService retentionService,
         IRfidTimeProvider timeProvider,
         IAsyncDelay delay,
@@ -620,6 +627,17 @@ public async Task StopAsync_waits_for_in_flight_backup_before_returning()
 }
 ```
 
+`Existing_formal_backup_for_today_skips_backup_after_process_restart` 必须使用全新的
+Coordinator，并先让当天 candidate 通过
+`healthChecker.Inspect(candidate.Path, SqliteInspectionMode.FullValidation)` 返回
+`Healthy`，再断言 `CreateCalls == 0`。另加：
+
+- `Corrupt_formal_backup_for_today_does_not_suppress_new_backup`
+- `Unavailable_formal_backup_for_today_does_not_suppress_new_backup`
+- `Unsupported_schema_formal_backup_for_today_does_not_suppress_new_backup`
+- `One_healthy_candidate_for_today_suppresses_new_backup_even_if_newer_candidate_is_corrupt`
+- `Daily_backup_candidate_check_uses_full_validation`
+
 另加 `Startup_and_scheduled_backup_share_one_serial_gate`：注入 `ManualAsyncDelay`，让
 测试手工释放“等待到下一次 02:00”的 delay，再让 backup service 第一次调用阻塞，同时
 触发 startup catch-up 和 scheduled tick，断言 backup service 最大并发数为 1。
@@ -647,9 +665,12 @@ Expected: FAIL，原因是 retention service、coordinator 和 runner contracts 
   `Backups/SQLite/yyyy-MM-dd/` 日期目录；保留最近 14 个本地自然日，today 和 today-13
   均保留，today-14 才可删除；非日期目录、`Data/Corrupt` 和不属于本应用的文件不删除。
 - 启动 catch-up 和每日 02:00 调度共享一个 `SemaphoreSlim(1, 1)`；进入锁后调用
-  `backupService.ScanCandidates(backupRootDirectory)`，依据 candidate 的
-  `LocalTimestamp` 本地日期再次检查当天正式健康 backup，存在则 skip，否则调用
-  `CreateValidatedBackupAsync`。因此跨进程重启也保证一天最多一份，不依赖内存 last-run 状态。
+  `backupService.ScanCandidates(backupRootDirectory)`。`ScanCandidates` 只负责严格正式
+  文件发现、日期一致性和规范文件名排序，不代表内容当前仍 Healthy。协调器筛选
+  `candidate.LocalTimestamp.Date == localNow.Date` 的全部候选，并逐个调用
+  `healthChecker.Inspect(candidate.Path, SqliteInspectionMode.FullValidation)`；只有当前
+  `Healthy` 的候选才 skip，否则调用 `CreateValidatedBackupAsync`。因此损坏、不可用或
+  schema 不支持的今日正式文件不会压制新备份，且跨进程重启仍不依赖内存 last-run 状态。
 - `RunStartupCatchUpAsync` 对 Existing Healthy/Recovered 可在 Store 创建前运行，因为它
   只依赖数据库路径和 `ISqliteBackupService`；Missing/first install 必须等 Store 初始化
   schema 后运行以生成第一份 backup。`StartAsync` 只启动后台 02:00 loop，不在 UI、UDP 或
@@ -723,6 +744,23 @@ public sealed class SqliteRecoveryService
         string productionDatabasePath,
         SqliteRecoveryMarker marker);
 }
+
+public sealed class SqliteRecoveryMarker
+{
+    public bool RecoveryStarted { get; }
+    public string SourceBackupPath { get; }
+    public string CorruptBundlePath { get; }
+    public string StagingPath { get; }
+    public DateTimeOffset StartedAt { get; }
+    public string BundleManifestSha256 { get; }
+}
+
+public sealed class SqliteRecoveryResult
+{
+    public bool Succeeded { get; }
+    public string? ErrorMessage { get; }
+    public SqliteRecoveryMarker? Marker { get; }
+}
 ```
 
 - [ ] **Step 1: Write the failing tests**
@@ -734,6 +772,8 @@ public sealed class SqliteRecoveryService
   字节内容和路径均不变。
 - `Recover_saves_db_wal_shm_before_destructive_replacement`：准备生产 DB、实际存在的
   `-wal`、`-shm`，恢复后 `Data/Corrupt/<timestamp>/` 三个文件均存在且字节相同。
+- `Recover_does_not_treat_non_file_wal_path_as_absent`：当 production `-wal` 路径是目录
+  而不是文件时，恢复在 marker 前失败，生产文件不变且不进入 replacement。
 - `Recover_persists_marker_before_sidecar_removal`：通过 `phaseObserver` 记录顺序，断言
   `CorruptBundleSaved` → `RecoveryMarkerPersisted` → `SidecarsRemoved` →
   `ProductionReplacementStarted`。
@@ -814,10 +854,15 @@ Resume 入口必须先重新 `ReadMarker()` 并确认 marker 仍存在且可解�
   重新执行 source/staging `FullValidation`。任一步失败都不开始新的 destructive replacement。
 - Resume 在 sidecar 已移除或 replacement 已开始的 crash boundary 仍可从 marker 继续；若
   前置证据不完整则安全失败，不猜测生产状态。
-- corrupt bundle 只复制实际存在的 `.db`、`.db-wal`、`.db-shm`；任何必需复制失败都
+- corrupt bundle 只复制实际存在的 `.db`、`.db-wal`、`.db-shm`；optional WAL/SHM 只有
+  `FileNotFoundException` 或 `DirectoryNotFoundException` 才解释为 truly absent，
+  权限、sharing、directory-as-file 和其它 IO 异常都必须失败；任何必需复制失败都
   停止恢复，不开始 destructive replacement。
-- marker 使用原子临时写入/rename，包含 `SourceBackupPath`、`CorruptBundlePath`、
-  `StagingPath` 和 `StartedAt`；marker 写入失败时不移除 sidecar。
+- marker 使用原子临时写入/rename，包含 `RecoveryStarted`、`SourceBackupPath`、
+  `CorruptBundlePath`、`StagingPath`、`StartedAt` 和 `BundleManifestSha256`；marker
+  写入失败时不移除 sidecar。bundle manifest 必须列出 db/WAL/SHM evidence 的 length
+  与 SHA-256，写入使用 `WriteThrough` 和 `Flush(true)`；Resume 必须校验 manifest
+  anchor hash 和实际 evidence set，路径必须限制在约定的 data/corrupt/staging 范围。
 - replacement 前不修改生产路径；replacement 开始后原始数据安全由完整 bundle 提供，
   不声称原生产路径永远不变。
 - final health 失败时不创建 Store、MainWindow 或空库，不启动 RFID；保留 marker、
@@ -898,6 +943,10 @@ public sealed class DatabaseStartupGate
 - `Marker_and_existing_database_still_blocks_normal_start`。
 - `Interrupted_recovery_decision_exposes_marker_for_resume`：marker 存在时 decision 保留
   marker 详情，供 UI 进入 ResumeRecovery，而不是只产生无状态 Retry。
+- `Malformed_recovery_marker_blocks_normal_start`：marker 存在但 JSON malformed、字段
+  缺失或 path/hash contract invalid 时，不能解释为 marker absent。
+- `Unreadable_recovery_marker_never_returns_create_new`：marker 文件不可读时不能降级为
+  `CreateNew`。
 - `Acceptance_mode_bypasses_production_backup_recovery_and_maintenance_paths`：只返回
   acceptance 数据路径对应的可启动决策，不访问生产 `Backups`、`Data/Corrupt` 或 recovery UI。
 
@@ -921,7 +970,9 @@ Expected: FAIL，原因是 startup decision 类型和 gate 尚未实现。
 
 执行顺序固定为：
 
-1. 先读取 marker。
+1. 先读取 marker。只有 formal marker 真正不存在时才能继续检查生产 DB；marker 文件
+   malformed、unreadable、路径 contract invalid 或 manifest hash invalid 都是启动错误，
+   绝不能解释为 marker absent，也绝不能进入 `CreateNew`。
 2. marker 存在时先返回 `InterruptedRecovery`，不把缺失生产 DB 解释为 `Missing`，
    也不因生产 DB 存在而直接 Healthy；decision 必须携带 marker 供 App 调用
    `ResumeInterruptedRecovery`。
@@ -942,7 +993,9 @@ Expected: FAIL，原因是 startup decision 类型和 gate 尚未实现。
    recovery candidate、marker UI 和 scheduler。
 
 Gate 不创建 `SqlitePassageRecordStore`，不执行 schema migration，不启动 MainWindow、
-YardCommunicationManager 或 RFID。
+YardCommunicationManager 或 RFID。marker 读取错误路径只允许进入明确的 recovery/error UI、
+重试、打开数据目录或退出；无论 marker 错误类型如何，都不得创建 Store、空数据库或
+MainWindow 正常业务环境。
 
 - [ ] **Step 4: Run GREEN and regression**
 

@@ -199,7 +199,7 @@ public sealed class SqliteRecoveryService
         Directory.CreateDirectory(bundlePath);
 
         var evidence = new List<BundleEvidence>();
-        CopyEvidence(productionPath, bundlePath, evidence, required: true);
+        CopyEvidence(productionPath, bundlePath, evidence);
         CopyOptionalEvidence(productionPath + "-wal", bundlePath, evidence);
         CopyOptionalEvidence(productionPath + "-shm", bundlePath, evidence);
 
@@ -231,19 +231,8 @@ public sealed class SqliteRecoveryService
     private static void CopyEvidence(
         string sourcePath,
         string bundlePath,
-        ICollection<BundleEvidence> evidence,
-        bool required)
+        ICollection<BundleEvidence> evidence)
     {
-        if (!File.Exists(sourcePath))
-        {
-            if (required)
-            {
-                throw new FileNotFoundException("Required SQLite recovery evidence is missing.", sourcePath);
-            }
-
-            return;
-        }
-
         var destinationPath = Path.Combine(bundlePath, Path.GetFileName(sourcePath));
         CopyFileDurably(sourcePath, destinationPath);
         var source = DescribeEvidence(sourcePath);
@@ -260,8 +249,21 @@ public sealed class SqliteRecoveryService
     private static void CopyOptionalEvidence(
         string sourcePath,
         string bundlePath,
-        ICollection<BundleEvidence> evidence) =>
-        CopyEvidence(sourcePath, bundlePath, evidence, required: false);
+        ICollection<BundleEvidence> evidence)
+    {
+        try
+        {
+            CopyEvidence(sourcePath, bundlePath, evidence);
+        }
+        catch (FileNotFoundException)
+        {
+            return;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return;
+        }
+    }
 
     private static void ValidateCorruptBundle(
         string bundlePath,
@@ -440,10 +442,7 @@ public sealed class SqliteRecoveryService
 
     private static void DeleteIfExists(string path)
     {
-        if (File.Exists(path))
-        {
-            File.Delete(path);
-        }
+        File.Delete(path);
     }
 
     private static void ReplaceProduction(string stagingPath, string productionPath)

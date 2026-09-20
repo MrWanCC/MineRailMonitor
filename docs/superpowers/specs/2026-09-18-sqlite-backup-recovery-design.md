@@ -309,12 +309,19 @@ Inspection Connection。它不是业务连接，必须满足：
 
 启动补备份规则：
 
-- 启动时当天没有正式健康备份：立即创建一份。
-- 当天已经有正式健康备份：跳过。
+- `ScanCandidates` 只负责严格正式文件发现、日期目录一致性和规范文件名排序，
+  不代表候选内容当前仍 Healthy。
+- 启动时扫描全部 `candidate.LocalTimestamp.Date == localNow.Date` 的正式 candidate，
+  对每个执行 `healthChecker.Inspect(candidate.Path, SqliteInspectionMode.FullValidation)`。
+- 只有本次 FullValidation 返回 `Healthy` 的今日 candidate 才允许跳过备份。
+- 今日 candidate 为 `Corrupt`、`Unavailable` 或 `UnsupportedSchema` 时，不能视为已有
+  健康备份；继续创建新的 validated backup，不删除损坏的正式文件。
 - 例如 01:00 启动并立即备份，02:00 不再重复创建。
 - 08:00 启动且当天没有备份：08:00 创建。
 
-判断“当天已有备份”只认验证通过并成功 rename 的正式 `.db`，不认 `.tmp.db` 或失败日志。
+判断“当天已有备份”只认本次 FullValidation 仍通过并成功 rename 的正式 `.db`，不认
+仅文件名合法的 candidate、`.tmp.db` 或失败日志。多个今日 candidate 中只要有一个当前
+Healthy，即可 skip；必须检查到该结论，不能只看最新 candidate。
 
 所有备份操作必须串行。建议 `DatabaseMaintenanceCoordinator` 持有 `SemaphoreSlim`，启动补备份、02:00 调度和其他未来入口都通过同一互斥区，并在锁内再次检查当天备份是否已经存在。
 
@@ -324,8 +331,10 @@ Inspection Connection。它不是业务连接，必须满足：
 计算下一次本地 02:00
 → 可取消的 Task.Delay / 等价一次性等待
 → 获取备份互斥
-→ 检查当天正式备份
-→ 必要时创建并验证
+→ 扫描当天正式 candidate
+→ 对今日 candidate 逐个 FullValidation
+→ 存在当前 Healthy candidate：skip
+→ 否则创建并验证
 → 释放互斥
 → 计算下一天 02:00
 ```
@@ -432,11 +441,33 @@ health check → Corrupt
 
 它是恢复事务边界的一部分，不是普通日志文件。marker 至少持久化以下信息：
 
-- `recoveryStarted`；
-- `sourceBackupPath`；
-- `corruptBundlePath`；
-- `stagingPath`；
-- `startedAt`（本地时间和可用于诊断的 UTC 时间）。
+- `recoveryStarted` (`bool`)；
+- `sourceBackupPath` (`string`)；
+- `corruptBundlePath` (`string`)；
+- `stagingPath` (`string`)；
+- `startedAt` (`DateTimeOffset`)；
+- `bundleManifestSha256` (`string`)。
+
+对应共享 contract 为：
+
+```csharp
+public sealed class SqliteRecoveryMarker
+{
+    public bool RecoveryStarted { get; }
+    public string SourceBackupPath { get; }
+    public string CorruptBundlePath { get; }
+    public string StagingPath { get; }
+    public DateTimeOffset StartedAt { get; }
+    public string BundleManifestSha256 { get; }
+}
+
+public sealed class SqliteRecoveryResult
+{
+    public bool Succeeded { get; }
+    public string? ErrorMessage { get; }
+    public SqliteRecoveryMarker? Marker { get; }
+}
+```
 
 恢复状态机为：
 
@@ -459,7 +490,9 @@ candidate validated
 
 - marker 存在且生产 `.db` 缺失：进入“上一次恢复未完成”路径，禁止首次安装初始化；
 - marker 存在且生产 `.db` 仍存在：仍阻止普通 Healthy 启动，不能直接忽略 marker；
-- marker 存在时，不自动把任意 staging 或生产文件当作已完成恢复。
+- marker 存在时，不自动把任意 staging 或生产文件当作已完成恢复。marker JSON malformed、
+  unreadable、path contract invalid 或 manifest hash invalid 都不是“marker absent”，
+  不得进入首次安装或 `CreateNew`。
 
 第一版不要求自动续跑恢复。可以安全地进入 startup recovery/error UI，重新检查
 staging、corrupt bundle、source backup 和 production DB，之后由明确流程完成恢复或
@@ -515,8 +548,17 @@ Backups/SQLite/2026-09-18/MineRailMonitor_20260918_020000.db
 - 复制当前 `MineRailMonitor.db`。
 - 如果存在，复制 `MineRailMonitor.db-wal`。
 - 如果存在，复制 `MineRailMonitor.db-shm`。
+- 写入 `bundle-manifest.json`，为每个实际 evidence 记录文件名、length 和 SHA-256；
+  db/WAL/SHM 的实际文件集合必须与 manifest 完全一致。
+- evidence 和 manifest 使用 durable `WriteThrough` 写入并 `Flush(true)`；marker 的
+  `BundleManifestSha256` 锚定 manifest 内容。
+- staging 和 production 路径必须限制在约定的 Data 文件名；corrupt bundle 必须限制在
+  Data/Corrupt 的直接子目录。
 
-只有实际存在的文件才复制。主库或实际存在的 WAL/SHM 复制失败时停止恢复，不得继续进入破坏性替换。
+只有实际存在的文件才复制。optional WAL/SHM 只有打开时得到
+`FileNotFoundException` 或 `DirectoryNotFoundException` 才能解释为 truly absent；权限、
+sharing、目录路径或其它 IO 异常都必须停止恢复。主库或实际存在的 WAL/SHM 复制失败时
+不得继续进入破坏性替换。
 
 ### 替换阶段
 
@@ -618,7 +660,13 @@ WAL/SHM 已在 bundle 中保存后，才允许从生产路径移走或清理，�
 
 ### DatabaseMaintenanceCoordinator
 
-负责正常运行期间的 startup catch-up、每日 02:00 调度、备份串行化、可取消停止和日志协调。它不把备份失败转换为 RFID 故障。
+负责正常运行期间的 startup catch-up、每日 02:00 调度、备份串行化、可取消停止和日志协调。它不把备份失败转换为 RFID 故障。构造函数必须接收
+`ISqliteDatabaseHealthChecker`。进入共享 `SemaphoreSlim` 后，Coordinator 调用
+`ScanCandidates` 找到当天全部正式 candidate，再对每个调用
+`Inspect(candidate.Path, SqliteInspectionMode.FullValidation)`；只有当前 `Healthy`
+的 candidate 才能抑制新备份。`Corrupt`、`Unavailable` 和 `UnsupportedSchema` 的今日
+candidate 不计为已有健康备份；多个 candidate 中任意一个当前 Healthy 即可 skip，
+不能只按最新文件名决定。
 
 ### SqlitePassageRecordStore
 
@@ -769,6 +817,9 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 - 验证前只存在 `.tmp.db`。
 - 验证失败的临时文件不会变成正式备份。
 - 每天最多一份正式备份。
+- 今日 formal candidate 必须经过本次 `FullValidation`；`Corrupt`、`Unavailable`、
+  `UnsupportedSchema` 不能 suppress 新备份；多个今日 candidate 中任一当前 Healthy
+  即可 suppress。
 - startup backup 与 02:00 backup 串行化。
 - 14 天边界正确。
 - 备份失败不会触发破坏性 retention。
@@ -781,12 +832,17 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 - staging 验证通过前生产库不改变。
 - 原始 `.db` 被保存。
 - 已存在的 WAL/SHM 被保存。
+- 非文件 WAL/SHM 路径不能被 `File.Exists` 当作缺失；只有明确 not-found 才可缺省，
+  其它访问错误必须在 marker 前失败。
 - candidate/staging 验证使用非破坏性的 Inspection Connection。
 - recovery marker 至少包含 source backup、corrupt bundle、staging 和 started timestamp。
 - marker + 缺失生产 DB 永远不创建空库。
 - marker + 仍存在生产 DB 也阻止普通启动。
 - corrupt bundle 完成后、sidecar 移除后、生产替换中断后，marker 和证据仍保留。
 - marker 只在最终 health check 成功后删除。
+- marker JSON contract 包含 `RecoveryStarted`、`SourceBackupPath`、`CorruptBundlePath`、
+  `StagingPath`、`StartedAt`、`BundleManifestSha256`；Resume 必须校验 manifest hash 和
+  evidence set。
 - 恢复后的生产库再次验证。
 - 恢复失败不启动 runtime。
 - 无健康备份不创建空数据库。

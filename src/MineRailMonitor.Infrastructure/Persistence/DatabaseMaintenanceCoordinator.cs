@@ -8,6 +8,7 @@ public sealed class DatabaseMaintenanceCoordinator : IDisposable
     private readonly string _productionDatabasePath;
     private readonly string _backupRootDirectory;
     private readonly ISqliteBackupService _backupService;
+    private readonly ISqliteDatabaseHealthChecker _healthChecker;
     private readonly SqliteRetentionService _retentionService;
     private readonly IRfidTimeProvider _timeProvider;
     private readonly IAsyncDelay _delay;
@@ -24,6 +25,7 @@ public sealed class DatabaseMaintenanceCoordinator : IDisposable
         string productionDatabasePath,
         string backupRootDirectory,
         ISqliteBackupService backupService,
+        ISqliteDatabaseHealthChecker healthChecker,
         SqliteRetentionService retentionService,
         IRfidTimeProvider timeProvider,
         IAsyncDelay delay,
@@ -42,6 +44,7 @@ public sealed class DatabaseMaintenanceCoordinator : IDisposable
         _productionDatabasePath = productionDatabasePath;
         _backupRootDirectory = backupRootDirectory;
         _backupService = backupService ?? throw new ArgumentNullException(nameof(backupService));
+        _healthChecker = healthChecker ?? throw new ArgumentNullException(nameof(healthChecker));
         _retentionService = retentionService ?? throw new ArgumentNullException(nameof(retentionService));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _delay = delay ?? throw new ArgumentNullException(nameof(delay));
@@ -171,10 +174,18 @@ public sealed class DatabaseMaintenanceCoordinator : IDisposable
         CancellationToken cancellationToken)
     {
         var candidates = _backupService.ScanCandidates(_backupRootDirectory);
-        var today = candidates.FirstOrDefault(candidate => candidate.LocalTimestamp.Date == localNow.Date);
-        if (today != null)
+        var todayCandidates = candidates
+            .Where(candidate => candidate.LocalTimestamp.Date == localNow.Date)
+            .ToArray();
+        foreach (var candidate in todayCandidates)
         {
-            return new SqliteBackupResult(true, today.Path, null);
+            var health = _healthChecker.Inspect(
+                candidate.Path,
+                SqliteInspectionMode.FullValidation);
+            if (health.State == SqliteDatabaseHealthState.Healthy)
+            {
+                return new SqliteBackupResult(true, candidate.Path, null);
+            }
         }
 
         var result = await _backupService.CreateValidatedBackupAsync(

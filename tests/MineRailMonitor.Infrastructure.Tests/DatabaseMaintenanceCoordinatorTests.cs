@@ -13,13 +13,108 @@ public sealed class DatabaseMaintenanceCoordinatorTests
         var today = CreateLocalNow(1, 0, 0);
         var candidatePath = directory.CreateFormal(today.Date, "010000");
         var backup = new RecordingBackupService(new[] { new SqliteBackupCandidate(candidatePath, today) });
-        using var coordinator = CreateCoordinator(directory, backup, today);
+        var health = new RecordingHealthChecker((_, _) => SqliteDatabaseHealthState.Healthy);
+        using var coordinator = CreateCoordinator(directory, backup, today, healthChecker: health);
 
         var result = await coordinator.RunStartupCatchUpAsync(CancellationToken.None);
 
         Assert.True(result.Succeeded);
         Assert.Equal(candidatePath, result.FinalPath);
         Assert.Equal(0, backup.CreateCalls);
+        var call = Assert.Single(health.Calls);
+        Assert.Equal(SqliteInspectionMode.FullValidation, call.Mode);
+    }
+
+    [Fact]
+    public async Task Corrupt_formal_backup_for_today_does_not_suppress_new_backup()
+    {
+        using var directory = new TemporaryDirectory();
+        var today = CreateLocalNow(1, 0, 0);
+        var candidatePath = directory.CreateFormal(today.Date, "010000");
+        var backup = new RecordingBackupService(new[] { new SqliteBackupCandidate(candidatePath, today) });
+        var health = new RecordingHealthChecker((_, _) => SqliteDatabaseHealthState.Corrupt);
+        using var coordinator = CreateCoordinator(directory, backup, today, healthChecker: health);
+
+        var result = await coordinator.RunStartupCatchUpAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, backup.CreateCalls);
+        Assert.Equal(SqliteDatabaseHealthState.Corrupt, health.Calls[0].State);
+    }
+
+    [Fact]
+    public async Task Unavailable_formal_backup_for_today_does_not_suppress_new_backup()
+    {
+        using var directory = new TemporaryDirectory();
+        var today = CreateLocalNow(1, 0, 0);
+        var candidatePath = directory.CreateFormal(today.Date, "010000");
+        var backup = new RecordingBackupService(new[] { new SqliteBackupCandidate(candidatePath, today) });
+        var health = new RecordingHealthChecker((_, _) => SqliteDatabaseHealthState.Unavailable);
+        using var coordinator = CreateCoordinator(directory, backup, today, healthChecker: health);
+
+        var result = await coordinator.RunStartupCatchUpAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, backup.CreateCalls);
+    }
+
+    [Fact]
+    public async Task Unsupported_schema_formal_backup_for_today_does_not_suppress_new_backup()
+    {
+        using var directory = new TemporaryDirectory();
+        var today = CreateLocalNow(1, 0, 0);
+        var candidatePath = directory.CreateFormal(today.Date, "010000");
+        var backup = new RecordingBackupService(new[] { new SqliteBackupCandidate(candidatePath, today) });
+        var health = new RecordingHealthChecker((_, _) => SqliteDatabaseHealthState.UnsupportedSchema);
+        using var coordinator = CreateCoordinator(directory, backup, today, healthChecker: health);
+
+        var result = await coordinator.RunStartupCatchUpAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, backup.CreateCalls);
+    }
+
+    [Fact]
+    public async Task One_healthy_candidate_for_today_suppresses_new_backup_even_if_newer_candidate_is_corrupt()
+    {
+        using var directory = new TemporaryDirectory();
+        var today = CreateLocalNow(1, 0, 0);
+        var newerPath = directory.CreateFormal(today.Date, "010000");
+        var olderPath = directory.CreateFormal(today.Date, "000000");
+        var candidates = new[]
+        {
+            new SqliteBackupCandidate(newerPath, today),
+            new SqliteBackupCandidate(olderPath, today.AddMinutes(-60))
+        };
+        var backup = new RecordingBackupService(candidates);
+        var health = new RecordingHealthChecker((path, _) =>
+            path == newerPath
+                ? SqliteDatabaseHealthState.Corrupt
+                : SqliteDatabaseHealthState.Healthy);
+        using var coordinator = CreateCoordinator(directory, backup, today, healthChecker: health);
+
+        var result = await coordinator.RunStartupCatchUpAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, backup.CreateCalls);
+        Assert.Equal(2, health.Calls.Count);
+        Assert.All(health.Calls, call => Assert.Equal(SqliteInspectionMode.FullValidation, call.Mode));
+    }
+
+    [Fact]
+    public async Task Daily_backup_candidate_check_uses_full_validation()
+    {
+        using var directory = new TemporaryDirectory();
+        var today = CreateLocalNow(1, 0, 0);
+        var candidatePath = directory.CreateFormal(today.Date, "010000");
+        var backup = new RecordingBackupService(new[] { new SqliteBackupCandidate(candidatePath, today) });
+        var health = new RecordingHealthChecker((_, _) => SqliteDatabaseHealthState.Healthy);
+        using var coordinator = CreateCoordinator(directory, backup, today, healthChecker: health);
+
+        await coordinator.RunStartupCatchUpAsync(CancellationToken.None);
+
+        Assert.Single(health.Calls);
+        Assert.Equal(SqliteInspectionMode.FullValidation, health.Calls[0].Mode);
     }
 
     [Fact]
@@ -258,13 +353,15 @@ public sealed class DatabaseMaintenanceCoordinatorTests
         TemporaryDirectory directory,
         ISqliteBackupService backup,
         DateTimeOffset localNow,
-        IAsyncDelay? delay = null)
+        IAsyncDelay? delay = null,
+        ISqliteDatabaseHealthChecker? healthChecker = null)
     {
         var time = new FixedTimeProvider(localNow);
         return new DatabaseMaintenanceCoordinator(
             Path.Combine(directory.Path, "MineRailMonitor.db"),
             directory.BackupRoot,
             backup,
+            healthChecker ?? new RecordingHealthChecker((_, _) => SqliteDatabaseHealthState.Healthy),
             new SqliteRetentionService(14, new TestLogger()),
             time,
             delay ?? new ManualAsyncDelay(),
@@ -275,6 +372,38 @@ public sealed class DatabaseMaintenanceCoordinatorTests
     {
         var date = new DateTime(2026, 9, 20, hour, minute, second, DateTimeKind.Unspecified);
         return new DateTimeOffset(date, TimeZoneInfo.Local.GetUtcOffset(date));
+    }
+
+    private sealed class RecordingHealthChecker : ISqliteDatabaseHealthChecker
+    {
+        private readonly Func<string, SqliteInspectionMode, SqliteDatabaseHealthState> _stateFactory;
+
+        public RecordingHealthChecker(
+            Func<string, SqliteInspectionMode, SqliteDatabaseHealthState> stateFactory)
+        {
+            _stateFactory = stateFactory;
+        }
+
+        public List<(string Path, SqliteInspectionMode Mode, SqliteDatabaseHealthState State)> Calls { get; } = new();
+
+        public SqliteDatabaseHealthResult Inspect(string databasePath, SqliteInspectionMode mode)
+        {
+            var state = _stateFactory(databasePath, mode);
+            Calls.Add((databasePath, mode, state));
+            var healthy = state == SqliteDatabaseHealthState.Healthy;
+            return new SqliteDatabaseHealthResult(
+                databasePath,
+                state,
+                DateTimeOffset.UtcNow,
+                healthy,
+                healthy ? "ok" : state.ToString(),
+                true,
+                healthy,
+                healthy ? "ok" : state.ToString(),
+                healthy,
+                healthy ? "ok" : state.ToString(),
+                schemaVersion: state == SqliteDatabaseHealthState.UnsupportedSchema ? 4 : 3);
+        }
     }
 
     private sealed class FixedTimeProvider : IRfidTimeProvider

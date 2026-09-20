@@ -70,6 +70,27 @@ public sealed class SqliteRecoveryServiceTests
     }
 
     [Fact]
+    public void Recover_does_not_treat_non_file_wal_path_as_absent()
+    {
+        using var workspace = RecoveryWorkspace.Create();
+        Directory.CreateDirectory(workspace.ProductionPath + "-wal");
+        var phases = new List<SqliteRecoveryPhase>();
+        var service = CreateService(
+            workspace,
+            new RecordingHealthChecker((_, _, _) => SqliteDatabaseHealthState.Healthy),
+            phases.Add);
+        var before = workspace.SnapshotProductionFiles();
+
+        var result = service.Recover(workspace.ProductionPath, workspace.Candidate);
+
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Marker);
+        Assert.False(File.Exists(workspace.MarkerPath));
+        Assert.Equal(before, workspace.SnapshotProductionFiles());
+        Assert.DoesNotContain(SqliteRecoveryPhase.ProductionReplacementStarted, phases);
+    }
+
+    [Fact]
     public void Marker_write_failure_does_not_report_unpersisted_marker()
     {
         using var workspace = RecoveryWorkspace.Create();

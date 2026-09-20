@@ -160,11 +160,12 @@ retention 计数。异常命名文件不根据猜测纳入候选；`LastWriteTim
 健康结果至少包含：
 
 - 数据库路径。
-- 状态：`Missing`、`Healthy`、`Corrupt` 或 `Unavailable`。
+- 状态：`Missing`、`Healthy`、`Corrupt`、`Unavailable` 或 `UnsupportedSchema`。
 - 检查时间。
 - quick check 是否通过及返回摘要。
 - foreign key check 是否通过及违规摘要。
 - integrity check 是否执行、是否通过及详细摘要。
+- `PRAGMA user_version` 读取到的 `SchemaVersion`；文件不存在时为 `null`。
 - 原始异常类型、SQLite/IO 错误码和可供日志使用的摘要。
 - 面向日志和 Dialog 的错误摘要。
 
@@ -182,6 +183,20 @@ retention 计数。异常命名文件不根据猜测纳入候选；`LastWriteTim
 1. 用 Inspection Connection 执行 `PRAGMA quick_check;`。
 2. 执行 `PRAGMA foreign_key_check;`。
 3. 只有 quick check 返回 `ok` 且 foreign key check 无结果时才判定 Healthy。
+
+4. 读取 `PRAGMA user_version`；当前 Store 支持的版本由
+   `SqlitePassageRecordStore.CurrentSchemaVersion` 提供，不在 HealthChecker 中复制版本常量。
+5. `user_version` 为 0、1、2 或当前支持版本时，物理检查通过即可保持 `Healthy`，并返回对应
+   `SchemaVersion`。v0/v1/v2/v3 继续遵循 Store 现有初始化和 migration 语义。
+
+`UnsupportedSchema`：
+
+- 数据库物理完整性检查通过；
+- `SchemaVersion` 大于 `SqlitePassageRecordStore.CurrentSchemaVersion`；
+- 表示应用与数据库版本不兼容，不表示数据库损坏或暂时不可访问；
+- 阻止 Store 创建，不执行 migration，不创建空数据库；
+- 不进入 corrupt backup recovery，不移动或覆盖生产 `.db`、WAL、SHM；
+- 启动级 UI 只提供升级提示、重试、打开数据目录和退出。
 
 `Corrupt` 只表示已经能够确定数据库内容或 SQLite 文件结构损坏，包括：
 
@@ -209,6 +224,16 @@ quick check 异常、返回非 `ok` 或 foreign key check 有结果时，继续�
 - 启动级 UI 只提供重试、打开数据目录和退出。
 
 `Unavailable` 不能被降级成 `Corrupt`，也不能通过“再创建一个空数据库”绕过。
+
+健康状态的最终优先级固定为：
+
+```text
+Corrupt → Unavailable → UnsupportedSchema → Healthy
+```
+
+因此不能因为 `user_version` 超前就跳过物理检查；确定的 corruption 或无法可靠读取
+优先于兼容性判断。读取 `PRAGMA user_version` 本身失败时，按现有 SQLite/IO 异常分类为
+`Corrupt` 或 `Unavailable`，不能猜测为 `UnsupportedSchema`。
 
 健康检查不得因为“能打开文件”就判定健康，也不得只检查主 `.db` 文件的存在。
 
@@ -360,6 +385,16 @@ health check
 - 启动级 UI 只提供重试、打开数据目录和退出。
 
 重试仍得到 `Unavailable` 时保持该路径，不能把暂时不可访问解释为 Corrupt。
+
+### UnsupportedSchema 启动路径
+
+健康检查结果为 `UnsupportedSchema` 时：
+
+- 显示“数据库版本高于当前应用支持版本，请升级应用程序”，同时显示当前支持版本和实际版本；
+- 不创建 `SqlitePassageRecordStore`、MainWindow 或 YardCommunicationManager；
+- 不执行 migration、backup recovery、候选扫描或空数据库初始化；
+- 不移动、覆盖或删除生产 `.db`、WAL、SHM；
+- 启动级 UI 只提供重试、打开数据目录和退出。
 
 ### 损坏数据库路径
 
@@ -519,7 +554,7 @@ WAL/SHM 已在 bundle 中保存后，才允许从生产路径移走或清理，�
 ## 13. DatabaseRecoveryDialog
 
 这是 MainWindow 创建前的启动级 modal，不挂在业务页面或已启动的通信管理器上。
-`Corrupt`、`Unavailable` 和“recovery marker 存在”是不同的 UI 状态，不能共用会
+`Corrupt`、`Unavailable`、`UnsupportedSchema` 和“recovery marker 存在”是不同的 UI 状态，不能共用会
 误导用户的损坏提示。
 
 至少显示：
@@ -551,6 +586,14 @@ WAL/SHM 已在 bundle 中保存后，才允许从生产路径移走或清理，�
 - 隐藏恢复候选和恢复按钮；
 - 只显示重试、打开数据目录和退出；
 - 重试前后都不移动生产文件，也不创建空数据库。
+
+对于 `UnsupportedSchema`：
+
+- 标题和正文显示“数据库版本高于当前应用支持版本，请升级应用程序”；
+- 显示当前应用支持版本和数据库实际 `SchemaVersion`；
+- 隐藏恢复候选、恢复和继续恢复按钮；
+- 只显示重试、打开数据目录和退出；
+- 不创建 Store、不执行 migration、不创建空数据库。
 
 对于 recovery marker：
 
@@ -684,6 +727,8 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 
 - 启动门禁是唯一允许决定“是否创建业务运行环境”的边界。
 - `Unavailable` 只允许重试、打开数据目录或退出，永远不进入 recovery candidate 流程。
+- `UnsupportedSchema` 只允许升级提示、重试、打开数据目录或退出，永远不进入 recovery
+  candidate 流程，也不创建 Store。
 - 恢复操作期间禁止创建 Store 和启动通信管理器。
 - 日常备份与 02:00 调度共享一个串行互斥，不允许 startup backup 与定时 backup 并发。
 - 备份失败只影响维护状态，不改变 `YardCommunicationManager`、`RfidRuntimeCoordinator` 或报警状态。
@@ -709,6 +754,11 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 - locked/busy 数据库判定为 `Unavailable`，而不是 `Corrupt`。
 - access denied 判定为 `Unavailable`。
 - `Unavailable` 不进入 recovery candidate 流程。
+- v0、v1、v2、v3 物理健康库分别返回对应 `SchemaVersion` 并保持 `Healthy`。
+- `user_version` 超过当前 Store 支持版本返回 `UnsupportedSchema`，而不是 `Corrupt` 或
+  `Unavailable`。
+- 物理 corruption 与后续 unavailable 错误同时存在时最终状态仍为 `Corrupt`。
+- `FullValidation` 同样拒绝超前 schema 版本。
 - 生产数据库已有 WAL 时，inspection 能读到已提交数据。
 - backup/staging inspection 不执行 WAL pragma、不产生 WAL/SHM、不修改文件。
 

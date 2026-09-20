@@ -59,6 +59,13 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
                     RunIntegrityCheck(connection, inspection);
                 }
             }
+
+            if (!inspection.IsCorrupt && !inspection.HasUnavailableError)
+            {
+                inspection.SchemaVersion = ReadSchemaVersion(connection);
+                inspection.IsUnsupportedSchema =
+                    inspection.SchemaVersion > SqlitePassageRecordStore.CurrentSchemaVersion;
+            }
         }
         catch (Exception exception)
         {
@@ -78,7 +85,10 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
             }
         }
 
-        var state = ResolveState(inspection.IsCorrupt, inspection.HasUnavailableError);
+        var state = ResolveState(
+            inspection.IsCorrupt,
+            inspection.HasUnavailableError,
+            inspection.IsUnsupportedSchema);
         if (state == SqliteDatabaseHealthState.Unavailable)
         {
             return CreateUnavailable(fullPath, checkedAt, inspection.UnavailableError!);
@@ -280,14 +290,29 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
                 : GetErrorDiagnostic(inspection.CorruptionError).ErrorCode,
             inspection.CorruptionError is null
                 ? null
-                : GetErrorDiagnostic(inspection.CorruptionError).ErrorCodeName);
+                : GetErrorDiagnostic(inspection.CorruptionError).ErrorCodeName,
+            inspection.SchemaVersion);
 
-    internal static SqliteDatabaseHealthState ResolveState(bool hasCorruption, bool hasUnavailableError) =>
+    internal static SqliteDatabaseHealthState ResolveState(
+        bool hasCorruption,
+        bool hasUnavailableError,
+        bool hasUnsupportedSchema = false) =>
         hasCorruption
             ? SqliteDatabaseHealthState.Corrupt
             : hasUnavailableError
                 ? SqliteDatabaseHealthState.Unavailable
-                : SqliteDatabaseHealthState.Healthy;
+                : hasUnsupportedSchema
+                    ? SqliteDatabaseHealthState.UnsupportedSchema
+                    : SqliteDatabaseHealthState.Healthy;
+
+    private static int ReadSchemaVersion(SQLiteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA user_version;";
+        return Convert.ToInt32(
+            command.ExecuteScalar(),
+            System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     private static SQLiteConnection OpenInspectionConnection(string databasePath) =>
         new($"Data Source={databasePath};Version=3;Read Only=True;Default Timeout=0;");
@@ -352,6 +377,10 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
         public string ForeignKeyCheckSummary { get; set; }
 
         public bool IsCorrupt { get; set; }
+
+        public bool IsUnsupportedSchema { get; set; }
+
+        public int? SchemaVersion { get; set; }
 
         public Exception? CorruptionError { get; private set; }
 

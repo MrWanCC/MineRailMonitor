@@ -5,7 +5,8 @@ public enum SqliteDatabaseHealthState
     Missing,
     Healthy,
     Corrupt,
-    Unavailable
+    Unavailable,
+    UnsupportedSchema
 }
 
 public enum SqliteInspectionMode

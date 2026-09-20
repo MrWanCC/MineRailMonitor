@@ -59,6 +59,98 @@ public sealed class SqliteDatabaseHealthCheckerTests
     }
 
     [Fact]
+    public void Supported_current_schema_is_healthy_and_reports_schema_version()
+    {
+        using var database = StandaloneDatabase.CreateWithSchemaVersion(
+            SqlitePassageRecordStore.CurrentSchemaVersion);
+
+        var result = CreateChecker().Inspect(database.Path, SqliteInspectionMode.StartupFast);
+
+        Assert.Equal(SqliteDatabaseHealthState.Healthy, result.State);
+        Assert.Equal(SqlitePassageRecordStore.CurrentSchemaVersion, result.SchemaVersion);
+    }
+
+    [Fact]
+    public void Supported_old_schema_v1_is_healthy()
+    {
+        using var database = StandaloneDatabase.CreateWithSchemaVersion(1);
+
+        var result = CreateChecker().Inspect(database.Path, SqliteInspectionMode.StartupFast);
+
+        Assert.Equal(SqliteDatabaseHealthState.Healthy, result.State);
+        Assert.Equal(1, result.SchemaVersion);
+    }
+
+    [Fact]
+    public void Supported_old_schema_v2_is_healthy()
+    {
+        using var database = StandaloneDatabase.CreateWithSchemaVersion(2);
+
+        var result = CreateChecker().Inspect(database.Path, SqliteInspectionMode.StartupFast);
+
+        Assert.Equal(SqliteDatabaseHealthState.Healthy, result.State);
+        Assert.Equal(2, result.SchemaVersion);
+    }
+
+    [Fact]
+    public void Schema_version_zero_preserves_existing_store_semantics()
+    {
+        using var database = StandaloneDatabase.Create();
+
+        var result = CreateChecker().Inspect(database.Path, SqliteInspectionMode.StartupFast);
+
+        Assert.Equal(SqliteDatabaseHealthState.Healthy, result.State);
+        Assert.Equal(0, result.SchemaVersion);
+    }
+
+    [Fact]
+    public void Newer_schema_is_reported_as_unsupported_schema()
+    {
+        using var database = StandaloneDatabase.CreateWithSchemaVersion(
+            SqlitePassageRecordStore.CurrentSchemaVersion + 1);
+
+        var result = CreateChecker().Inspect(database.Path, SqliteInspectionMode.StartupFast);
+
+        Assert.Equal(SqliteDatabaseHealthState.UnsupportedSchema, result.State);
+        Assert.Equal(SqlitePassageRecordStore.CurrentSchemaVersion + 1, result.SchemaVersion);
+    }
+
+    [Fact]
+    public void Unsupported_schema_is_not_corrupt()
+    {
+        using var database = StandaloneDatabase.CreateWithSchemaVersion(
+            SqlitePassageRecordStore.CurrentSchemaVersion + 1);
+
+        var result = CreateChecker().Inspect(database.Path, SqliteInspectionMode.StartupFast);
+
+        Assert.NotEqual(SqliteDatabaseHealthState.Corrupt, result.State);
+    }
+
+    [Fact]
+    public void Unsupported_schema_is_not_unavailable()
+    {
+        using var database = StandaloneDatabase.CreateWithSchemaVersion(
+            SqlitePassageRecordStore.CurrentSchemaVersion + 1);
+
+        var result = CreateChecker().Inspect(database.Path, SqliteInspectionMode.StartupFast);
+
+        Assert.NotEqual(SqliteDatabaseHealthState.Unavailable, result.State);
+    }
+
+    [Fact]
+    public void Full_validation_also_rejects_newer_schema()
+    {
+        using var database = StandaloneDatabase.CreateWithSchemaVersion(
+            SqlitePassageRecordStore.CurrentSchemaVersion + 1);
+
+        var result = CreateChecker().Inspect(database.Path, SqliteInspectionMode.FullValidation);
+
+        Assert.Equal(SqliteDatabaseHealthState.UnsupportedSchema, result.State);
+        Assert.Equal(SqlitePassageRecordStore.CurrentSchemaVersion + 1, result.SchemaVersion);
+        Assert.True(result.IntegrityCheckExecuted);
+    }
+
+    [Fact]
     public void Locked_database_is_unavailable_not_corrupt()
     {
         using var database = StandaloneDatabase.Create();
@@ -341,6 +433,19 @@ COMMIT;";
             using var connection = Open(path);
             using var command = connection.CreateCommand();
             command.CommandText = "CREATE TABLE sample (id INTEGER PRIMARY KEY, value TEXT NOT NULL); INSERT INTO sample (value) VALUES ('healthy');";
+            command.ExecuteNonQuery();
+            return new StandaloneDatabase(directory, path);
+        }
+
+        public static StandaloneDatabase CreateWithSchemaVersion(int version)
+        {
+            var directory = CreateDirectory();
+            var path = System.IO.Path.Combine(directory, "schema-version.db");
+            using var connection = Open(path);
+            using var command = connection.CreateCommand();
+            command.CommandText = $@"
+CREATE TABLE sample (id INTEGER PRIMARY KEY, value TEXT NOT NULL);
+PRAGMA user_version={version};";
             command.ExecuteNonQuery();
             return new StandaloneDatabase(directory, path);
         }

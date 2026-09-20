@@ -23,7 +23,8 @@ public sealed class SqliteDatabaseHealthResult
         string? errorType = null,
         string? errorMessage = null,
         int? errorCode = null,
-        string? errorCodeName = null)
+        string? errorCodeName = null,
+        int? schemaVersion = null)
     {
         DatabasePath = databasePath;
         State = state;
@@ -39,6 +40,7 @@ public sealed class SqliteDatabaseHealthResult
         ErrorMessage = errorMessage;
         ErrorCode = errorCode;
         ErrorCodeName = errorCodeName;
+        SchemaVersion = schemaVersion;
     }
 
     public string DatabasePath { get; }
@@ -68,4 +70,6 @@ public sealed class SqliteDatabaseHealthResult
     public int? ErrorCode { get; }
 
     public string? ErrorCodeName { get; }
+
+    public int? SchemaVersion { get; }
 }

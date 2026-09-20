@@ -67,8 +67,9 @@ public partial class MainWindow : Window
     private const int WM_GETMINMAXINFO = 0x0024;
     private const uint MonitorDefaultToNearest = 0x00000002;
 
-    public MainWindow()
+    public MainWindow(SqlitePassageRecordStore passageRecordStore)
     {
+        _passageRecordStore = passageRecordStore ?? throw new ArgumentNullException(nameof(passageRecordStore));
         InitializeComponent();
         _acceptanceOptions = ((App)Application.Current).AcceptanceOptions;
         _externalInterfaceAvailable = false;
@@ -85,10 +86,6 @@ public partial class MainWindow : Window
         _currentYardContext.PropertyChanged += OnCurrentYardContextChanged;
         UpdateAdminModeBanner();
         _configService = new ProjectConfigService(((App)Application.Current).Logger);
-        _passageRecordStore = new SqlitePassageRecordStore(
-            _acceptanceOptions.Enabled
-                ? _acceptanceOptions.DatabasePath!
-                : Path.Combine(AppContext.BaseDirectory, "Data", "MineRailMonitor.db"));
         _communicationPage = new CommunicationPage();
         var blackBoxRootDirectory = _acceptanceOptions.Enabled
             ? Path.Combine(_acceptanceOptions.LogDirectory!, "BlackBox")
@@ -854,7 +851,6 @@ public partial class MainWindow : Window
         _rawPacketBlackBoxWriter.Dispose();
         _acceptanceRuntimeStateWriter?.Write("closed");
         _acceptanceRuntimeStateWriter?.Dispose();
-        _passageRecordStore.Dispose();
     }
 
     private void OnYardCommandSent(

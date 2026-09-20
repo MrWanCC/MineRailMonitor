@@ -164,7 +164,7 @@ public sealed class MapLayerMarkupTests
     [Fact]
     public void Rfid_map_editor_saves_the_entered_device_name()
     {
-        var monitorCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml.cs"));
+        var monitorCode = NormalizeNewlines(File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml.cs")));
 
         Assert.Contains(
             "MapAnnotationKind.RfidStation => _annotationEditor!.TryUpdateRfidStation(\n                id,\n                name,\n                cadX,\n                cadY,\n                rfidStationId,\n                enabled),",
@@ -320,4 +320,7 @@ public sealed class MapLayerMarkupTests
 
         throw new FileNotFoundException($"Unable to locate {Path.Combine(segments)} from the test directory.");
     }
+
+    private static string NormalizeNewlines(string value) =>
+        value.Replace("\r\n", "\n");
 }

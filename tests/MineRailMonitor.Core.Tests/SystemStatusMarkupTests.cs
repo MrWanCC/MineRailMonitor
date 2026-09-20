@@ -83,7 +83,7 @@ public sealed class SystemStatusMarkupTests
     [Fact]
     public void Monitor_bottom_tasks_stay_left_of_the_right_alarm_rail()
     {
-        var monitor = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));
+        var monitor = NormalizeNewlines(File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml")));
 
         Assert.Contains("<Grid.ColumnDefinitions>\n            <ColumnDefinition Width=\"*\" />\n            <ColumnDefinition Width=\"380\" />\n        </Grid.ColumnDefinitions>", monitor);
         Assert.Contains("<Grid Grid.Row=\"0\" Grid.ColumnSpan=\"2\" Margin=\"0,0,0,8\">", monitor);
@@ -285,4 +285,7 @@ public sealed class SystemStatusMarkupTests
 
         throw new FileNotFoundException($"Unable to locate {Path.Combine(parts)}.");
     }
+
+    private static string NormalizeNewlines(string value) =>
+        value.Replace("\r\n", "\n");
 }

@@ -645,9 +645,10 @@ WAL/SHM 已在 bundle 中保存后，才允许从生产路径移走或清理，�
 - 最近健康备份文件路径。
 - 明确警告：恢复后，备份时间之后产生的历史记录可能丢失。
 
-第一版只提供：
+正常 `Corrupt` 恢复状态提供：
 
 - 恢复此备份。
+- 重试。
 - 打开备份/数据目录。
 - 退出程序。
 
@@ -687,6 +688,53 @@ WAL/SHM 已在 bundle 中保存后，才允许从生产路径移走或清理，�
 - 不把生产 DB 缺失显示为首次安装；
 - 第一版不自动续跑，用户只能进入明确的恢复/错误处理流程或退出；
 - 在最终 health check 成功前不允许删除 marker。
+
+## 13.1 DatabaseRecoveryDialog contract
+
+`DatabaseRecoveryDialog` 是 `MainWindow` 创建前的 startup Window，不是业务页子窗口：
+
+- `WindowStartupLocation=CenterScreen`；
+- `ShowInTaskbar=True`；
+- 不设置 `Owner=MainWindow`，不依赖 `CenterOwner`；
+- `WindowStyle=None`、`ResizeMode=NoResize`，复用现有 `Colors.xaml`、`Typography.xaml`、
+  `Cards.xaml` 工业深色资源。
+
+Dialog 只消费 `DatabaseStartupDecision`：
+
+```csharp
+public enum DatabaseRecoveryDialogAction
+{
+    Recover,
+    ResumeRecovery,
+    Retry,
+    OpenDataDirectory,
+    Exit
+}
+
+public sealed class DatabaseRecoveryDialogResult
+{
+    public DatabaseRecoveryDialogAction Action { get; }
+    public SqliteBackupCandidate? Candidate { get; }
+}
+```
+
+默认 `Result.Action` 必须是 `Exit`。X、Alt+F4、系统关闭和未选择动作关闭窗口都返回
+`Exit`。Retry、OpenDataDirectory、Exit 只返回动作，不自行重新 Inspect、扫描目录、打开
+目录或退出应用。Recover 只返回用户从 `decision.Candidates` 选中的 candidate；默认选择
+Gate 已按新到旧排序列表的第一项。ResumeRecovery 的 Candidate 必须为 `null`。
+
+`Corrupt` 只显示 Gate 提供的候选和健康摘要；无候选时隐藏或禁用 Recover。`Unavailable`
+只显示 ErrorType、ErrorCode/ErrorCodeName、ErrorMessage、Retry、打开目录和退出。
+`UnsupportedSchema` 显示 `decision.Health.SchemaVersion` 与公开的
+`SqlitePassageRecordStore.CurrentSchemaVersion`，不在 UI 复制版本常量，也不提供恢复动作。
+`InterruptedRecovery` 显示 marker 的 source backup、corrupt bundle、staging、startedAt 和
+manifest hash，但不在 UI 重新检查这些路径；真正 Resume 入口再次验证。`RecoveryStateError`
+显示 `ErrorMessage`，只允许 Retry、打开目录和退出。
+
+Recover/ResumeRecovery 附近只显示提示“执行恢复前需要管理员验证”。Task 6 不打开
+`AdminPasswordDialog`，不调用 `AdminModeService`，不执行认证；Task 7 的 App orchestration
+在调用 `Recover` 或 `ResumeInterruptedRecovery` 前检查 `AdminModeService.IsAdmin`，未验证
+时先显示现有管理员密码窗口，验证失败或取消不得调用 recovery service。
 
 ## 14. 组件边界
 
@@ -746,6 +794,16 @@ App.OnStartup
 → 恢复 PendingClear / 未确认报警
 → YardCommunicationManager Start
 ```
+
+由于 recovery dialog 在 `MainWindow` 之前显示，App startup gate 阶段必须使用
+`ShutdownMode.OnExplicitShutdown`（或等价且可测试的实现），不能让 startup dialog 被 WPF
+自动当作最终 `Application.MainWindow`。只有正常业务 `MainWindow` 创建并赋值给
+`Application.MainWindow` 后，才切换回 `ShutdownMode.OnMainWindowClose`。Retry、打开目录和
+Exit 的结果由 App 处理，关闭 dialog 本身不能意外结束或绕过 startup 决策流程。
+
+Recover/ResumeRecovery 是 destructive operation。App 在调用 recovery service 前检查
+`AdminModeService.IsAdmin`；未验证时显示现有 `AdminPasswordDialog`，验证失败或取消不得
+调用 `Recover` 或 `ResumeInterruptedRecovery`，已处于管理员模式时不重复弹窗。
 
 MainWindow 不再负责决定数据库是否损坏，也不应在构造早期自行打开未经门禁的生产数据库。
 

@@ -191,8 +191,8 @@ public interface ISqliteBackupService
 - Consumes: `IRfidTimeProvider.UtcNow`、`System.Data.SQLite.SQLiteConnection`、`ILogger`。
 - Produces: `SqliteDatabaseHealthState`、`SqliteDatabaseHealthResult`、
   `SqliteInspectionMode`、`ISqliteDatabaseHealthChecker.Inspect(string, SqliteInspectionMode)`。
-- `SqlitePassageRecordStore` 暴露 assembly 内共享的
-  `internal const int CurrentSchemaVersion = 3`；Store 的现有 schema SQL、migration、
+- `SqlitePassageRecordStore` 暴露供 Infrastructure 和启动错误 UI 共享的
+  `public const int CurrentSchemaVersion = 3`；Store 的现有 schema SQL、migration、
   `user_version` 写入和 CRUD 语义保持不变。
 
 - [ ] **Step 1: Write the failing tests**
@@ -1032,7 +1032,7 @@ git commit -m "feat: add sqlite startup decision gate"
 - Create: `src/MineRailMonitor/Pages/DatabaseRecoveryDialog.xaml`
 - Create: `src/MineRailMonitor/Pages/DatabaseRecoveryDialog.xaml.cs`
 - Create: `tests/MineRailMonitor.Core.Tests/DatabaseRecoveryDialogMarkupTests.cs`
-- Modify: none
+- Modify: `src/MineRailMonitor.Infrastructure/Persistence/SqlitePassageRecordStore.cs`
 
 **Interfaces:**
 
@@ -1077,6 +1077,15 @@ public sealed partial class DatabaseRecoveryDialog : Window
   started timestamp 和“上一次恢复未完成”，并提供“继续恢复”、打开数据目录和退出。
 - `InterruptedRecovery_offers_resume_recovery`：当 marker/source/bundle 前置证据可检查时，
   ResumeRecovery 可用；Retry 可以保留但不能是唯一恢复动作。
+- `Recovery_state_error_never_offers_recover_or_resume`、
+  `Recovery_state_error_shows_error_message`：RecoveryStateError 只显示错误、重试、打开目录
+  和退出。
+- `Closing_without_action_defaults_to_exit`：X、Alt+F4、系统关闭均返回 Exit。
+- `Unsupported_schema_shows_actual_and_supported_versions`：实际版本来自 decision，支持版本
+  来自 `SqlitePassageRecordStore.CurrentSchemaVersion`，不能在 UI 硬编码。
+- `Recover_returns_selected_candidate`：Recover 只返回 `decision.Candidates[0]` 或用户选中项。
+- `Recover_requires_admin_verification_prompt_but_does_not_authenticate_in_task_6`：Task 6 只
+  显示管理员验证提示，不创建 AdminPasswordDialog、不调用 AdminModeService。
 - 不出现“忽略错误继续运行”“创建空数据库”等文案。
 
 示例断言：
@@ -1099,6 +1108,8 @@ Expected: FAIL，原因是 Dialog XAML/C# 和 markup contract 尚不存在。
 - [ ] **Step 3: Implement the minimum dialog**
 
 - 复用现有深色工业资源，不创建数据库管理页面，不改变现有主窗口布局。
+- 这是 `MainWindow` 创建前的 startup Window：`WindowStartupLocation=CenterScreen`、
+  `ShowInTaskbar=True`，不设置 MainWindow Owner；关闭动作默认是 `Exit`。
 - `Corrupt` 状态只允许用户选择 gate 在本次启动中已经通过 `FullValidation` 的 candidate；
   Dialog 不接受仅凭合法文件名的 backup。本身不复制、替换或删除数据库文件。
 - `Unavailable` 只显示重试、打开数据目录、退出。
@@ -1107,7 +1118,11 @@ Expected: FAIL，原因是 Dialog XAML/C# 和 markup contract 尚不存在。
 - marker 状态显示 interrupted recovery，不自动静默续跑；操作结果通过
   `DatabaseRecoveryDialogResult` 返回给 App。可恢复前置条件满足时显示 ResumeRecovery，
   同时保留 Retry、打开数据目录和退出。
-- 所有按钮都只返回动作，实际恢复由 `SqliteRecoveryService` 执行。
+- `RecoveryStateError` 只显示错误信息、重试、打开目录和退出；不显示 Recover/Resume。
+- Recover/Resume 附近显示“执行恢复前需要管理员验证”，但 Task 6 不打开
+  `AdminPasswordDialog`，不调用 `AdminModeService.EnterAdminMode`；认证由 Task 7 App
+  orchestration 在调用 recovery service 前统一完成。
+- 所有按钮都只返回动作，实际恢复由后续 App/recovery 流程执行；Task 6 不调用 `SqliteRecoveryService`。
 
 - [ ] **Step 4: Run GREEN and regression**
 
@@ -1156,6 +1171,13 @@ git commit -m "feat: add sqlite startup recovery dialog"
 - `App_routes_resume_recovery_before_store_creation`：InterruptedRecovery 的
   `ResumeRecovery` 调用 `SqliteRecoveryService.ResumeInterruptedRecovery`，成功后重新做
   startup/final health gate，失败时不创建 Store/MainWindow/RFID。
+- `Recover_requires_admin_verification_before_recovery_service`、
+  `Resume_recovery_requires_admin_verification_before_recovery_service`：非管理员先显示
+  `AdminPasswordDialog`，认证成功前不得调用 recovery service。
+- `Admin_cancel_never_invokes_recovery_service`：取消或验证失败只能返回安全处理路径。
+- `Startup_dialog_uses_explicit_shutdown_until_main_window_is_created`：startup dialog 不被
+  WPF 自动认定为最终 MainWindow；正常 MainWindow 创建并赋值后才恢复
+  `OnMainWindowClose`。
 
 另在 `DatabaseStartupGateTests` 中保留实际决策测试；markup tests只约束 ownership/顺序，
 不代替 Infrastructure 行为测试。
@@ -1229,10 +1251,19 @@ resolve production/acceptance paths
 - Acceptance 使用命令行提供的独立 database/log/runtime 路径，跳过生产 backup、
   recovery UI 和 scheduler，不创建 production maintenance Coordinator；仍创建现有业务
   Store 以执行 Acceptance。
+- 对 Recover/ResumeRecovery，App 在调用 recovery service 前检查 `AdminModeService.IsAdmin`。
+  未进入管理员模式时显示现有 `AdminPasswordDialog`；验证失败或取消不得调用
+  `Recover`/`ResumeInterruptedRecovery`，而应返回 recovery dialog 或安全错误路径；已是
+  管理员时不重复验证。
 - `MainWindow` 构造函数改为接收 `SqlitePassageRecordStore`，保留现有 LoadProject、
   Yard manager、报警、Black Box 和双站场逻辑；删除构造函数中的 Store new。
 - App 保存 Store 和 coordinator 字段，后续 Task 8 负责安全停止；MainWindow 不拥有
   数据库基础设施。App 始终是 Store 和 coordinator 的唯一 owner。
+- 当前 `App.xaml` 的 `ShutdownMode=OnMainWindowClose` 与 startup dialog 先于 MainWindow
+  显示存在风险。Task 7 必须在 startup gate/dialog 阶段使用
+  `ShutdownMode.OnExplicitShutdown`（或等价可测试实现），避免 recovery dialog 被当成最终
+  MainWindow ownership；只有正常业务 MainWindow 创建并赋值给 `Application.MainWindow` 后，
+  才切回 `ShutdownMode.OnMainWindowClose`。
 
 - [ ] **Step 4: Run GREEN and regression**
 

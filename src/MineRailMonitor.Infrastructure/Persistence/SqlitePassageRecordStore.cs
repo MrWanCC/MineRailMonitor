@@ -6,7 +6,7 @@ namespace MineRailMonitor.Infrastructure.Persistence;
 
 public sealed class SqlitePassageRecordStore : IPassageRecordStore, IDisposable
 {
-    internal const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 3;
     private const string ConnectionPragmas =
         "PRAGMA journal_mode=WAL;" +
         "PRAGMA synchronous=FULL;" +

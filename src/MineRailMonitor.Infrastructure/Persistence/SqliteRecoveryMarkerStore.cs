@@ -25,15 +25,26 @@ public sealed class SqliteRecoveryMarkerStore
 
     public SqliteRecoveryMarker? ReadMarker()
     {
-        if (!File.Exists(MarkerPath))
-        {
-            return null;
-        }
-
         string json;
         try
         {
-            json = File.ReadAllText(MarkerPath, Encoding.UTF8);
+            using var stream = new FileStream(
+                MarkerPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                4096,
+                FileOptions.SequentialScan);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            json = reader.ReadToEnd();
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -103,20 +114,18 @@ public sealed class SqliteRecoveryMarkerStore
 
     public void DeleteMarker()
     {
-        if (File.Exists(MarkerPath))
-        {
-            File.Delete(MarkerPath);
-        }
+        File.Delete(MarkerPath);
     }
 
-    private static void ValidateMarker(SqliteRecoveryMarker? marker)
+    private void ValidateMarker(SqliteRecoveryMarker? marker)
     {
         if (marker is null ||
             !marker.RecoveryStarted ||
             marker.StartedAt == default ||
             !IsAbsolutePath(marker.SourceBackupPath) ||
-            !IsAbsolutePath(marker.CorruptBundlePath) ||
-            !IsAbsolutePath(marker.StagingPath))
+            !IsStagingPathInScope(marker.StagingPath) ||
+            !IsBundlePathInScope(marker.CorruptBundlePath) ||
+            !IsSha256(marker.BundleManifestSha256))
         {
             throw new InvalidDataException("SQLite recovery marker is missing required fields.");
         }
@@ -124,4 +133,42 @@ public sealed class SqliteRecoveryMarkerStore
 
     private static bool IsAbsolutePath(string? path) =>
         !string.IsNullOrWhiteSpace(path) && Path.IsPathRooted(path);
+
+    private bool IsStagingPathInScope(string? path) =>
+        IsAbsolutePath(path) &&
+        PathEquals(
+            Path.GetFullPath(path!),
+            Path.Combine(DataDirectory, "MineRailMonitor.restore.tmp.db"));
+
+    private bool IsBundlePathInScope(string? path)
+    {
+        if (!IsAbsolutePath(path))
+        {
+            return false;
+        }
+
+        var bundlePath = Path.GetFullPath(path!);
+        var corruptRoot = Path.GetFullPath(Path.Combine(DataDirectory, "Corrupt"));
+        var parent = Path.GetDirectoryName(bundlePath);
+        return parent is not null &&
+               PathEquals(parent, corruptRoot) &&
+               !PathEquals(bundlePath, corruptRoot);
+    }
+
+    private static bool IsSha256(string? value)
+    {
+        if (value is null || value.Length != 64)
+        {
+            return false;
+        }
+
+        return value.All(character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f' or >= 'A' and <= 'F');
+    }
+
+    private static bool PathEquals(string left, string right) =>
+        string.Equals(
+            Path.GetFullPath(left),
+            Path.GetFullPath(right),
+            StringComparison.OrdinalIgnoreCase);
 }

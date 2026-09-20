@@ -1,3 +1,4 @@
+using System.Data.SQLite;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -29,6 +30,60 @@ public sealed class SqliteRecoveryServiceTests
         Assert.Equal(before, workspace.SnapshotProductionFiles());
         Assert.False(File.Exists(workspace.MarkerPath));
         Assert.DoesNotContain(health.Calls, call => call.Path == workspace.ProductionPath);
+    }
+
+    [Fact]
+    public void Marker_path_directory_is_not_treated_as_absent()
+    {
+        using var workspace = RecoveryWorkspace.Create();
+        Directory.CreateDirectory(workspace.MarkerPath);
+        var store = new SqliteRecoveryMarkerStore(workspace.DataDirectory);
+
+        Assert.Throws<InvalidDataException>(() => store.ReadMarker());
+    }
+
+    [Fact]
+    public void Recover_does_not_report_success_when_marker_cannot_be_deleted()
+    {
+        using var workspace = RecoveryWorkspace.Create();
+        var phases = new List<SqliteRecoveryPhase>();
+        var service = CreateService(
+            workspace,
+            new RecordingHealthChecker((_, _, _) => SqliteDatabaseHealthState.Healthy),
+            phase =>
+            {
+                phases.Add(phase);
+                if (phase == SqliteRecoveryPhase.FinalHealthCheckCompleted)
+                {
+                    File.Delete(workspace.MarkerPath);
+                    Directory.CreateDirectory(workspace.MarkerPath);
+                }
+            });
+
+        var result = service.Recover(workspace.ProductionPath, workspace.Candidate);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(
+            SqliteRecoveryPhase.FinalHealthCheckCompleted,
+            phases[phases.Count - 1]);
+        Assert.True(Directory.Exists(workspace.MarkerPath));
+    }
+
+    [Fact]
+    public void Marker_write_failure_does_not_report_unpersisted_marker()
+    {
+        using var workspace = RecoveryWorkspace.Create();
+        File.WriteAllText(workspace.TemporaryMarkerPath, "stale marker write");
+        var before = workspace.SnapshotProductionFiles();
+        var service = CreateService(workspace, new RecordingHealthChecker((_, _, _) =>
+            SqliteDatabaseHealthState.Healthy));
+
+        var result = service.Recover(workspace.ProductionPath, workspace.Candidate);
+
+        Assert.False(result.Succeeded);
+        Assert.Null(result.Marker);
+        Assert.False(File.Exists(workspace.MarkerPath));
+        Assert.Equal(before, workspace.SnapshotProductionFiles());
     }
 
     [Fact]
@@ -131,8 +186,7 @@ public sealed class SqliteRecoveryServiceTests
         using var workspace = RecoveryWorkspace.Create();
         var marker = workspace.CreateMarker();
         workspace.CreateBundle(marker.CorruptBundlePath);
-        var markerStore = new SqliteRecoveryMarkerStore(workspace.DataDirectory);
-        markerStore.WriteMarker(marker);
+        workspace.PersistMarker(marker);
         var health = new RecordingHealthChecker((_, _, _) => SqliteDatabaseHealthState.Healthy);
         var service = CreateService(workspace, health);
 
@@ -154,7 +208,7 @@ public sealed class SqliteRecoveryServiceTests
         var marker = workspace.CreateMarker();
         workspace.CreateBundle(marker.CorruptBundlePath, includeSidecars: true);
         var before = SnapshotDirectory(marker.CorruptBundlePath);
-        new SqliteRecoveryMarkerStore(workspace.DataDirectory).WriteMarker(marker);
+        workspace.PersistMarker(marker);
         var service = CreateService(workspace, new RecordingHealthChecker((_, _, _) =>
             SqliteDatabaseHealthState.Healthy));
 
@@ -169,7 +223,7 @@ public sealed class SqliteRecoveryServiceTests
     {
         using var workspace = RecoveryWorkspace.Create();
         var marker = workspace.CreateMarker();
-        new SqliteRecoveryMarkerStore(workspace.DataDirectory).WriteMarker(marker);
+        workspace.PersistMarker(marker);
         var before = workspace.SnapshotProductionFiles();
         var service = CreateService(workspace, new RecordingHealthChecker((_, _, _) =>
             SqliteDatabaseHealthState.Healthy));
@@ -187,7 +241,7 @@ public sealed class SqliteRecoveryServiceTests
         using var workspace = RecoveryWorkspace.Create();
         var marker = workspace.CreateMarker();
         workspace.CreateBundle(marker.CorruptBundlePath);
-        new SqliteRecoveryMarkerStore(workspace.DataDirectory).WriteMarker(marker);
+        workspace.PersistMarker(marker);
         var before = SnapshotDirectory(marker.CorruptBundlePath);
         var service = CreateService(workspace, new RecordingHealthChecker((path, _, _) =>
             path == marker.SourceBackupPath
@@ -210,7 +264,7 @@ public sealed class SqliteRecoveryServiceTests
         workspace.CreateBundle(marker.CorruptBundlePath);
         File.Delete(workspace.ProductionPath + "-wal");
         File.Delete(workspace.ProductionPath + "-shm");
-        new SqliteRecoveryMarkerStore(workspace.DataDirectory).WriteMarker(marker);
+        workspace.PersistMarker(marker);
         var service = CreateService(workspace, new RecordingHealthChecker((_, _, _) =>
             SqliteDatabaseHealthState.Healthy));
 
@@ -227,7 +281,7 @@ public sealed class SqliteRecoveryServiceTests
         var marker = workspace.CreateMarker();
         workspace.CreateBundle(marker.CorruptBundlePath);
         File.Delete(workspace.ProductionPath);
-        new SqliteRecoveryMarkerStore(workspace.DataDirectory).WriteMarker(marker);
+        workspace.PersistMarker(marker);
         var service = CreateService(workspace, new RecordingHealthChecker((_, _, _) =>
             SqliteDatabaseHealthState.Healthy));
 
@@ -244,7 +298,7 @@ public sealed class SqliteRecoveryServiceTests
         using var workspace = RecoveryWorkspace.Create();
         var marker = workspace.CreateMarker();
         workspace.CreateBundle(marker.CorruptBundlePath);
-        new SqliteRecoveryMarkerStore(workspace.DataDirectory).WriteMarker(marker);
+        workspace.PersistMarker(marker);
         var service = CreateService(workspace, new RecordingHealthChecker((path, _, _) =>
             path == marker.StagingPath
                 ? SqliteDatabaseHealthState.Healthy
@@ -264,7 +318,7 @@ public sealed class SqliteRecoveryServiceTests
     {
         using var workspace = RecoveryWorkspace.Create();
         var marker = workspace.CreateMarker();
-        new SqliteRecoveryMarkerStore(workspace.DataDirectory).WriteMarker(marker);
+        workspace.PersistMarker(marker);
         var health = new RecordingHealthChecker((_, _, _) => SqliteDatabaseHealthState.Healthy);
         var service = CreateService(workspace, health);
         var before = workspace.SnapshotProductionFiles();
@@ -305,7 +359,7 @@ public sealed class SqliteRecoveryServiceTests
         using var workspace = RecoveryWorkspace.Create();
         var marker = workspace.CreateMarker();
         workspace.CreateBundle(marker.CorruptBundlePath);
-        new SqliteRecoveryMarkerStore(workspace.DataDirectory).WriteMarker(marker);
+        workspace.PersistMarker(marker);
         File.AppendAllText(Path.Combine(marker.CorruptBundlePath, "MineRailMonitor.db"), "tampered");
         var before = workspace.SnapshotProductionFiles();
         var health = new RecordingHealthChecker((_, _, _) => SqliteDatabaseHealthState.Healthy);
@@ -326,7 +380,47 @@ public sealed class SqliteRecoveryServiceTests
         var marker = workspace.CreateMarker();
         workspace.CreateBundle(marker.CorruptBundlePath, includeSidecars: true);
         File.Delete(Path.Combine(marker.CorruptBundlePath, "MineRailMonitor.db-wal"));
-        new SqliteRecoveryMarkerStore(workspace.DataDirectory).WriteMarker(marker);
+        workspace.PersistMarker(marker);
+        var before = workspace.SnapshotProductionFiles();
+        var service = CreateService(workspace, new RecordingHealthChecker((_, _, _) =>
+            SqliteDatabaseHealthState.Healthy));
+
+        var result = service.ResumeInterruptedRecovery(workspace.ProductionPath, marker);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(before, workspace.SnapshotProductionFiles());
+        Assert.True(File.Exists(workspace.MarkerPath));
+    }
+
+    [Fact]
+    public void Resume_rejects_manifest_that_omits_existing_sidecar_evidence()
+    {
+        using var workspace = RecoveryWorkspace.Create(includeSidecars: true);
+        var marker = workspace.CreateMarker();
+        workspace.CreateBundle(marker.CorruptBundlePath, includeSidecars: true);
+        workspace.RewriteManifest(marker.CorruptBundlePath, includeSidecars: false);
+        workspace.PersistMarker(marker);
+        var before = workspace.SnapshotProductionFiles();
+        var service = CreateService(workspace, new RecordingHealthChecker((_, _, _) =>
+            SqliteDatabaseHealthState.Healthy));
+
+        var result = service.ResumeInterruptedRecovery(workspace.ProductionPath, marker);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(before, workspace.SnapshotProductionFiles());
+        Assert.True(File.Exists(workspace.MarkerPath));
+    }
+
+    [Fact]
+    public void Resume_rejects_tampered_manifest_even_if_manifest_is_self_consistent()
+    {
+        using var workspace = RecoveryWorkspace.Create();
+        var marker = workspace.CreateMarker();
+        workspace.CreateBundle(marker.CorruptBundlePath);
+        workspace.PersistMarker(marker);
+        File.AppendAllText(
+            Path.Combine(marker.CorruptBundlePath, "bundle-manifest.json"),
+            Environment.NewLine);
         var before = workspace.SnapshotProductionFiles();
         var service = CreateService(workspace, new RecordingHealthChecker((_, _, _) =>
             SqliteDatabaseHealthState.Healthy));
@@ -354,6 +448,89 @@ public sealed class SqliteRecoveryServiceTests
     }
 
     [Fact]
+    public void Marker_staging_path_outside_data_directory_is_invalid()
+    {
+        using var workspace = RecoveryWorkspace.Create();
+        var marker = workspace.CreateMarker(stagingPath: Path.Combine(workspace.Root, "external-staging.db"));
+        workspace.CreateBundle(marker.CorruptBundlePath);
+        File.WriteAllText(workspace.MarkerPath, workspace.SerializeMarker(marker));
+
+        var service = CreateService(workspace, new RecordingHealthChecker((_, _, _) =>
+            SqliteDatabaseHealthState.Healthy));
+
+        var result = service.ResumeInterruptedRecovery(workspace.ProductionPath, marker);
+
+        Assert.False(result.Succeeded);
+        Assert.True(File.Exists(workspace.MarkerPath));
+    }
+
+    [Fact]
+    public void Marker_bundle_path_outside_corrupt_root_is_invalid()
+    {
+        using var workspace = RecoveryWorkspace.Create();
+        var marker = workspace.CreateMarker(
+            corruptBundlePath: Path.Combine(workspace.Root, "external-bundle"));
+        File.WriteAllText(workspace.MarkerPath, workspace.SerializeMarker(marker));
+        var service = CreateService(workspace, new RecordingHealthChecker((_, _, _) =>
+            SqliteDatabaseHealthState.Healthy));
+
+        Assert.Throws<InvalidDataException>(() => service.ReadMarker());
+    }
+
+    [Fact]
+    public void Resume_with_out_of_scope_staging_path_does_not_delete_external_file()
+    {
+        using var workspace = RecoveryWorkspace.Create();
+        var externalPath = Path.Combine(workspace.Root, "external-staging.db");
+        File.WriteAllText(externalPath, "must remain");
+        var marker = workspace.CreateMarker(stagingPath: externalPath);
+        workspace.CreateBundle(marker.CorruptBundlePath);
+        File.WriteAllText(workspace.MarkerPath, workspace.SerializeMarker(marker));
+        var service = CreateService(workspace, new RecordingHealthChecker((_, _, _) =>
+            SqliteDatabaseHealthState.Healthy));
+
+        var result = service.ResumeInterruptedRecovery(workspace.ProductionPath, marker);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("must remain", File.ReadAllText(externalPath));
+    }
+
+    [Fact]
+    public void Recover_refuses_production_path_outside_data_directory()
+    {
+        using var workspace = RecoveryWorkspace.Create();
+        var externalProduction = Path.Combine(workspace.Root, "external-production.db");
+        File.WriteAllText(externalProduction, "must remain");
+        var health = new RecordingHealthChecker((_, _, _) => SqliteDatabaseHealthState.Healthy);
+        var service = CreateService(workspace, health);
+
+        var result = service.Recover(externalProduction, workspace.Candidate);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("must remain", File.ReadAllText(externalProduction));
+        Assert.Empty(health.Calls);
+    }
+
+    [Fact]
+    public void Marker_json_uses_expected_camel_case_contract()
+    {
+        using var workspace = RecoveryWorkspace.Create();
+        var marker = workspace.CreateMarker();
+        workspace.PersistMarker(marker);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(workspace.MarkerPath));
+        var properties = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
+
+        Assert.Contains("recoveryStarted", properties);
+        Assert.Contains("sourceBackupPath", properties);
+        Assert.Contains("corruptBundlePath", properties);
+        Assert.Contains("stagingPath", properties);
+        Assert.Contains("startedAt", properties);
+        Assert.Contains("bundleManifestSha256", properties);
+        Assert.DoesNotContain("SourceBackupPath", properties);
+    }
+
+    [Fact]
     public void Recover_does_not_accept_unsupported_schema_candidate()
     {
         using var workspace = RecoveryWorkspace.Create();
@@ -367,6 +544,35 @@ public sealed class SqliteRecoveryServiceTests
         Assert.Single(health.Calls);
         Assert.False(File.Exists(workspace.MarkerPath));
         Assert.Empty(Directory.GetDirectories(workspace.CorruptRoot));
+    }
+
+    [Fact]
+    public void Recover_real_sqlite_backup_produces_queryable_healthy_production_database()
+    {
+        using var workspace = RecoveryWorkspace.Create();
+        workspace.CreateRealCandidate();
+        var checker = new SqliteDatabaseHealthChecker(new FixedTimeProvider(), new TestLogger());
+        var service = new SqliteRecoveryService(
+            checker,
+            workspace.DataDirectory,
+            new TestLogger(),
+            new FixedTimeProvider());
+
+        var result = service.Recover(workspace.ProductionPath, workspace.Candidate);
+
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        Assert.False(File.Exists(workspace.MarkerPath));
+        var finalHealth = checker.Inspect(
+            workspace.ProductionPath,
+            SqliteInspectionMode.FullValidation);
+        Assert.Equal(SqliteDatabaseHealthState.Healthy, finalHealth.State);
+        using var connection = new SQLiteConnection($"Data Source={workspace.ProductionPath};Version=3;Read Only=True;");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM known_row;";
+        Assert.Equal("candidate-value", Convert.ToString(command.ExecuteScalar()));
+        var bundle = Assert.Single(Directory.GetDirectories(workspace.CorruptRoot));
+        Assert.Equal(workspace.ProductionBytes, File.ReadAllBytes(Path.Combine(bundle, "MineRailMonitor.db")));
     }
 
     private static SqliteRecoveryService CreateService(
@@ -478,6 +684,8 @@ public sealed class SqliteRecoveryServiceTests
 
         public string MarkerPath => Path.Combine(DataDirectory, ".sqlite-recovery-in-progress");
 
+        public string TemporaryMarkerPath => MarkerPath + ".tmp";
+
         public byte[] ProductionBytes { get; }
 
         public byte[] CandidateBytes { get; }
@@ -501,12 +709,15 @@ public sealed class SqliteRecoveryServiceTests
             return workspace;
         }
 
-        public SqliteRecoveryMarker CreateMarker() =>
+        public SqliteRecoveryMarker CreateMarker(
+            string? corruptBundlePath = null,
+            string? stagingPath = null) =>
             new(
                 CandidatePath,
-                Path.Combine(CorruptRoot, "20260920_103000_000"),
-                Path.Combine(DataDirectory, "MineRailMonitor.restore.tmp.db"),
-                StartedAt);
+                corruptBundlePath ?? Path.Combine(CorruptRoot, "20260920_103000_000"),
+                stagingPath ?? StagingPath,
+                StartedAt,
+                new string('0', 64));
 
         public void CreateBundle(string bundlePath, bool includeSidecars = false)
         {
@@ -530,6 +741,88 @@ public sealed class SqliteRecoveryServiceTests
             File.WriteAllText(
                 Path.Combine(bundlePath, "bundle-manifest.json"),
                 JsonSerializer.Serialize(new { files }));
+        }
+
+        public void RewriteManifest(
+            string bundlePath,
+            bool includeSidecars,
+            bool alterLength = false)
+        {
+            var evidence = new List<object>
+            {
+                new
+                {
+                    fileName = "MineRailMonitor.db",
+                    length = alterLength
+                        ? new FileInfo(Path.Combine(bundlePath, "MineRailMonitor.db")).Length + 1
+                        : new FileInfo(Path.Combine(bundlePath, "MineRailMonitor.db")).Length,
+                    sha256 = Sha256(Path.Combine(bundlePath, "MineRailMonitor.db"))
+                }
+            };
+            if (includeSidecars)
+            {
+                evidence.Add(new
+                {
+                    fileName = "MineRailMonitor.db-wal",
+                    length = new FileInfo(Path.Combine(bundlePath, "MineRailMonitor.db-wal")).Length,
+                    sha256 = Sha256(Path.Combine(bundlePath, "MineRailMonitor.db-wal"))
+                });
+                evidence.Add(new
+                {
+                    fileName = "MineRailMonitor.db-shm",
+                    length = new FileInfo(Path.Combine(bundlePath, "MineRailMonitor.db-shm")).Length,
+                    sha256 = Sha256(Path.Combine(bundlePath, "MineRailMonitor.db-shm"))
+                });
+            }
+
+            File.WriteAllText(
+                Path.Combine(bundlePath, "bundle-manifest.json"),
+                JsonSerializer.Serialize(new { files = evidence }));
+        }
+
+        public void CreateRealCandidate()
+        {
+            File.Delete(CandidatePath);
+            using var connection = new SQLiteConnection($"Data Source={CandidatePath};Version=3;");
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = @"
+PRAGMA user_version=3;
+CREATE TABLE known_row (value TEXT NOT NULL);
+INSERT INTO known_row (value) VALUES ('candidate-value');";
+            command.ExecuteNonQuery();
+        }
+
+        public void PersistMarker(SqliteRecoveryMarker marker)
+        {
+            if (Directory.Exists(marker.CorruptBundlePath))
+            {
+                marker.BundleManifestSha256 = Sha256(Path.Combine(
+                    marker.CorruptBundlePath,
+                    "bundle-manifest.json"));
+            }
+
+            new SqliteRecoveryMarkerStore(DataDirectory).WriteMarker(marker);
+        }
+
+        public string SerializeMarker(SqliteRecoveryMarker marker)
+        {
+            if (Directory.Exists(marker.CorruptBundlePath))
+            {
+                marker.BundleManifestSha256 = Sha256(Path.Combine(
+                    marker.CorruptBundlePath,
+                    "bundle-manifest.json"));
+            }
+
+            return JsonSerializer.Serialize(new
+            {
+                recoveryStarted = marker.RecoveryStarted,
+                sourceBackupPath = marker.SourceBackupPath,
+                corruptBundlePath = marker.CorruptBundlePath,
+                stagingPath = marker.StagingPath,
+                startedAt = marker.StartedAt,
+                bundleManifestSha256 = marker.BundleManifestSha256
+            });
         }
 
         public Dictionary<string, string> SnapshotProductionFiles() =>

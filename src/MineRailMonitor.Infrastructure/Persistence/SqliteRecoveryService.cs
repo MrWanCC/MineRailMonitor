@@ -59,6 +59,8 @@ public sealed class SqliteRecoveryService
                 throw new ArgumentNullException(nameof(candidate));
             }
 
+            EnsureProductionPath(productionPath);
+            var startedAt = _timeProvider.UtcNow;
             var candidatePath = Path.GetFullPath(candidate.Path);
             var candidateHealth = InspectHealthy(candidatePath);
             if (candidateHealth.State != SqliteDatabaseHealthState.Healthy)
@@ -77,16 +79,17 @@ public sealed class SqliteRecoveryService
 
             Notify(SqliteRecoveryPhase.StagingValidated);
 
-            var startedAt = _timeProvider.UtcNow;
-            var bundlePath = SaveCorruptBundle(productionPath, startedAt);
+            var bundle = SaveCorruptBundle(productionPath, startedAt);
             Notify(SqliteRecoveryPhase.CorruptBundleSaved);
 
-            marker = new SqliteRecoveryMarker(
+            var pendingMarker = new SqliteRecoveryMarker(
                 candidatePath,
-                bundlePath,
+                bundle.Path,
                 stagingPath,
-                startedAt);
-            _markerStore.WriteMarker(marker);
+                startedAt,
+                bundle.ManifestSha256);
+            _markerStore.WriteMarker(pendingMarker);
+            marker = pendingMarker;
             Notify(SqliteRecoveryPhase.RecoveryMarkerPersisted);
 
             RemoveProductionSidecars(productionPath);
@@ -132,7 +135,11 @@ public sealed class SqliteRecoveryService
             }
 
             var productionPath = GetFullPath(productionDatabasePath, nameof(productionDatabasePath));
-            ValidateCorruptBundle(diskMarker.CorruptBundlePath, productionPath);
+            EnsureProductionPath(productionPath);
+            ValidateCorruptBundle(
+                diskMarker.CorruptBundlePath,
+                productionPath,
+                diskMarker.BundleManifestSha256);
 
             var sourceHealth = InspectHealthy(diskMarker.SourceBackupPath);
             if (sourceHealth.State != SqliteDatabaseHealthState.Healthy)
@@ -179,7 +186,7 @@ public sealed class SqliteRecoveryService
         return result;
     }
 
-    private string SaveCorruptBundle(string productionPath, DateTimeOffset startedAt)
+    private SavedCorruptBundle SaveCorruptBundle(string productionPath, DateTimeOffset startedAt)
     {
         if (!File.Exists(productionPath))
         {
@@ -198,12 +205,13 @@ public sealed class SqliteRecoveryService
 
         var manifestPath = Path.Combine(bundlePath, ManifestFileName);
         var manifest = new BundleManifest { Files = evidence };
-        File.WriteAllText(
+        WriteTextDurably(
             manifestPath,
             JsonConvert.SerializeObject(manifest, Formatting.Indented),
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        ValidateCorruptBundle(bundlePath, productionPath);
-        return bundlePath;
+        var manifestSha256 = Sha256File(manifestPath);
+        ValidateCorruptBundle(bundlePath, productionPath, manifestSha256);
+        return new SavedCorruptBundle(bundlePath, manifestSha256);
     }
 
     private static string CreateUniqueBundlePath(string corruptRoot, DateTimeOffset startedAt)
@@ -237,7 +245,7 @@ public sealed class SqliteRecoveryService
         }
 
         var destinationPath = Path.Combine(bundlePath, Path.GetFileName(sourcePath));
-        File.Copy(sourcePath, destinationPath, overwrite: false);
+        CopyFileDurably(sourcePath, destinationPath);
         var source = DescribeEvidence(sourcePath);
         var destination = DescribeEvidence(destinationPath);
         if (source.Length != destination.Length ||
@@ -255,7 +263,10 @@ public sealed class SqliteRecoveryService
         ICollection<BundleEvidence> evidence) =>
         CopyEvidence(sourcePath, bundlePath, evidence, required: false);
 
-    private static void ValidateCorruptBundle(string bundlePath, string productionPath)
+    private static void ValidateCorruptBundle(
+        string bundlePath,
+        string productionPath,
+        string? expectedManifestSha256 = null)
     {
         if (!Directory.Exists(bundlePath))
         {
@@ -266,6 +277,15 @@ public sealed class SqliteRecoveryService
         if (!File.Exists(manifestPath))
         {
             throw new InvalidDataException("SQLite recovery corrupt bundle manifest is missing.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(expectedManifestSha256) &&
+            !string.Equals(
+                Sha256File(manifestPath),
+                expectedManifestSha256,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("SQLite recovery corrupt bundle manifest hash mismatch.");
         }
 
         BundleManifest? manifest;
@@ -321,19 +341,76 @@ public sealed class SqliteRecoveryService
         {
             throw new InvalidDataException("SQLite recovery bundle does not contain the production database evidence.");
         }
+
+        var actualNames = new HashSet<string>(
+            Directory.GetFiles(bundlePath, "*", SearchOption.TopDirectoryOnly)
+                .Select(Path.GetFileName)
+                .Where(name => !string.Equals(name, ManifestFileName, StringComparison.OrdinalIgnoreCase))!,
+            StringComparer.OrdinalIgnoreCase);
+        if (!actualNames.SetEquals(seen))
+        {
+            throw new InvalidDataException("SQLite recovery bundle evidence set does not match its manifest.");
+        }
     }
 
     private static BundleEvidence DescribeEvidence(string path)
     {
-        using var sha256 = SHA256.Create();
         return new BundleEvidence
         {
             FileName = Path.GetFileName(path),
             Length = new FileInfo(path).Length,
-            Sha256 = BitConverter.ToString(sha256.ComputeHash(File.ReadAllBytes(path)))
-                .Replace("-", string.Empty)
-                .ToLowerInvariant()
+            Sha256 = Sha256File(path)
         };
+    }
+
+    private static string Sha256File(string path)
+    {
+        using var sha256 = SHA256.Create();
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            64 * 1024,
+            FileOptions.SequentialScan);
+        return BitConverter.ToString(sha256.ComputeHash(stream))
+            .Replace("-", string.Empty)
+            .ToLowerInvariant();
+    }
+
+    private static void CopyFileDurably(string sourcePath, string destinationPath)
+    {
+        using var source = new FileStream(
+            sourcePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            64 * 1024,
+            FileOptions.SequentialScan);
+        using var destination = new FileStream(
+            destinationPath,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            64 * 1024,
+            FileOptions.WriteThrough);
+        source.CopyTo(destination);
+        destination.Flush(true);
+    }
+
+    private static void WriteTextDurably(string path, string text, Encoding encoding)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            4096,
+            FileOptions.WriteThrough);
+        using var writer = new StreamWriter(stream, encoding);
+        writer.Write(text);
+        writer.Flush();
+        stream.Flush(true);
     }
 
     private static void PrepareStaging(string stagingPath)
@@ -386,7 +463,20 @@ public sealed class SqliteRecoveryService
         string.Equals(left.SourceBackupPath, right.SourceBackupPath, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(left.CorruptBundlePath, right.CorruptBundlePath, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(left.StagingPath, right.StagingPath, StringComparison.OrdinalIgnoreCase) &&
-        left.StartedAt == right.StartedAt;
+        left.StartedAt == right.StartedAt &&
+        string.Equals(left.BundleManifestSha256, right.BundleManifestSha256, StringComparison.OrdinalIgnoreCase);
+
+    private void EnsureProductionPath(string productionPath)
+    {
+        var expectedPath = Path.Combine(_dataDirectory, "MineRailMonitor.db");
+        if (!string.Equals(
+                Path.GetFullPath(productionPath),
+                Path.GetFullPath(expectedPath),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("SQLite recovery production path is outside the data directory contract.");
+        }
+    }
 
     private static string GetFullPath(string path, string parameterName)
     {
@@ -421,5 +511,18 @@ public sealed class SqliteRecoveryService
 
         [JsonProperty("sha256")]
         public string Sha256 { get; set; } = string.Empty;
+    }
+
+    private sealed class SavedCorruptBundle
+    {
+        public SavedCorruptBundle(string path, string manifestSha256)
+        {
+            Path = path;
+            ManifestSha256 = manifestSha256;
+        }
+
+        public string Path { get; }
+
+        public string ManifestSha256 { get; }
     }
 }

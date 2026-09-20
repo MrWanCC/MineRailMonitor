@@ -252,13 +252,92 @@ public sealed class DatabaseStartupOwnershipMarkupTests
     }
 
     [Fact]
-    public void App_shutdown_disposes_coordinator_before_store()
+    public void App_database_shutdown_stops_coordinator_before_store_dispose()
+    {
+        var shutdown = ExtractMethod(ReadApp(), "private async Task StopDatabaseInfrastructureCoreAsync");
+
+        Assert.True(
+            shutdown.IndexOf("await coordinator.StopAsync()", StringComparison.Ordinal) <
+            shutdown.IndexOf("coordinator.Dispose()", StringComparison.Ordinal));
+        Assert.True(
+            shutdown.IndexOf("coordinator.Dispose()", StringComparison.Ordinal) <
+            shutdown.IndexOf("store.Dispose()", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void OnExit_uses_the_same_database_shutdown_entrypoint()
     {
         var onExit = ExtractMethod(ReadApp(), "protected override void OnExit");
 
-        Assert.True(
-            onExit.IndexOf("_databaseMaintenanceCoordinator?.Dispose()", StringComparison.Ordinal) <
-            onExit.IndexOf("_passageRecordStore?.Dispose()", StringComparison.Ordinal));
+        Assert.Contains("StopDatabaseInfrastructureAsync().GetAwaiter().GetResult()", onExit);
+        Assert.DoesNotContain("_databaseMaintenanceCoordinator?.Dispose()", onExit);
+        Assert.DoesNotContain("_passageRecordStore?.Dispose()", onExit);
+    }
+
+    [Fact]
+    public void Repeated_database_shutdown_calls_share_the_same_inflight_task()
+    {
+        var app = ReadApp();
+        var method = ExtractMethod(app, "public Task StopDatabaseInfrastructureAsync");
+
+        Assert.Contains("private readonly object _databaseShutdownSyncRoot = new();", app);
+        Assert.Contains("private Task? _databaseShutdownTask;", app);
+        Assert.Contains("lock (_databaseShutdownSyncRoot)", method);
+        Assert.Contains("_databaseShutdownTask ??= StopDatabaseInfrastructureCoreAsync()", method);
+    }
+
+    [Fact]
+    public void Shutdown_order_is_runtime_then_coordinator_then_store()
+    {
+        var method = ExtractMethod(ReadMainWindow(), "private async Task StopRuntimeThenCloseAsync");
+
+        Assert.True(method.IndexOf("_clockTimer.Stop()", StringComparison.Ordinal) <
+                    method.IndexOf("_yardCommunicationManager.Dispose()", StringComparison.Ordinal));
+        Assert.True(method.IndexOf("_yardCommunicationManager.Dispose()", StringComparison.Ordinal) <
+                    method.IndexOf("_rawPacketBlackBoxWriter.Dispose()", StringComparison.Ordinal));
+        Assert.True(method.IndexOf("_rawPacketBlackBoxWriter.Dispose()", StringComparison.Ordinal) <
+                    method.IndexOf("StopDatabaseInfrastructureAsync()", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void First_close_is_cancelled_before_any_await()
+    {
+        var method = ExtractMethod(ReadMainWindow(), "private async void OnWindowClosing");
+        var cancelIndex = method.IndexOf("e.Cancel = true", StringComparison.Ordinal);
+        var awaitIndex = method.IndexOf("await ", StringComparison.Ordinal);
+        var closeGuardIndex = method.IndexOf("if (_closeInProgress)", StringComparison.Ordinal);
+
+        Assert.True(cancelIndex >= 0);
+        Assert.True(closeGuardIndex > cancelIndex);
+        Assert.True(awaitIndex > cancelIndex);
+        Assert.Contains("_closeInProgress = true", method);
+    }
+
+    [Fact]
+    public void Repeated_close_during_shutdown_does_not_start_second_shutdown()
+    {
+        var method = ExtractMethod(ReadMainWindow(), "private async void OnWindowClosing");
+
+        Assert.Contains("if (_closeInProgress)", method);
+        Assert.Contains("return", method.Substring(method.IndexOf("if (_closeInProgress)", StringComparison.Ordinal)));
+        Assert.Contains("await StopRuntimeThenCloseAsync()", method);
+    }
+
+    [Fact]
+    public void MainWindow_keeps_black_box_alive_until_manager_is_stopped()
+    {
+        var method = ExtractMethod(ReadMainWindow(), "private async Task StopRuntimeThenCloseAsync");
+
+        Assert.True(method.IndexOf("_yardCommunicationManager.Dispose()", StringComparison.Ordinal) <
+                    method.IndexOf("_rawPacketBlackBoxWriter.Dispose()", StringComparison.Ordinal));
+        Assert.Contains("_yardCommunicationManager.DatagramReceived -=", method);
+        Assert.Contains("_yardCommunicationManager.DatagramSent -=", method);
+    }
+
+    [Fact]
+    public void MainWindow_never_disposes_app_owned_store_during_shutdown()
+    {
+        Assert.DoesNotContain("_passageRecordStore.Dispose()", ReadMainWindow());
     }
 
     private static string ReadApp() => ReadSource("src", "MineRailMonitor", "App.xaml.cs");

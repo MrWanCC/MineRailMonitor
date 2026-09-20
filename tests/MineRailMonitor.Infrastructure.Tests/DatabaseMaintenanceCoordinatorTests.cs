@@ -306,6 +306,34 @@ public sealed class DatabaseMaintenanceCoordinatorTests
     }
 
     [Fact]
+    public async Task StopAsync_is_idempotent_and_returns_same_inflight_task()
+    {
+        using var directory = new TemporaryDirectory();
+        var localNow = CreateLocalNow(1, 0, 0);
+        var delay = new ManualAsyncDelay();
+        var backup = new BlockingBackupService();
+        using var coordinator = CreateCoordinator(directory, backup, localNow, delay);
+
+        await coordinator.StartAsync(CancellationToken.None);
+        await delay.WaitUntilCapturedAsync();
+        delay.ReleaseNext();
+        await backup.WaitUntilFirstCreateAsync();
+
+        var firstStop = coordinator.StopAsync();
+        var secondStop = coordinator.StopAsync();
+
+        Assert.Same(firstStop, secondStop);
+        Assert.False(firstStop.IsCompleted);
+        Assert.False(secondStop.IsCompleted);
+
+        backup.ReleaseCurrent();
+        await Task.WhenAll(firstStop, secondStop);
+
+        Assert.Equal(1, backup.Calls);
+        Assert.Equal(1, backup.MaxConcurrency);
+    }
+
+    [Fact]
     public async Task StopAsync_is_safe_when_scheduler_is_waiting()
     {
         using var directory = new TemporaryDirectory();
@@ -547,6 +575,17 @@ public sealed class DatabaseMaintenanceCoordinatorTests
                 lock (_syncRoot)
                 {
                     return _maxConcurrency;
+                }
+            }
+        }
+
+        public int Calls
+        {
+            get
+            {
+                lock (_syncRoot)
+                {
+                    return _calls;
                 }
             }
         }

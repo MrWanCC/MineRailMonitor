@@ -1295,7 +1295,7 @@ git commit -m "feat: gate sqlite startup before main window"
 **Interfaces:**
 
 - Consumes: `DatabaseMaintenanceCoordinator.StopAsync()`、现有 MainWindow `OnWindowClosing` / `_allowWindowClose`、`YardCommunicationManager.Dispose()`、Raw Packet Black Box lifecycle。
-- Produces: `App.StopDatabaseInfrastructureAsync()`，幂等执行 coordinator stop → coordinator dispose → Store dispose；MainWindow 先停止 manager/runtime，再请求 App 完成数据库 shutdown。
+- Produces: `App.StopDatabaseInfrastructureAsync()`，通过缓存同一个 in-flight `Task` 让并发/重复调用共享 coordinator stop → coordinator dispose → Store dispose；MainWindow 先停止 manager/runtime，再请求 App 完成数据库 shutdown。
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1303,15 +1303,16 @@ git commit -m "feat: gate sqlite startup before main window"
 
 - `StopAsync_waits_for_in_flight_backup_before_store_can_be_disposed`：blocking runner
   未释放时 `StopAsync` 不完成；释放后才完成。
-- `StopAsync_is_idempotent`：连续调用两次不重复启动或 Dispose backup。
+- `StopAsync_is_idempotent_and_returns_same_inflight_task`：连续调用两次返回同一个 in-flight `Task`，不重复启动或 Dispose backup。
 
 在 markup tests 添加：
 
 - `Shutdown_order_is_runtime_then_coordinator_then_store`：`MainWindow.xaml.cs` 中 manager
   停止发生在调用 App database shutdown 之前；`App.xaml.cs` 中 coordinator stop 发生在
   Store dispose 之前。
-- `MainWindow_keeps_black_box_after_manager_stop_until_close_drain`：Black Box Dispose
-  排在 manager Dispose 之后，且 MainWindow 不 Dispose Store。
+- `MainWindow_keeps_black_box_alive_until_manager_is_stopped`：Black Box Dispose 排在
+  manager Dispose 之后，且事件只在 manager 完整停止后解除。
+- `MainWindow_never_disposes_app_owned_store`：MainWindow 不 Dispose App-owned Store。
 
 - [ ] **Step 2: Run RED**
 
@@ -1324,16 +1325,22 @@ Expected: FAIL，原因是 App 没有 shutdown owner 方法，MainWindow 当前�
 
 - [ ] **Step 3: Implement the minimum safe shutdown**
 
-- `App.StopDatabaseInfrastructureAsync()` 使用一次性状态标志，先 `await
-  _databaseMaintenanceCoordinator.StopAsync()`，再 Dispose coordinator，最后 Dispose
-  Store；重复调用直接返回。
-- MainWindow 继续负责停止 `_yardCommunicationManager` 和 Acceptance runtime writer，
-  manager 完整 Dispose 后才解除其 Datagram/Command 事件，再 Dispose Raw Packet Black Box。
-- 复用现有 `OnWindowClosing` 的 `_allowWindowClose`：第一次关闭时取消关闭并执行
-  `StopRuntimeThenCloseAsync`；该方法等待 manager/runtime 和 App 数据库 shutdown 后设置
-  `_allowWindowClose=true` 并重新 `Close()`。
-- `OnWindowClosed` 只做已完成关闭后的最后性清理，不再 Dispose App-owned Store；
-  App `OnExit` 对 shutdown 方法做幂等兜底，确保没有窗口关闭路径遗漏。
+- `App.StopDatabaseInfrastructureAsync()` 在独立锁内缓存并返回同一个
+  `StopDatabaseInfrastructureCoreAsync()` Task。Core 顺序固定为：
+  `await coordinator.StopAsync().ConfigureAwait(false)` → `coordinator.Dispose()` →
+  `Store.Dispose()`。只有对应步骤成功后才清空 owner 字段；coordinator stop 失败时
+  不得 Dispose Store，错误向调用方传播，`OnExit` 只记录错误。
+- MainWindow 的第一次关闭事件必须先无条件设置 `e.Cancel=true`，再用 `_closeInProgress`
+  抑制重复关闭；未保存地图/设置在用户取消时清除该标志并保持窗口打开，不停止 runtime
+  或数据库。通过确认后，`StopRuntimeThenCloseAsync` 固定执行：停止 UI timer →
+  Dispose manager → 解除 manager 事件 → 清空 manager → 写入并 Dispose Acceptance 最终
+  快照 → Dispose Raw Packet Black Box（排空）→ await App database shutdown → 设置
+  `_allowWindowClose=true`、清除 `_closeInProgress` 并重新 `Close()`。
+- 关闭过程中任一 manager、Acceptance/Black Box 或数据库 shutdown 失败都记录错误，不能
+  设置 `_allowWindowClose` 或绕过 coordinator/Store 顺序；清除 `_closeInProgress` 后显示
+  “程序安全关闭失败，请重试退出。”，允许用户重新尝试。`OnWindowClosed` 仅做最终 UI/event
+  清理，不能重复 Dispose runtime、Black Box、Acceptance writer 或 App-owned Store。
+- `OnExit` 只同步等待同一个 `StopDatabaseInfrastructureAsync()` 入口，作为幂等兜底。
 - 维护 coordinator 的 `StopAsync` 取消 scheduler 并等待 in-flight backup，保证 Store
   不会在 backup 仍使用数据库时被 Dispose。
 

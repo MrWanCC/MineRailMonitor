@@ -35,6 +35,8 @@ public partial class App : Application
 
     private SqlitePassageRecordStore? _passageRecordStore;
     private DatabaseMaintenanceCoordinator? _databaseMaintenanceCoordinator;
+    private readonly object _databaseShutdownSyncRoot = new();
+    private Task? _databaseShutdownTask;
 
     private static string? ReadAdminPassword()
     {
@@ -81,23 +83,40 @@ public partial class App : Application
         Logger.Information("MineRailMonitor 退出。");
         try
         {
-            _databaseMaintenanceCoordinator?.Dispose();
+            StopDatabaseInfrastructureAsync().GetAwaiter().GetResult();
         }
         catch (Exception exception)
         {
-            Logger.Error("停止 SQLite 维护协调器失败。", exception);
-        }
-
-        try
-        {
-            _passageRecordStore?.Dispose();
-        }
-        catch (Exception exception)
-        {
-            Logger.Error("释放 SQLite 数据库失败。", exception);
+            Logger.Error("SQLite 数据库基础设施关闭失败。", exception);
         }
 
         base.OnExit(e);
+    }
+
+    public Task StopDatabaseInfrastructureAsync()
+    {
+        lock (_databaseShutdownSyncRoot)
+        {
+            return _databaseShutdownTask ??= StopDatabaseInfrastructureCoreAsync();
+        }
+    }
+
+    private async Task StopDatabaseInfrastructureCoreAsync()
+    {
+        var coordinator = _databaseMaintenanceCoordinator;
+        if (coordinator is not null)
+        {
+            await coordinator.StopAsync().ConfigureAwait(false);
+            coordinator.Dispose();
+            _databaseMaintenanceCoordinator = null;
+        }
+
+        var store = _passageRecordStore;
+        if (store is not null)
+        {
+            store.Dispose();
+            _passageRecordStore = null;
+        }
     }
 
     private void StartAcceptance()

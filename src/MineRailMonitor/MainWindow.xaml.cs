@@ -53,6 +53,7 @@ public partial class MainWindow : Window
     private Button? _activeNavigationButton;
     private Button? _activeStationButton;
     private bool _allowWindowClose;
+    private bool _closeInProgress;
     private bool _rfidListenerHealthy;
     private bool _externalInterfaceAvailable;
 
@@ -835,22 +836,67 @@ public partial class MainWindow : Window
         }));
     }
 
+    private async Task StopRuntimeThenCloseAsync()
+    {
+        try
+        {
+            var app = (App)Application.Current;
+            _clockTimer.Stop();
+
+            if (_yardCommunicationManager is not null)
+            {
+                _yardCommunicationManager.Dispose();
+                _yardCommunicationManager.DatagramReceived -= OnYardDatagramReceived;
+                _yardCommunicationManager.DatagramSent -= OnYardDatagramSent;
+                _yardCommunicationManager.ReceiveError -= OnYardReceiveError;
+                _yardCommunicationManager.CommandSent -= OnYardCommandSent;
+                _yardCommunicationManager.StationCommandSent -= OnYardStationCommandSent;
+                _yardCommunicationManager = null;
+            }
+
+            if (_acceptanceRuntimeStateWriter is not null)
+            {
+                try
+                {
+                    _acceptanceRuntimeStateWriter.Write("closed");
+                }
+                catch (Exception exception)
+                {
+                    app.Logger.Error("写入验收运行时最终快照失败。", exception);
+                }
+                finally
+                {
+                    _acceptanceRuntimeStateWriter.Dispose();
+                    _acceptanceRuntimeStateWriter = null;
+                }
+            }
+
+            _rawPacketBlackBoxWriter.Dispose();
+            await app.StopDatabaseInfrastructureAsync();
+
+            _allowWindowClose = true;
+            _closeInProgress = false;
+            Close();
+        }
+        catch (Exception exception)
+        {
+            ((App)Application.Current).Logger.Error("程序安全关闭失败。", exception);
+            _closeInProgress = false;
+            var dialog = new StyledMessageDialog(
+                "程序安全关闭失败",
+                "程序安全关闭失败，请重试退出。",
+                MessageDialogKind.Error)
+            {
+                Owner = this
+            };
+            dialog.ShowDialog();
+        }
+    }
+
     private void OnWindowClosed(object? sender, EventArgs e)
     {
         _adminModeService.PropertyChanged -= OnAdminModeStateChanged;
         _clockTimer.Stop();
-        if (_yardCommunicationManager is not null)
-        {
-            _yardCommunicationManager.Dispose();
-            _yardCommunicationManager.DatagramReceived -= OnYardDatagramReceived;
-            _yardCommunicationManager.DatagramSent -= OnYardDatagramSent;
-            _yardCommunicationManager.ReceiveError -= OnYardReceiveError;
-            _yardCommunicationManager.CommandSent -= OnYardCommandSent;
-            _yardCommunicationManager.StationCommandSent -= OnYardStationCommandSent;
-        }
-        _rawPacketBlackBoxWriter.Dispose();
-        _acceptanceRuntimeStateWriter?.Write("closed");
-        _acceptanceRuntimeStateWriter?.Dispose();
     }
 
     private void OnYardCommandSent(
@@ -909,33 +955,52 @@ public partial class MainWindow : Window
 
     private async void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_allowWindowClose || (_monitorPage is null && _settingsPage is null))
+        if (_allowWindowClose)
         {
             return;
         }
 
-        if (_monitorPage is not null && _monitorPage.HasUnsavedMapChanges)
+        e.Cancel = true;
+        if (_closeInProgress)
         {
-            e.Cancel = true;
-            if (!await _monitorPage.TryLeaveMapEditingAsync("关闭程序"))
-            {
-                return;
-            }
+            return;
         }
 
-        if (_settingsPage is not null && _settingsPage.HasUnsavedChanges)
+        _closeInProgress = true;
+        try
         {
-            e.Cancel = true;
-            if (!await _settingsPage.TryLeaveAsync("关闭程序"))
+            if (_monitorPage is not null && _monitorPage.HasUnsavedMapChanges)
             {
-                return;
+                if (!await _monitorPage.TryLeaveMapEditingAsync("关闭程序"))
+                {
+                    _closeInProgress = false;
+                    return;
+                }
             }
-        }
 
-        if (e.Cancel)
+            if (_settingsPage is not null && _settingsPage.HasUnsavedChanges)
+            {
+                if (!await _settingsPage.TryLeaveAsync("关闭程序"))
+                {
+                    _closeInProgress = false;
+                    return;
+                }
+            }
+
+            await StopRuntimeThenCloseAsync();
+        }
+        catch (Exception exception)
         {
-            _allowWindowClose = true;
-            Close();
+            ((App)Application.Current).Logger.Error("程序安全关闭失败。", exception);
+            _closeInProgress = false;
+            var dialog = new StyledMessageDialog(
+                "程序安全关闭失败",
+                "程序安全关闭失败，请重试退出。",
+                MessageDialogKind.Error)
+            {
+                Owner = this
+            };
+            dialog.ShowDialog();
         }
     }
 

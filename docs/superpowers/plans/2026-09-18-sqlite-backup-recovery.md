@@ -1313,6 +1313,12 @@ git commit -m "feat: gate sqlite startup before main window"
 - `MainWindow_keeps_black_box_alive_until_manager_is_stopped`：Black Box Dispose 排在
   manager Dispose 之后，且事件只在 manager 完整停止后解除。
 - `MainWindow_never_disposes_app_owned_store`：MainWindow 不 Dispose App-owned Store。
+- `Faulted_database_shutdown_task_can_be_retried`：失败或取消的数据库 shutdown Task
+  不会永久阻塞后续重试。
+- `Runtime_stop_is_awaited_before_manager_dispose`：`await manager.StopAllAsync()` 先于
+  manager Dispose、Black Box drain 和数据库 shutdown。
+- `Runtime_stop_failure_cannot_reach_database_shutdown`：runtime 停止异常不会通过 finally
+  强制继续数据库释放。
 
 - [ ] **Step 2: Run RED**
 
@@ -1333,9 +1339,11 @@ Expected: FAIL，原因是 App 没有 shutdown owner 方法，MainWindow 当前�
 - MainWindow 的第一次关闭事件必须先无条件设置 `e.Cancel=true`，再用 `_closeInProgress`
   抑制重复关闭；未保存地图/设置在用户取消时清除该标志并保持窗口打开，不停止 runtime
   或数据库。通过确认后，`StopRuntimeThenCloseAsync` 固定执行：停止 UI timer →
-  Dispose manager → 解除 manager 事件 → 清空 manager → 写入并 Dispose Acceptance 最终
+  `await manager.StopAllAsync()` → Dispose manager → 解除 manager 事件 → 清空 manager → 写入并 Dispose Acceptance 最终
   快照 → Dispose Raw Packet Black Box（排空）→ await App database shutdown → 设置
   `_allowWindowClose=true`、清除 `_closeInProgress` 并重新 `Close()`。
+- 如果 `StopAllAsync` 失败，manager 不 Dispose、不解除事件，Black Box 和数据库 shutdown
+  都不会执行；用户可以再次关闭并重试。
 - 关闭过程中任一 manager、Acceptance/Black Box 或数据库 shutdown 失败都记录错误，不能
   设置 `_allowWindowClose` 或绕过 coordinator/Store 顺序；清除 `_closeInProgress` 后显示
   “程序安全关闭失败，请重试退出。”，允许用户重新尝试。`OnWindowClosed` 仅做最终 UI/event

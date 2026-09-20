@@ -97,7 +97,14 @@ public partial class App : Application
     {
         lock (_databaseShutdownSyncRoot)
         {
-            return _databaseShutdownTask ??= StopDatabaseInfrastructureCoreAsync();
+            if (_databaseShutdownTask is null ||
+                _databaseShutdownTask.IsFaulted ||
+                _databaseShutdownTask.IsCanceled)
+            {
+                _databaseShutdownTask = StopDatabaseInfrastructureCoreAsync();
+            }
+
+            return _databaseShutdownTask;
         }
     }
 

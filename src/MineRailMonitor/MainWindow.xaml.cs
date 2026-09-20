@@ -843,14 +843,16 @@ public partial class MainWindow : Window
             var app = (App)Application.Current;
             _clockTimer.Stop();
 
-            if (_yardCommunicationManager is not null)
+            var manager = _yardCommunicationManager;
+            if (manager is not null)
             {
-                _yardCommunicationManager.Dispose();
-                _yardCommunicationManager.DatagramReceived -= OnYardDatagramReceived;
-                _yardCommunicationManager.DatagramSent -= OnYardDatagramSent;
-                _yardCommunicationManager.ReceiveError -= OnYardReceiveError;
-                _yardCommunicationManager.CommandSent -= OnYardCommandSent;
-                _yardCommunicationManager.StationCommandSent -= OnYardStationCommandSent;
+                await manager.StopAllAsync();
+                manager.Dispose();
+                manager.DatagramReceived -= OnYardDatagramReceived;
+                manager.DatagramSent -= OnYardDatagramSent;
+                manager.ReceiveError -= OnYardReceiveError;
+                manager.CommandSent -= OnYardCommandSent;
+                manager.StationCommandSent -= OnYardStationCommandSent;
                 _yardCommunicationManager = null;
             }
 
@@ -864,11 +866,9 @@ public partial class MainWindow : Window
                 {
                     app.Logger.Error("写入验收运行时最终快照失败。", exception);
                 }
-                finally
-                {
-                    _acceptanceRuntimeStateWriter.Dispose();
-                    _acceptanceRuntimeStateWriter = null;
-                }
+
+                _acceptanceRuntimeStateWriter.Dispose();
+                _acceptanceRuntimeStateWriter = null;
             }
 
             _rawPacketBlackBoxWriter.Dispose();

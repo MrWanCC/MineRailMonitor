@@ -283,7 +283,20 @@ public sealed class DatabaseStartupOwnershipMarkupTests
         Assert.Contains("private readonly object _databaseShutdownSyncRoot = new();", app);
         Assert.Contains("private Task? _databaseShutdownTask;", app);
         Assert.Contains("lock (_databaseShutdownSyncRoot)", method);
-        Assert.Contains("_databaseShutdownTask ??= StopDatabaseInfrastructureCoreAsync()", method);
+        Assert.Contains("return _databaseShutdownTask", method);
+        Assert.Contains("StopDatabaseInfrastructureCoreAsync()", method);
+    }
+
+    [Fact]
+    public void Faulted_database_shutdown_task_can_be_retried()
+    {
+        var method = ExtractMethod(ReadApp(), "public Task StopDatabaseInfrastructureAsync");
+
+        Assert.DoesNotContain("??=", method);
+        Assert.Contains("_databaseShutdownTask is null", method);
+        Assert.Contains("_databaseShutdownTask.IsFaulted", method);
+        Assert.Contains("_databaseShutdownTask.IsCanceled", method);
+        Assert.Contains("_databaseShutdownTask = StopDatabaseInfrastructureCoreAsync()", method);
     }
 
     [Fact]
@@ -292,8 +305,8 @@ public sealed class DatabaseStartupOwnershipMarkupTests
         var method = ExtractMethod(ReadMainWindow(), "private async Task StopRuntimeThenCloseAsync");
 
         Assert.True(method.IndexOf("_clockTimer.Stop()", StringComparison.Ordinal) <
-                    method.IndexOf("_yardCommunicationManager.Dispose()", StringComparison.Ordinal));
-        Assert.True(method.IndexOf("_yardCommunicationManager.Dispose()", StringComparison.Ordinal) <
+                    method.IndexOf("manager.Dispose()", StringComparison.Ordinal));
+        Assert.True(method.IndexOf("manager.Dispose()", StringComparison.Ordinal) <
                     method.IndexOf("_rawPacketBlackBoxWriter.Dispose()", StringComparison.Ordinal));
         Assert.True(method.IndexOf("_rawPacketBlackBoxWriter.Dispose()", StringComparison.Ordinal) <
                     method.IndexOf("StopDatabaseInfrastructureAsync()", StringComparison.Ordinal));
@@ -328,10 +341,37 @@ public sealed class DatabaseStartupOwnershipMarkupTests
     {
         var method = ExtractMethod(ReadMainWindow(), "private async Task StopRuntimeThenCloseAsync");
 
-        Assert.True(method.IndexOf("_yardCommunicationManager.Dispose()", StringComparison.Ordinal) <
+        Assert.True(method.IndexOf("manager.Dispose()", StringComparison.Ordinal) <
                     method.IndexOf("_rawPacketBlackBoxWriter.Dispose()", StringComparison.Ordinal));
-        Assert.Contains("_yardCommunicationManager.DatagramReceived -=", method);
-        Assert.Contains("_yardCommunicationManager.DatagramSent -=", method);
+        Assert.Contains("manager.DatagramReceived -=", method);
+        Assert.Contains("manager.DatagramSent -=", method);
+    }
+
+    [Fact]
+    public void Runtime_stop_is_awaited_before_manager_dispose()
+    {
+        var method = ExtractMethod(ReadMainWindow(), "private async Task StopRuntimeThenCloseAsync");
+
+        Assert.True(method.IndexOf("var manager = _yardCommunicationManager", StringComparison.Ordinal) >= 0);
+        Assert.True(method.IndexOf("await manager.StopAllAsync()", StringComparison.Ordinal) <
+                    method.IndexOf("manager.Dispose()", StringComparison.Ordinal));
+        Assert.True(method.IndexOf("manager.Dispose()", StringComparison.Ordinal) <
+                    method.IndexOf("_rawPacketBlackBoxWriter.Dispose()", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Runtime_stop_failure_cannot_reach_database_shutdown()
+    {
+        var method = ExtractMethod(ReadMainWindow(), "private async Task StopRuntimeThenCloseAsync");
+        var stopIndex = method.IndexOf("await manager.StopAllAsync()", StringComparison.Ordinal);
+        var databaseIndex = method.IndexOf("StopDatabaseInfrastructureAsync()", StringComparison.Ordinal);
+        var finallyAfterStopIndex = stopIndex >= 0
+            ? method.IndexOf("finally", stopIndex, StringComparison.Ordinal)
+            : -1;
+
+        Assert.True(stopIndex >= 0);
+        Assert.True(databaseIndex > stopIndex);
+        Assert.True(finallyAfterStopIndex < 0 || finallyAfterStopIndex > databaseIndex);
     }
 
     [Fact]

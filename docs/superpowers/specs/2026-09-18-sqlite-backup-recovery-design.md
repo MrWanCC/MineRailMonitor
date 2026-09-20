@@ -810,7 +810,10 @@ MainWindow 不再负责决定数据库是否损坏，也不应在构造早期自
 完整退出顺序必须是：
 
 ```text
-停止 YardCommunicationManager / runtime
+停止 YardCommunicationManager / runtime（确认 StopAllAsync 完成）
+→ Dispose YardCommunicationManager
+→ Acceptance final snapshot
+→ Raw Packet Black Box drain / Dispose
 → DatabaseMaintenanceCoordinator.StopAsync()
 → 等待正在运行的 backup 安全结束
 → Dispose DatabaseMaintenanceCoordinator
@@ -820,8 +823,15 @@ MainWindow 不再负责决定数据库是否损坏，也不应在构造早期自
 
 `StopAsync` 必须等待或安全取消 in-flight backup，不能在 backup 仍使用数据库时
 Dispose Store。任何退出路径都不得让 MainWindow 和 App 同时 Dispose Store，也不得
-让 backup scheduler 在 Store Dispose 后继续运行。本设计不改变报警恢复、Raw Packet
-Black Box 或 560/620 Context 隔离。
+让 backup scheduler 在 Store Dispose 后继续运行。MainWindow 在 manager 停止失败时
+不得继续 Black Box 或数据库释放，必须保留 manager 以允许用户重试；不能用 `finally`
+强制绕过该边界。本设计不改变报警恢复、Raw Packet Black Box 或 560/620 Context 隔离。
+
+App 的 `StopDatabaseInfrastructureAsync()` 在独立同步锁内缓存 shutdown Task：并发或
+进行中的调用共享同一个 Task，成功完成后重复调用保持幂等；如果该 Task faulted 或
+cancelled，下一次调用必须创建新的 shutdown Task，不能让一次失败永久毒化后续重试。
+每次 shutdown 仍固定执行 `Coordinator.StopAsync()` → coordinator Dispose → Store
+Dispose；Coordinator 停止失败时不得 Dispose Store。
 
 ## 16. 正常运行期维护
 

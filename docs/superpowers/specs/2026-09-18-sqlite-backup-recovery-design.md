@@ -384,6 +384,34 @@ health check
   - 初始数据库在成功初始化后可由维护协调器创建第一份正式备份；该路径不需要伪造“迁移前备份”。
 - 如果存在 recovery marker，即使生产 `.db` 不存在，也绝不能创建空数据库；必须进入“上一次恢复未完成”路径。
 
+启动决策门禁的返回状态固定为：
+
+```text
+Missing                 → CreateNew
+Healthy                 → StartHealthy
+Corrupt                 → RecoverCorrupt
+Unavailable             → Unavailable
+UnsupportedSchema       → UnsupportedSchema
+valid marker            → InterruptedRecovery
+marker read/parse error → RecoveryStateError
+```
+
+门禁先读取 recovery marker，再检查生产数据库。合法 marker 无论生产 `.db` 是否存在，
+都返回 `InterruptedRecovery`，并携带 marker 详情；不能因为生产库存在而直接返回
+`StartHealthy`，也不能因为生产库缺失而返回 `CreateNew`。marker malformed、不可读或
+contract/hash 无效返回 `RecoveryStateError`，不能降级为 marker absent。
+
+无 marker 时才执行生产数据库 `StartupFast` 检查。只有 `Corrupt` 才扫描备份目录，
+并按新到旧对每个候选执行本次 `FullValidation`；只有 `Healthy` 候选进入可恢复列表。
+`Unavailable`、`UnsupportedSchema`、`Missing` 候选均排除，并记录排除原因。最新候选
+损坏时继续检查较旧候选。真正恢复入口仍必须再次 `FullValidation`，不能把门禁结果当作
+最终恢复验证。
+
+`acceptanceMode` 是显式旁路：只检查 acceptance database 的 `StartupFast`，不读取
+production recovery marker，不扫描生产备份，不执行 recovery 或 maintenance scheduler。
+即使 acceptance 数据库返回 `Corrupt`，也只返回空 candidates 的 `RecoverCorrupt`，由
+Acceptance 流程自行处理，不接入生产恢复 UI。
+
 ### Unavailable 启动路径
 
 健康检查结果为 `Unavailable` 时：
@@ -403,6 +431,15 @@ health check
 - 不创建 `SqlitePassageRecordStore`、MainWindow 或 YardCommunicationManager；
 - 不执行 migration、backup recovery、候选扫描或空数据库初始化；
 - 不移动、覆盖或删除生产 `.db`、WAL、SHM；
+- 启动级 UI 只提供重试、打开数据目录和退出。
+
+### RecoveryStateError 启动路径
+
+recovery marker 无法可信读取或校验时：
+
+- 返回 `RecoveryStateError`，不能按 marker 缺失继续启动；
+- 不创建 Store、MainWindow、YardCommunicationManager、RFID 或空数据库；
+- 不扫描或选择 recovery candidate，不自动 Resume；
 - 启动级 UI 只提供重试、打开数据目录和退出。
 
 ### 损坏数据库路径
@@ -633,6 +670,13 @@ WAL/SHM 已在 bundle 中保存后，才允许从生产路径移走或清理，�
 
 - 标题和正文显示“数据库版本高于当前应用支持版本，请升级应用程序”；
 - 显示当前应用支持版本和数据库实际 `SchemaVersion`；
+- 隐藏恢复候选、恢复和继续恢复按钮；
+- 只显示重试、打开数据目录和退出；
+- 不创建 Store、不执行 migration、不创建空数据库。
+
+对于 `RecoveryStateError`：
+
+- 标题和正文明确显示 recovery marker 无法可信读取或校验；
 - 隐藏恢复候选、恢复和继续恢复按钮；
 - 只显示重试、打开数据目录和退出；
 - 不创建 Store、不执行 migration、不创建空数据库。

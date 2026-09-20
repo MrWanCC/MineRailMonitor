@@ -131,15 +131,17 @@ public enum DatabaseStartupDecisionKind
     RecoverCorrupt,
     Unavailable,
     UnsupportedSchema,
-    InterruptedRecovery
+    InterruptedRecovery,
+    RecoveryStateError
 }
 
 public sealed class DatabaseStartupDecision
 {
     public DatabaseStartupDecisionKind Kind { get; }
-    public SqliteDatabaseHealthResult Health { get; }
+    public SqliteDatabaseHealthResult? Health { get; }
     public IReadOnlyList<SqliteBackupCandidate> Candidates { get; }
     public SqliteRecoveryMarker? RecoveryMarker { get; }
+    public string? ErrorMessage { get; }
 }
 
 public interface ISqliteBackupService
@@ -947,8 +949,14 @@ public sealed class DatabaseStartupGate
   缺失或 path/hash contract invalid 时，不能解释为 marker absent。
 - `Unreadable_recovery_marker_never_returns_create_new`：marker 文件不可读时不能降级为
   `CreateNew`。
+- `Malformed_marker_and_missing_database_never_returns_create_new`：生产 DB 缺失时，
+  malformed marker 也必须返回 `RecoveryStateError`。
 - `Acceptance_mode_bypasses_production_backup_recovery_and_maintenance_paths`：只返回
   acceptance 数据路径对应的可启动决策，不访问生产 `Backups`、`Data/Corrupt` 或 recovery UI。
+- `Candidate_validation_uses_full_validation`、`Healthy_candidates_preserve_newest_to_oldest_order`：
+  候选显示前逐个执行 `FullValidation`，保留通过者的新到旧顺序。
+- `Missing_candidate_is_not_presented_for_restore`：候选验证为 `Missing` 时排除。
+- `Inspect_does_not_modify_database_or_candidate_files`：门禁检查不改变生产库或候选文件。
 
 关键断言使用：
 
@@ -972,7 +980,7 @@ Expected: FAIL，原因是 startup decision 类型和 gate 尚未实现。
 
 1. 先读取 marker。只有 formal marker 真正不存在时才能继续检查生产 DB；marker 文件
    malformed、unreadable、路径 contract invalid 或 manifest hash invalid 都是启动错误，
-   绝不能解释为 marker absent，也绝不能进入 `CreateNew`。
+   返回 `RecoveryStateError`，绝不能解释为 marker absent，也绝不能进入 `CreateNew`。
 2. marker 存在时先返回 `InterruptedRecovery`，不把缺失生产 DB 解释为 `Missing`，
    也不因生产 DB 存在而直接 Healthy；decision 必须携带 marker 供 App 调用
    `ResumeInterruptedRecovery`。
@@ -990,12 +998,15 @@ Expected: FAIL，原因是 startup decision 类型和 gate 尚未实现。
    `ScanCandidates` 或 RecoveryService，不创建 Store/空库；UI 只提供升级提示、重试、
    打开数据目录和退出。
 10. `acceptanceMode=true` 时只使用传入 acceptance database/log 路径，跳过生产 backup、
-   recovery candidate、marker UI 和 scheduler。
+   recovery candidate、marker UI 和 scheduler；只执行 acceptance 数据库的
+   `StartupFast` health check。即使结果为 `Corrupt`，也返回空 candidates 的
+   `RecoverCorrupt`，不扫描生产备份。
 
 Gate 不创建 `SqlitePassageRecordStore`，不执行 schema migration，不启动 MainWindow、
 YardCommunicationManager 或 RFID。marker 读取错误路径只允许进入明确的 recovery/error UI、
 重试、打开数据目录或退出；无论 marker 错误类型如何，都不得创建 Store、空数据库或
-MainWindow 正常业务环境。
+MainWindow 正常业务环境。Gate 本身不调用 `Recover` 或 `ResumeInterruptedRecovery`，
+也不移动、删除或替换任何生产/备份文件。
 
 - [ ] **Step 4: Run GREEN and regression**
 

@@ -59,9 +59,17 @@ public enum SqliteDatabaseHealthState
     Unavailable
 }
 
+public enum SqliteInspectionMode
+{
+    StartupFast,
+    FullValidation
+}
+
 public interface ISqliteDatabaseHealthChecker
 {
-    SqliteDatabaseHealthResult Inspect(string databasePath);
+    SqliteDatabaseHealthResult Inspect(
+        string databasePath,
+        SqliteInspectionMode mode);
 }
 
 public sealed class SqliteDatabaseHealthResult
@@ -139,6 +147,16 @@ public interface ISqliteBackupRunner
 `DatabaseStartupGate` 均放在 `MineRailMonitor.Infrastructure.Persistence`。所有路径
 使用 `Path.GetFullPath`，所有时间从注入的 `IRfidTimeProvider.UtcNow` 转换为本地时间。
 
+`SqliteInspectionMode` 是所有 health-check 调用的强制选择：
+
+- `StartupFast` 执行 `quick_check` 和 `foreign_key_check`；只有 quick/FK 出现异常时
+  才追加 `integrity_check`，用于正常生产 startup gate。
+- `FullValidation` 必须执行 `integrity_check` 和 `foreign_key_check`，不得因为
+  `quick_check=ok` 跳过 `integrity_check`；用于 backup tmp、recovery candidate、
+  staging 以及 restored production 的 final validation。
+
+正式 `.db` backup 在 promotion 前必须已经通过 `FullValidation`。
+
 ## Task 1: SQLite Health Model and Inspection Connection
 
 **Files:**
@@ -152,7 +170,8 @@ public interface ISqliteBackupRunner
 **Interfaces:**
 
 - Consumes: `IRfidTimeProvider.UtcNow`、`System.Data.SQLite.SQLiteConnection`、`ILogger`。
-- Produces: `SqliteDatabaseHealthState`、`SqliteDatabaseHealthResult`、`ISqliteDatabaseHealthChecker.Inspect(string)`。
+- Produces: `SqliteDatabaseHealthState`、`SqliteDatabaseHealthResult`、
+  `SqliteInspectionMode`、`ISqliteDatabaseHealthChecker.Inspect(string, SqliteInspectionMode)`。
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -166,7 +185,7 @@ public void Missing_database_is_reported_as_missing()
 {
     using var directory = new TemporaryDirectory();
     var result = new SqliteDatabaseHealthChecker(new FixedRfidTimeProvider(), new TestLogger()).Inspect(
-        Path.Combine(directory.Path, "MineRailMonitor.db"));
+        Path.Combine(directory.Path, "MineRailMonitor.db"), SqliteInspectionMode.StartupFast);
 
     Assert.Equal(SqliteDatabaseHealthState.Missing, result.State);
 }
@@ -175,10 +194,24 @@ public void Missing_database_is_reported_as_missing()
 public void Healthy_database_reports_quick_integrity_and_foreign_key_results()
 {
     using var database = new TemporaryDatabase();
-    var result = new SqliteDatabaseHealthChecker(new FixedRfidTimeProvider(), new TestLogger()).Inspect(database.Path);
+    var result = new SqliteDatabaseHealthChecker(new FixedRfidTimeProvider(), new TestLogger()).Inspect(
+        database.Path, SqliteInspectionMode.StartupFast);
 
     Assert.Equal(SqliteDatabaseHealthState.Healthy, result.State);
     Assert.True(result.QuickCheckPassed);
+    Assert.True(result.ForeignKeyCheckPassed);
+}
+
+[Fact]
+public void Full_validation_always_runs_integrity_check()
+{
+    using var database = new TemporaryDatabase();
+    var result = new SqliteDatabaseHealthChecker(new FixedRfidTimeProvider(), new TestLogger()).Inspect(
+        database.Path, SqliteInspectionMode.FullValidation);
+
+    Assert.Equal(SqliteDatabaseHealthState.Healthy, result.State);
+    Assert.True(result.IntegrityCheckExecuted);
+    Assert.True(result.IntegrityCheckPassed);
     Assert.True(result.ForeignKeyCheckPassed);
 }
 
@@ -188,7 +221,8 @@ public void Locked_database_is_unavailable_not_corrupt()
     using var database = new TemporaryDatabase();
     using var exclusiveLock = database.OpenExclusiveTransaction();
 
-    var result = new SqliteDatabaseHealthChecker(new FixedRfidTimeProvider(), new TestLogger()).Inspect(database.Path);
+    var result = new SqliteDatabaseHealthChecker(new FixedRfidTimeProvider(), new TestLogger()).Inspect(
+        database.Path, SqliteInspectionMode.StartupFast);
 
     Assert.Equal(SqliteDatabaseHealthState.Unavailable, result.State);
     Assert.NotEqual(SqliteDatabaseHealthState.Corrupt, result.State);
@@ -199,7 +233,8 @@ public void Corrupt_database_is_corrupt_after_integrity_confirmation()
 {
     using var database = TemporaryDatabase.CreateCorruptPageFile();
 
-    var result = new SqliteDatabaseHealthChecker(new FixedRfidTimeProvider(), new TestLogger()).Inspect(database.Path);
+    var result = new SqliteDatabaseHealthChecker(new FixedRfidTimeProvider(), new TestLogger()).Inspect(
+        database.Path, SqliteInspectionMode.StartupFast);
 
     Assert.Equal(SqliteDatabaseHealthState.Corrupt, result.State);
     Assert.True(result.IntegrityCheckExecuted);
@@ -213,7 +248,8 @@ public void Inspection_reads_committed_wal_data_without_creating_sidecars_for_ba
     database.EnableWalAndCommitKnownRow();
     var before = database.SnapshotFiles();
 
-    var result = new SqliteDatabaseHealthChecker(new FixedRfidTimeProvider(), new TestLogger()).Inspect(database.Path);
+    var result = new SqliteDatabaseHealthChecker(new FixedRfidTimeProvider(), new TestLogger()).Inspect(
+        database.Path, SqliteInspectionMode.StartupFast);
 
     Assert.Equal(SqliteDatabaseHealthState.Healthy, result.State);
     Assert.Equal(before, database.SnapshotFiles());
@@ -248,7 +284,9 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
         ILogger logger,
         Func<string, SQLiteConnection>? inspectionConnectionFactory = null);
 
-    public SqliteDatabaseHealthResult Inspect(string databasePath);
+    public SqliteDatabaseHealthResult Inspect(
+        string databasePath,
+        SqliteInspectionMode mode);
 }
 ```
 
@@ -259,11 +297,11 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
 2. 主库存在时使用独立 Inspection Connection，连接字符串只包含绝对 `Data Source`、
    `Version=3` 和只读/查询策略；绝不执行业务四条 PRAGMA 中的 `journal_mode=WAL`，
    也不调用 Store 构造函数。
-3. 先执行 `PRAGMA quick_check;` 和 `PRAGMA foreign_key_check;`。返回 `ok` 且无外键
-   行时返回 `Healthy`。
-4. quick check 非 `ok`、抛出可判定 corruption 的 SQLite 错误或 foreign key check
-   返回违规行时执行 `PRAGMA integrity_check;`；只有得到明确完整性证据才返回
-   `Corrupt`。
+3. `StartupFast` 执行 `PRAGMA quick_check;` 和 `PRAGMA foreign_key_check;`；返回 `ok`
+   且无外键行时返回 `Healthy`。quick/FK 异常时再执行 `PRAGMA integrity_check;`。
+4. `FullValidation` 无条件执行 `PRAGMA integrity_check;` 和
+   `PRAGMA foreign_key_check;`，即使 quick check 为 `ok` 也不能跳过 integrity check；
+   只有得到明确完整性证据才返回 `Corrupt`。
 5. locked、busy timeout、access denied、sharing violation、路径/磁盘不可用和无法
    确定内容是否损坏的 SQLite/IO 异常返回 `Unavailable`，记录 `ErrorType`、错误码
    和摘要，不进入 recovery。
@@ -305,6 +343,9 @@ git commit -m "feat: add sqlite health inspection model"
 - Produces: `ISqliteBackupRunner.CreateValidatedBackupAsync(...)`、
   `SqliteBackupService.ScanCandidates(string)`。
 
+`ScanCandidates` 只负责严格文件名/日期目录筛选和按规范文件名时间排序，不宣称候选内容
+健康；启动 gate 会在展示候选前逐个执行 `FullValidation`。
+
 - [ ] **Step 1: Write the failing tests**
 
 添加以下测试：
@@ -320,9 +361,9 @@ public async Task CreateValidatedBackup_promotes_only_after_validation()
 
     Assert.True(result.Succeeded);
     Assert.Equal(
-        Path.Combine(directories.Root, "20260918", "MineRailMonitor_20260918_020000.db"),
+        Path.Combine(directories.Root, "2026-09-18", "MineRailMonitor_20260918_020000.db"),
         result.FinalPath);
-    Assert.Empty(Directory.GetFiles(Path.Combine(directories.Root, "20260918"), "*.tmp.db"));
+    Assert.Empty(Directory.GetFiles(Path.Combine(directories.Root, "2026-09-18"), "*.tmp.db"));
 }
 
 [Fact]
@@ -346,7 +387,7 @@ public void ScanCandidates_orders_by_filename_timestamp_and_ignores_malformed_na
         "MineRailMonitor_20260918_020000.db",
         "MineRailMonitor_20260917_230000.db",
         "copy-of-MineRailMonitor.db");
-    File.SetLastWriteTimeUtc(directories.Path("20260917", "MineRailMonitor_20260917_230000.db"), DateTime.UtcNow.AddDays(2));
+    File.SetLastWriteTimeUtc(directories.Path("2026-09-17", "MineRailMonitor_20260917_230000.db"), DateTime.UtcNow.AddDays(2));
 
     var candidates = CreateService().ScanCandidates(directories.Root);
 
@@ -355,6 +396,10 @@ public void ScanCandidates_orders_by_filename_timestamp_and_ignores_malformed_na
     Assert.DoesNotContain(candidates, item => item.Path.EndsWith("copy-of-MineRailMonitor.db"));
 }
 ```
+
+另加 `Formal_backup_promotion_requires_full_validation`：注入 recording health checker，
+断言 tmp 文件 promotion 前收到的 mode 必须是 `SqliteInspectionMode.FullValidation`，并且
+只有 `Healthy` 才生成正式 `.db`。
 
 另加 `CreateValidatedBackup_validation_failure_does_not_promote_tmp`：注入一个返回
 `Corrupt` 的 `ISqliteDatabaseHealthChecker`，断言没有正式 `.db`，临时文件按失败规则
@@ -376,11 +421,13 @@ Expected: FAIL，原因是 BackupService、candidate、result 和 runner interfa
   `MineRailMonitor_yyyyMMdd_HHmmss.tmp.db`。
 - source connection 通过 SQLite Online Backup API 复制一致性内容，不调用
   `SqlitePassageRecordStore`，不触发 schema migration。
-- 复制目标在同一文件系统；先写 `.tmp.db`，使用 Inspection Connection 验证 quick、
-  integrity、foreign key，验证成功后再原子 rename/move 为正式 `.db`。
+- 复制目标在同一文件系统；先写 `.tmp.db`，调用
+  `healthChecker.Inspect(tmpPath, SqliteInspectionMode.FullValidation)`，验证成功后再
+  原子 rename/move 为正式 `.db`。
 - 验证失败不得加入 candidate；失败路径不删除旧正式备份。
-- `ScanCandidates` 只接受精确文件名和匹配的日期目录，按文件名解析出的本地时间降序
-  排序；`LastWriteTime` 只能作为日志信息，不能参与主排序。
+- `ScanCandidates` 只接受精确文件名和匹配的 `Backups/SQLite/yyyy-MM-dd/` 日期目录，
+  按规范文件名解析出的本地时间降序排序；`LastWriteTime` 只能作为日志信息，不能参与
+  主排序，也不能把异常命名文件猜测成最新备份。
 - Inspection 验证不执行 WAL pragma、不修改文件、不产生 `.tmp.db-wal` 或
   `.tmp.db-shm`。
 
@@ -431,6 +478,11 @@ public sealed class SqliteRetentionService
     public void Apply(string backupRootDirectory, DateTimeOffset localNow);
 }
 
+public interface IAsyncDelay
+{
+    Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken);
+}
+
 public sealed class DatabaseMaintenanceCoordinator : IDisposable
 {
     public DatabaseMaintenanceCoordinator(
@@ -439,6 +491,7 @@ public sealed class DatabaseMaintenanceCoordinator : IDisposable
         ISqliteBackupRunner backupRunner,
         SqliteRetentionService retentionService,
         IRfidTimeProvider timeProvider,
+        IAsyncDelay delay,
         ILogger logger);
 
     public Task<SqliteBackupResult> RunStartupCatchUpAsync(CancellationToken cancellationToken);
@@ -457,6 +510,9 @@ public sealed class DatabaseMaintenanceCoordinator : IDisposable
   不删除。
 - `Retention_ignores_tmp_files_and_malformed_backup_names`：`.tmp.db` 和异常命名文件不
   计入健康备份日期，也不被当成正式候选。
+- `Startup_cleanup_removes_only_application_tmp_older_than_24_hours`：使用注入时钟创建
+  严格匹配 `MineRailMonitor_yyyyMMdd_HHmmss.tmp.db` 的 25 小时旧文件、24 小时边界文件、
+  其它命名临时文件和未知目录文件；只有前者被删除。
 
 `DatabaseMaintenanceCoordinatorTests.cs` 添加：
 
@@ -465,7 +521,7 @@ public sealed class DatabaseMaintenanceCoordinator : IDisposable
 public async Task Startup_catch_up_creates_at_most_one_backup_for_local_date()
 {
     var runner = new RecordingBackupRunner();
-    using var coordinator = CreateCoordinator(runner, LocalTime);
+    using var coordinator = CreateCoordinator(runner, LocalTime, new ImmediateAsyncDelay());
 
     await coordinator.RunStartupCatchUpAsync(CancellationToken.None);
     await coordinator.RunStartupCatchUpAsync(CancellationToken.None);
@@ -477,7 +533,7 @@ public async Task Startup_catch_up_creates_at_most_one_backup_for_local_date()
 public async Task Failed_backup_does_not_run_destructive_retention()
 {
     var runner = new RecordingBackupRunner { Result = FailedBackupResult };
-    using var coordinator = CreateCoordinator(runner, LocalTime);
+    using var coordinator = CreateCoordinator(runner, LocalTime, new ImmediateAsyncDelay());
     CreateExpiredFormalBackup();
 
     await coordinator.RunStartupCatchUpAsync(CancellationToken.None);
@@ -490,8 +546,11 @@ public async Task Failed_backup_does_not_run_destructive_retention()
 public async Task StopAsync_waits_for_in_flight_backup_before_returning()
 {
     var runner = new BlockingBackupRunner();
-    using var coordinator = CreateCoordinator(runner, LocalTime);
+    var delay = new ManualAsyncDelay();
+    using var coordinator = CreateCoordinator(runner, LocalTime, delay);
     await coordinator.StartAsync(CancellationToken.None);
+    await delay.WaitUntilCapturedAsync();
+    delay.ReleaseNext();
     await runner.WaitUntilStartedAsync();
 
     var stop = coordinator.StopAsync();
@@ -501,8 +560,14 @@ public async Task StopAsync_waits_for_in_flight_backup_before_returning()
 }
 ```
 
-另加 `Startup_and_scheduled_backup_share_one_serial_gate`：让 runner 第一次调用阻塞，
-同时触发 startup catch-up 和 scheduled tick，断言 runner 最大并发数为 1。
+另加 `Startup_and_scheduled_backup_share_one_serial_gate`：注入 `ManualAsyncDelay`，让
+测试手工释放“等待到下一次 02:00”的 delay，再让 runner 第一次调用阻塞，同时触发
+startup catch-up 和 scheduled tick，断言 runner 最大并发数为 1。
+
+测试辅助类型固定为内存实现：`ManualAsyncDelay` 通过 `TaskCompletionSource` 暴露
+`WaitUntilCapturedAsync()` 和 `ReleaseNext()`；测试不得使用 `Thread.Sleep`、真实时钟等待
+或等待到现实中的 02:00。生产实现 `TaskAsyncDelay` 仅将 `DelayAsync` 委托给
+`Task.Delay(delay, cancellationToken)`。
 
 - [ ] **Step 2: Run RED**
 
@@ -514,16 +579,20 @@ Expected: FAIL，原因是 retention service、coordinator 和 runner contracts 
 
 - [ ] **Step 3: Implement retention and coordinator**
 
-- `SqliteRetentionService` 按注入的本地日期只处理 `Backups/SQLite/yyyy-MM-dd` 或当前
-  既定目录格式中的日期目录；保留最近 14 个本地自然日，today 和 today-13 均保留，
-  today-14 才可删除；非日期目录、`Data/Corrupt` 和不属于本应用的文件不删除。
+- `SqliteRetentionService` 按注入的本地日期只处理
+  `Backups/SQLite/yyyy-MM-dd/` 日期目录；保留最近 14 个本地自然日，today 和 today-13
+  均保留，today-14 才可删除；非日期目录、`Data/Corrupt` 和不属于本应用的文件不删除。
 - 启动 catch-up 和每日 02:00 调度共享一个 `SemaphoreSlim(1, 1)`；进入锁后再次检查
   当天正式健康备份，保证一天最多一份。
 - `RunStartupCatchUpAsync` 在 Store 创建前可运行，因为它只依赖数据库路径和 backup
   service；`StartAsync` 只启动后台 02:00 loop，不在 UI、UDP 或 poller 线程执行 IO。
 - 只有 validated backup 成功后才调用 retention；失败 backup 不执行 destructive cleanup。
-- 启动和日期轮转时清理明确属于本应用且满足 stale 条件的 `.tmp.db`，不把临时文件
-  变成正式候选。
+- 启动和日期轮转时只清理严格匹配
+  `MineRailMonitor_yyyyMMdd_HHmmss.tmp.db` 且按注入时钟计算 age `> 24` 小时的临时文件；
+  stale 默认阈值固定为 `TimeSpan.FromHours(24)`。未知临时文件、其它命名文件和恰好 24
+  小时的文件都不删除，也不把任何临时文件变成正式候选。
+- 调度 loop 通过注入的 `IAsyncDelay` 等待下一次本地 02:00；生产默认实现使用
+  `Task.Delay`，测试实现必须可手工释放，不依赖真实时间。
 - `StopAsync` 取消调度 loop，等待当前 runner 调用结束后返回；`Dispose` 只在
   `StopAsync` 完成后释放 semaphore/token source。
 
@@ -556,7 +625,8 @@ git commit -m "feat: coordinate sqlite retention and daily backups"
 
 **Interfaces:**
 
-- Consumes: `ISqliteDatabaseHealthChecker`、`SqliteBackupCandidate`、`ILogger`、file system paths。
+- Consumes: `ISqliteDatabaseHealthChecker`、`SqliteInspectionMode.FullValidation`、
+  `SqliteBackupCandidate`、`ILogger`、file system paths。
 - Produces:
 
 ```csharp
@@ -601,6 +671,10 @@ public sealed class SqliteRecoveryService
   `Succeeded=false`，并保留 bundle、marker、staging/最终失败文件证据。
 - `Recover_removes_marker_only_after_final_health_succeeds`：final=Healthy 时 marker
   才消失；source backup sidecar 不被复制到生产目录。
+- `Recover_revalidates_selected_candidate_with_full_validation`：即使 startup gate 已经
+  验证过 candidate，恢复入口仍再次调用
+  `healthChecker.Inspect(candidate.Path, SqliteInspectionMode.FullValidation)`，未通过时
+  不进入 staging 或 destructive replacement。
 
 测试使用 `TemporaryDirectory` 和 `FakeHealthChecker`，不通过 `Thread.Sleep` 制造时序；
 `FakeHealthChecker` 每次 `Inspect` 按预先配置的路径队列返回确定结果。
@@ -618,7 +692,7 @@ Expected: FAIL，原因是 recovery phase、marker store 和 service 尚未定�
 严格实现以下顺序：
 
 ```text
-candidate revalidated
+candidate revalidated with FullValidation
 → staging copied and validated
 → all existing production db/wal/shm copied to Data/Corrupt/<timestamp>/
 → marker atomically persisted to Data/.sqlite-recovery-in-progress
@@ -630,7 +704,7 @@ candidate revalidated
 
 具体约束：
 
-- source candidate 在恢复入口再次执行 Inspection 验证；candidate 失败时不触碰生产文件。
+- source candidate 在恢复入口再次执行 `FullValidation`；candidate 失败时不触碰生产文件。
 - corrupt bundle 只复制实际存在的 `.db`、`.db-wal`、`.db-shm`；任何必需复制失败都
   停止恢复，不开始 destructive replacement。
 - marker 使用原子临时写入/rename，包含 `SourceBackupPath`、`CorruptBundlePath`、
@@ -639,8 +713,8 @@ candidate revalidated
   不声称原生产路径永远不变。
 - final health 失败时不创建 Store、MainWindow 或空库，不启动 RFID；保留 marker、
   corrupt bundle 和失败证据，并返回 `SqliteRecoveryResult.Succeeded=false`。
-- recovery 使用 Inspection Connection 验证 source/staging/final，不执行业务 PRAGMA、
-  schema migration 或 user_version 修改。
+- recovery 使用 `SqliteInspectionMode.FullValidation` 的 Inspection Connection 验证
+  source/staging/final，不执行业务 PRAGMA、schema migration 或 user_version 修改。
 
 - [ ] **Step 4: Run GREEN and regression**
 
@@ -697,7 +771,12 @@ public sealed class DatabaseStartupGate
 - `Missing_database_without_marker_returns_create_new`：允许后续 Store 建库。
 - `Healthy_database_returns_start_healthy`：不扫描 recovery candidates。
 - `Corrupt_database_returns_recover_corrupt_with_individually_scanned_candidates`：只
-  扫描并排序严格命名的正式备份。
+  扫描严格命名的正式备份，并只把本次 `FullValidation` 为 `Healthy` 的 candidate 放入
+  decision。
+- `Newest_corrupt_backup_falls_back_to_next_healthy_candidate`：最新合法命名 backup
+  `FullValidation` 为 `Corrupt` 时排除它，继续选择下一个较旧且健康的 backup。
+- `Unavailable_candidate_is_not_presented_for_restore`：candidate 的
+  `FullValidation` 为 `Unavailable` 时排除它，Dialog 的 candidates 不包含该文件。
 - `Unavailable_database_returns_unavailable_without_recovery_candidates`：即使备份目录
   有健康文件，也返回 `Unavailable` 且 candidates 为空。
 - `Marker_and_missing_database_returns_interrupted_recovery_not_create_new`。
@@ -730,9 +809,15 @@ Expected: FAIL，原因是 startup decision 类型和 gate 尚未实现。
    也不因生产 DB 存在而直接 Healthy。
 3. 无 marker 时调用 HealthChecker。
 4. `Missing` 返回 `CreateNew`；`Healthy` 返回 `StartHealthy`。
-5. `Corrupt` 才调用 `ScanCandidates`，每个 candidate 后续由 RecoveryService 再次验证。
-6. `Unavailable` 返回 `Unavailable`，candidates 为空，不移动生产文件、不创建空库。
-7. `acceptanceMode=true` 时只使用传入 acceptance database/log 路径，跳过生产 backup、
+5. `Corrupt` 才调用 `ScanCandidates`；按新到旧顺序对每个严格命名 candidate 调用
+   `healthChecker.Inspect(candidate.Path, SqliteInspectionMode.FullValidation)`。
+6. 只有本次检查为 `Healthy` 的 candidates 才放入 `DatabaseStartupDecision.Candidates`；
+   `Corrupt` 和 `Unavailable` candidate 都排除并记录原因。因而合法文件名但内容损坏
+   或当前不可访问的 backup 不会展示给 Dialog。
+7. `RecoveryService` 在真正恢复入口仍再次对 selected candidate 执行 `FullValidation`，
+   不能因为 gate 已经验证过就跳过。
+8. `Unavailable` 返回 `Unavailable`，candidates 为空，不移动生产文件、不创建空库。
+9. `acceptanceMode=true` 时只使用传入 acceptance database/log 路径，跳过生产 backup、
    recovery candidate、marker UI 和 scheduler。
 
 Gate 不创建 `SqlitePassageRecordStore`，不执行 schema migration，不启动 MainWindow、
@@ -823,8 +908,8 @@ Expected: FAIL，原因是 Dialog XAML/C# 和 markup contract 尚不存在。
 - [ ] **Step 3: Implement the minimum dialog**
 
 - 复用现有深色工业资源，不创建数据库管理页面，不改变现有主窗口布局。
-- `Corrupt` 状态允许用户选择已经重新验证的 candidate；Dialog 本身不复制、替换或
-  删除数据库文件。
+- `Corrupt` 状态只允许用户选择 gate 在本次启动中已经通过 `FullValidation` 的 candidate；
+  Dialog 不接受仅凭合法文件名的 backup。本身不复制、替换或删除数据库文件。
 - `Unavailable` 只显示重试、打开数据目录、退出。
 - marker 状态显示 interrupted recovery，不自动续跑；操作结果通过
   `DatabaseRecoveryDialogResult` 返回给 App startup gate。
@@ -895,8 +980,9 @@ resolve production/acceptance paths
 → create health checker / backup service / recovery service / startup gate
 → inspect marker and database health
 → Missing without marker: continue to Store creation
-→ Healthy: run startup catch-up backup before Store creation
-→ Corrupt: show Dialog, recover selected candidate, final health check, then continue
+→ Healthy: StartupFast passed; run startup catch-up backup with FullValidation before Store creation
+→ Corrupt: ScanCandidates, FullValidation-filter candidates, show Dialog, recover selected
+  candidate with another FullValidation, final FullValidation, then continue
 → Unavailable or interrupted recovery: show error UI, do not create Store/MainWindow
 → App creates SqlitePassageRecordStore
 → App creates DatabaseMaintenanceCoordinator
@@ -910,7 +996,11 @@ resolve production/acceptance paths
 - 对 Healthy 生产库，`RunStartupCatchUpAsync` 必须在 Store 构造和 migration 之前执行，
   以保留 migration 前备份；coordinator 可以先由 App 创建为 startup-only service，
   但 scheduled loop 只能在 Store 和 MainWindow 启动后开始。
-- 对 Corrupt，Dialog 恢复成功后必须再次 `Inspect`，只有 final Healthy 才创建 Store。
+- 生产 startup gate 使用 `SqliteInspectionMode.StartupFast`；backup、candidate、staging
+  和 restored production final check 使用 `SqliteInspectionMode.FullValidation`。
+- 对 Corrupt，Gate 先完成候选的当前启动 `FullValidation`，Dialog 只看到 Healthy 候选；
+  Dialog 恢复成功后 RecoveryService 仍必须再次 `FullValidation`，只有 final Healthy 才
+  创建 Store。
 - 对 Unavailable 和 marker interrupted，App 不创建 Store、不创建 MainWindow、不启动 RFID，
   只按 Dialog 动作重试、打开目录或退出。
 - Acceptance 使用命令行提供的独立 database/log/runtime 路径，跳过生产 backup、
@@ -1025,7 +1115,7 @@ git commit -m "feat: make sqlite maintenance shutdown safe"
 - Consumes: all completed Infrastructure services、current Store、existing Core runtime、existing Acceptance script。
 - Produces: one final regression suite proving that database maintenance does not change schema, alarms, RFID runtime, black box, or 560/620 isolation.
 
-- [ ] **Step 1: Write the failing regression tests**
+- [ ] **Step 1: Write the final regression tests**
 
 在 `SqliteBackupRecoveryRegressionTests.cs` 添加以下测试：
 
@@ -1042,18 +1132,25 @@ git commit -m "feat: make sqlite maintenance shutdown safe"
   每个阶段都返回 `InterruptedRecovery` 而不是 `CreateNew`。
 - `Unavailable_never_reaches_recovery_candidate_selection`：locked/access denied 结果不会
   扫描、移动或替换 backup/production 文件。
+- 回归中的 backup promotion、candidate selection、recovery source/staging/final health
+  调用必须显式传入正确的 `SqliteInspectionMode`，不得恢复无 mode 的旧接口。
 
 测试只通过 Infrastructure public contracts 和临时目录验证，不修改主程序、协议或 acceptance fixtures。
 
-- [ ] **Step 2: Run RED**
+- [ ] **Step 2: Run the final regression contract**
 
 ```powershell
 dotnet test tests/MineRailMonitor.Infrastructure.Tests/MineRailMonitor.Infrastructure.Tests.csproj -c Release --filter "FullyQualifiedName~SqliteBackupRecoveryRegressionTests"
 ```
 
-Expected: FAIL，原因是完整 startup/recovery 集成路径尚未满足回归断言。
+Expected:
 
-- [ ] **Step 3: Implement only the minimum regression-facing fixes**
+- 如果 FAIL，只修复前述 Tasks 1-8 暴露的最小接口 wiring 或生命周期 gap，然后重跑受影响
+  的回归测试；不得借此扩大范围。
+- 如果第一次运行就是 GREEN，记录为 regression contract 已被现有实现满足，不为了
+  TDD 形式人为制造 RED，也不修改代码制造失败。
+
+- [ ] **Step 3: If needed, implement only the minimum regression-facing fixes**
 
 如果回归测试发现的是跨任务接口不一致，只修正前述任务定义的接口调用、路径或生命周期
 连接；不得把业务逻辑、RFID 协议、报警、Black Box 或 schema 改动塞入本任务。所有修正
@@ -1064,7 +1161,7 @@ Expected: FAIL，原因是完整 startup/recovery 集成路径尚未满足回归
 - Inspection Connection 与 Business Connection 分离；
 - acceptance bypass 生产目录和 scheduler。
 
-- [ ] **Step 4: Run final GREEN, full regression, and Acceptance**
+- [ ] **Step 4: Run Release full verification and Acceptance**
 
 ```powershell
 dotnet restore
@@ -1151,6 +1248,23 @@ No new package, ProjectReference, database table, schema migration, simulator fi
 - runtime → coordinator → Store shutdown: Task 8。
 - schema/alarm/PendingClear/Black Box/560-620/Core/Infrastructure/Acceptance regression: Task 9。
 
+### Plan self-check required by this design revision
+
+1. 正式 backup promotion 前明确调用 `FullValidation`，并由测试锁定。
+2. Dialog 看到的 candidates 已经通过本次启动逐个 `FullValidation`；RecoveryService 入口
+   仍再次验证 selected candidate。
+3. 最新损坏 candidate 会被排除并 fallback 到下一份健康 candidate；`Unavailable` candidate
+   不会展示给恢复 UI。
+4. scheduled tick 通过 `IAsyncDelay`/`ManualAsyncDelay` 手工推进，不依赖真实时间或
+   `Thread.Sleep`。
+5. stale tmp 默认阈值明确为 age `> 24` 小时，且只删除严格匹配本应用命名的文件。
+6. 所有 backup 日期目录固定为 `Backups/SQLite/yyyy-MM-dd/`，文件固定为
+   `MineRailMonitor_yyyyMMdd_HHmmss.db`。
+7. `SqliteInspectionMode` 已贯穿 health checker、backup、recovery、startup gate 和
+   regression contracts，接口签名前后一致。
+8. Task 9 不再要求人为制造 RED；首轮 GREEN 时只记录 contract 已满足，然后执行 Release
+   全量验证和 Acceptance。
+
 ### Known implementation boundary
 
 批准的 spec 同时要求“已有 Healthy DB 的 startup catch-up backup 在 Store migration 前执行”，
@@ -1163,5 +1277,6 @@ No new package, ProjectReference, database table, schema migration, simulator fi
 当前代码的真正 blocker 是 `App.OnStartup` 与 `MainWindow` 构造职责耦合；Task 7/8 通过最小
 构造函数注入和现有 `_allowWindowClose` 关闭路径拆开，不需要全项目 MVVM 重构。
 
-本计划没有未完成标记、未定义的实现类型或泛化测试描述；每个任务都有 RED、GREEN、
-regression 和独立 commit message。
+本计划没有未完成标记、未定义的实现类型或泛化测试描述；Tasks 1-8 都有 RED、GREEN、
+regression 和独立 commit message，Task 9 明确采用首轮 GREEN 也合法的 final regression
+语义，并保留独立 commit message。

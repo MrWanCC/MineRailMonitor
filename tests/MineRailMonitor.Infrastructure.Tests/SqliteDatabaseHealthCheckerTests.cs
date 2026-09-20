@@ -18,6 +18,7 @@ public sealed class SqliteDatabaseHealthCheckerTests
             SqliteInspectionMode.StartupFast);
 
         Assert.Equal(SqliteDatabaseHealthState.Missing, result.State);
+        Assert.Null(result.ErrorCode);
     }
 
     [Fact]
@@ -82,6 +83,58 @@ public sealed class SqliteDatabaseHealthCheckerTests
 
         Assert.Equal(SqliteDatabaseHealthState.Unavailable, result.State);
         Assert.Equal(nameof(UnauthorizedAccessException), result.ErrorType);
+        Assert.Equal(new UnauthorizedAccessException().HResult, result.ErrorCode);
+    }
+
+    [Fact]
+    public void SQLite_busy_error_code_is_unavailable()
+    {
+        using var database = new TemporaryDatabase();
+        var checker = CreateChecker(_ =>
+            throw new SQLiteException(SQLiteErrorCode.Busy, "injected busy"));
+
+        var result = checker.Inspect(database.Path, SqliteInspectionMode.StartupFast);
+
+        Assert.Equal(SqliteDatabaseHealthState.Unavailable, result.State);
+        Assert.Equal((int)SQLiteErrorCode.Busy, result.ErrorCode);
+        Assert.Equal(nameof(SQLiteErrorCode.Busy), result.ErrorCodeName);
+    }
+
+    [Fact]
+    public void SQLite_corrupt_error_code_is_corrupt()
+    {
+        using var database = new TemporaryDatabase();
+        var checker = CreateChecker(_ =>
+            throw new SQLiteException(SQLiteErrorCode.Corrupt, "injected corruption"));
+
+        var result = checker.Inspect(database.Path, SqliteInspectionMode.StartupFast);
+
+        Assert.Equal(SqliteDatabaseHealthState.Corrupt, result.State);
+        Assert.Equal((int)SQLiteErrorCode.Corrupt, result.ErrorCode);
+        Assert.Equal(nameof(SQLiteErrorCode.Corrupt), result.ErrorCodeName);
+    }
+
+    [Fact]
+    public void Health_result_contains_sqlite_error_code()
+    {
+        using var database = new TemporaryDatabase();
+        var checker = CreateChecker(_ =>
+            throw new SQLiteException(SQLiteErrorCode.NotADb, "injected not-a-database"));
+
+        var result = checker.Inspect(database.Path, SqliteInspectionMode.StartupFast);
+
+        Assert.Equal((int)SQLiteErrorCode.NotADb, result.ErrorCode);
+        Assert.Equal(nameof(SQLiteErrorCode.NotADb), result.ErrorCodeName);
+    }
+
+    [Fact]
+    public void Confirmed_corruption_is_not_downgraded_by_later_unavailable_error()
+    {
+        var state = SqliteDatabaseHealthChecker.ResolveState(
+            hasCorruption: true,
+            hasUnavailableError: true);
+
+        Assert.Equal(SqliteDatabaseHealthState.Corrupt, state);
     }
 
     [Fact]
@@ -123,6 +176,25 @@ public sealed class SqliteDatabaseHealthCheckerTests
     }
 
     [Fact]
+    public void Inspection_sees_foreign_key_violation_committed_only_in_wal()
+    {
+        using var database = WalForeignKeyDatabase.Create();
+        Assert.True(File.Exists(database.Path + "-wal"));
+        Assert.True(new FileInfo(database.Path + "-wal").Length > 0);
+
+        var mainOnlyPath = database.CopyMainOnly();
+        var mainOnlyResult = CreateChecker().Inspect(mainOnlyPath, SqliteInspectionMode.StartupFast);
+        Assert.Equal(SqliteDatabaseHealthState.Healthy, mainOnlyResult.State);
+
+        var before = database.SnapshotFilesWithoutSharedMemory();
+        var result = CreateChecker().Inspect(database.Path, SqliteInspectionMode.StartupFast);
+
+        Assert.Equal(SqliteDatabaseHealthState.Corrupt, result.State);
+        Assert.False(result.ForeignKeyCheckPassed);
+        Assert.Equal(before, database.SnapshotFilesWithoutSharedMemory());
+    }
+
+    [Fact]
     public void Inspection_does_not_create_sidecars_for_standalone_database()
     {
         using var database = StandaloneDatabase.Create();
@@ -153,6 +225,10 @@ public sealed class SqliteDatabaseHealthCheckerTests
 
     private static SqliteDatabaseHealthChecker CreateChecker() =>
         new(new FixedRfidTimeProvider(), new TestLogger());
+
+    private static SqliteDatabaseHealthChecker CreateChecker(
+        Func<string, SQLiteConnection> inspectionConnectionFactory) =>
+        new(new FixedRfidTimeProvider(), new TestLogger(), inspectionConnectionFactory);
 
     private sealed class FixedRfidTimeProvider : IRfidTimeProvider
     {
@@ -337,6 +413,63 @@ PRAGMA writable_schema=OFF;";
             public HeldConnection(SQLiteConnection connection) => _connection = connection;
 
             public void Dispose() => _connection.Dispose();
+        }
+    }
+
+    private sealed class WalForeignKeyDatabase : IDisposable
+    {
+        private readonly string _directory;
+        private readonly SQLiteConnection _writer;
+
+        private WalForeignKeyDatabase(string directory, string path, SQLiteConnection writer)
+        {
+            _directory = directory;
+            Path = path;
+            _writer = writer;
+        }
+
+        public string Path { get; }
+
+        public static WalForeignKeyDatabase Create()
+        {
+            var directory = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                "MineRailMonitor",
+                Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            var path = System.IO.Path.Combine(directory, "wal-fk.db");
+            var writer = new SQLiteConnection($"Data Source={path};Version=3;");
+            writer.Open();
+            using var command = writer.CreateCommand();
+            command.CommandText = @"
+PRAGMA journal_mode=WAL;
+CREATE TABLE parent (id INTEGER PRIMARY KEY);
+CREATE TABLE child (parent_id INTEGER NOT NULL REFERENCES parent(id));
+PRAGMA wal_checkpoint(TRUNCATE);
+PRAGMA foreign_keys=OFF;
+BEGIN;
+INSERT INTO child (parent_id) VALUES (99);
+COMMIT;";
+            command.ExecuteNonQuery();
+            return new WalForeignKeyDatabase(directory, path, writer);
+        }
+
+        public string CopyMainOnly()
+        {
+            var copy = System.IO.Path.Combine(_directory, "main-only.db");
+            File.Copy(Path, copy);
+            return copy;
+        }
+
+        public Dictionary<string, string> SnapshotFilesWithoutSharedMemory() =>
+            SnapshotDirectory(_directory)
+                .Where(pair => !pair.Key.EndsWith("-shm", StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+
+        public void Dispose()
+        {
+            _writer.Dispose();
+            DeleteDirectory(_directory);
         }
     }
 

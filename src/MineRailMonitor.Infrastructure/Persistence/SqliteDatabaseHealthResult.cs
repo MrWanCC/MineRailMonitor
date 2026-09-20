@@ -21,7 +21,9 @@ public sealed class SqliteDatabaseHealthResult
         bool foreignKeyCheckPassed,
         string foreignKeyCheckSummary,
         string? errorType = null,
-        string? errorMessage = null)
+        string? errorMessage = null,
+        int? errorCode = null,
+        string? errorCodeName = null)
     {
         DatabasePath = databasePath;
         State = state;
@@ -35,6 +37,8 @@ public sealed class SqliteDatabaseHealthResult
         ForeignKeyCheckSummary = foreignKeyCheckSummary;
         ErrorType = errorType;
         ErrorMessage = errorMessage;
+        ErrorCode = errorCode;
+        ErrorCodeName = errorCodeName;
     }
 
     public string DatabasePath { get; }
@@ -60,4 +64,8 @@ public sealed class SqliteDatabaseHealthResult
     public string? ErrorType { get; }
 
     public string? ErrorMessage { get; }
+
+    public int? ErrorCode { get; }
+
+    public string? ErrorCodeName { get; }
 }

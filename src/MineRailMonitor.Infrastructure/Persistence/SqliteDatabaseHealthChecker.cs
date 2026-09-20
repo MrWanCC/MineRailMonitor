@@ -1,6 +1,9 @@
 using System.Data.SQLite;
+using System.Runtime.CompilerServices;
 using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Infrastructure.Logging;
+
+[assembly: InternalsVisibleTo("MineRailMonitor.Infrastructure.Tests")]
 
 namespace MineRailMonitor.Infrastructure.Persistence;
 
@@ -59,42 +62,29 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
         }
         catch (Exception exception)
         {
-            if (!IsDeterministicCorruption(exception))
+            if (IsDeterministicCorruption(exception))
             {
-                return CreateUnavailable(fullPath, checkedAt, exception);
+                inspection.RecordCorruption(exception);
+                if (!inspection.IntegrityCheckExecuted)
+                {
+                    inspection.IntegrityCheckExecuted = true;
+                    inspection.IntegrityCheckPassed = false;
+                    inspection.IntegrityCheckSummary = exception.Message;
+                }
             }
-
-            inspection.RecordCorruption(exception);
-            if (!inspection.IntegrityCheckExecuted)
+            else
             {
-                inspection.IntegrityCheckExecuted = true;
-                inspection.IntegrityCheckPassed = false;
-                inspection.IntegrityCheckSummary = exception.Message;
+                inspection.RecordException(exception);
             }
         }
 
-        if (inspection.HasUnavailableError)
+        var state = ResolveState(inspection.IsCorrupt, inspection.HasUnavailableError);
+        if (state == SqliteDatabaseHealthState.Unavailable)
         {
             return CreateUnavailable(fullPath, checkedAt, inspection.UnavailableError!);
         }
 
-        var state = inspection.IsCorrupt
-            ? SqliteDatabaseHealthState.Corrupt
-            : SqliteDatabaseHealthState.Healthy;
-
-        return new SqliteDatabaseHealthResult(
-            fullPath,
-            state,
-            checkedAt,
-            inspection.QuickCheckPassed,
-            inspection.QuickCheckSummary,
-            inspection.IntegrityCheckExecuted,
-            inspection.IntegrityCheckPassed,
-            inspection.IntegrityCheckSummary,
-            inspection.ForeignKeyCheckPassed,
-            inspection.ForeignKeyCheckSummary,
-            inspection.CorruptionError?.GetType().Name,
-            inspection.CorruptionError?.Message);
+        return CreateResult(fullPath, checkedAt, inspection, state);
     }
 
     private SqliteDatabaseHealthResult? CheckFileAvailability(
@@ -249,6 +239,7 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
         Exception exception)
     {
         _logger.Error($"SQLite health inspection unavailable: {databasePath}", exception);
+        var diagnostic = GetErrorDiagnostic(exception);
         return new SqliteDatabaseHealthResult(
             databasePath,
             SqliteDatabaseHealthState.Unavailable,
@@ -261,8 +252,42 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
             false,
             "not executed",
             exception.GetType().Name,
-            exception.Message);
+            exception.Message,
+            diagnostic.ErrorCode,
+            diagnostic.ErrorCodeName);
     }
+
+    private static SqliteDatabaseHealthResult CreateResult(
+        string databasePath,
+        DateTimeOffset checkedAt,
+        InspectionState inspection,
+        SqliteDatabaseHealthState state) =>
+        new(
+            databasePath,
+            state,
+            checkedAt,
+            inspection.QuickCheckPassed,
+            inspection.QuickCheckSummary,
+            inspection.IntegrityCheckExecuted,
+            inspection.IntegrityCheckPassed,
+            inspection.IntegrityCheckSummary,
+            inspection.ForeignKeyCheckPassed,
+            inspection.ForeignKeyCheckSummary,
+            inspection.CorruptionError?.GetType().Name,
+            inspection.CorruptionError?.Message,
+            inspection.CorruptionError is null
+                ? null
+                : GetErrorDiagnostic(inspection.CorruptionError).ErrorCode,
+            inspection.CorruptionError is null
+                ? null
+                : GetErrorDiagnostic(inspection.CorruptionError).ErrorCodeName);
+
+    internal static SqliteDatabaseHealthState ResolveState(bool hasCorruption, bool hasUnavailableError) =>
+        hasCorruption
+            ? SqliteDatabaseHealthState.Corrupt
+            : hasUnavailableError
+                ? SqliteDatabaseHealthState.Unavailable
+                : SqliteDatabaseHealthState.Healthy;
 
     private static SQLiteConnection OpenInspectionConnection(string databasePath) =>
         new($"Data Source={databasePath};Version=3;Read Only=True;Default Timeout=0;");
@@ -274,12 +299,31 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
             return false;
         }
 
+        var sqliteException = (SQLiteException)exception;
+        var baseCode = (int)sqliteException.ResultCode & 0xFF;
+        if (baseCode == (int)SQLiteErrorCode.Corrupt ||
+            baseCode == (int)SQLiteErrorCode.NotADb)
+        {
+            return true;
+        }
+
         var message = exception.Message.ToLowerInvariant();
-        return message.IndexOf("malformed", StringComparison.Ordinal) >= 0 ||
-               message.IndexOf("not a database", StringComparison.Ordinal) >= 0 ||
-               message.IndexOf("file is encrypted", StringComparison.Ordinal) >= 0 ||
-               message.IndexOf("unsupported file format", StringComparison.Ordinal) >= 0 ||
-               message.IndexOf("database disk image", StringComparison.Ordinal) >= 0;
+        return message.IndexOf("database disk image is malformed", StringComparison.Ordinal) >= 0 ||
+               message.IndexOf("malformed database schema", StringComparison.Ordinal) >= 0 ||
+               message.IndexOf("file is encrypted or is not a database", StringComparison.Ordinal) >= 0 ||
+               message.IndexOf("unsupported file format", StringComparison.Ordinal) >= 0;
+    }
+
+    private static ErrorDiagnostic GetErrorDiagnostic(Exception exception)
+    {
+        if (exception is SQLiteException sqliteException)
+        {
+            return new ErrorDiagnostic(
+                sqliteException.ErrorCode,
+                sqliteException.ResultCode.ToString());
+        }
+
+        return new ErrorDiagnostic(exception.HResult, exception.GetType().Name);
     }
 
     private sealed class InspectionState
@@ -331,6 +375,19 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
             IsCorrupt = true;
             CorruptionError ??= exception;
         }
+    }
+
+    private sealed class ErrorDiagnostic
+    {
+        public ErrorDiagnostic(int errorCode, string errorCodeName)
+        {
+            ErrorCode = errorCode;
+            ErrorCodeName = errorCodeName;
+        }
+
+        public int ErrorCode { get; }
+
+        public string ErrorCodeName { get; }
     }
 
     private sealed class CheckResult

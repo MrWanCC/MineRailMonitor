@@ -40,6 +40,53 @@ public sealed class DatabaseMaintenanceCoordinatorTests
     }
 
     [Fact]
+    public async Task Scheduled_tick_cleans_stale_tmp_even_when_today_backup_already_exists()
+    {
+        using var directory = new TemporaryDirectory();
+        var localNow = CreateLocalNow(1, 0, 0);
+        var stale = directory.CreateTmp(localNow.Date, "010000");
+        File.SetLastWriteTimeUtc(stale, localNow.UtcDateTime.AddHours(-25));
+        var candidatePath = directory.CreateFormal(localNow.Date, "000000");
+        var delay = new ManualAsyncDelay();
+        var backup = new RecordingBackupService(new[]
+        {
+            new SqliteBackupCandidate(candidatePath, localNow),
+        });
+        using var coordinator = CreateCoordinator(directory, backup, localNow, delay);
+
+        await coordinator.StartAsync(CancellationToken.None);
+        await delay.WaitUntilCapturedAsync();
+        delay.ReleaseNext();
+        await backup.WaitUntilScanCapturedAsync();
+
+        Assert.False(File.Exists(stale));
+        Assert.Equal(0, backup.CreateCalls);
+        await coordinator.StopAsync();
+    }
+
+    [Fact]
+    public async Task Scheduled_tick_cleans_stale_tmp_even_when_backup_fails()
+    {
+        using var directory = new TemporaryDirectory();
+        var localNow = CreateLocalNow(1, 0, 0);
+        var stale = directory.CreateTmp(localNow.Date, "010000");
+        File.SetLastWriteTimeUtc(stale, localNow.UtcDateTime.AddHours(-25));
+        var delay = new ManualAsyncDelay();
+        var backup = new RecordingBackupService(
+            Array.Empty<SqliteBackupCandidate>(),
+            new SqliteBackupResult(false, null, "failed"));
+        using var coordinator = CreateCoordinator(directory, backup, localNow, delay);
+
+        await coordinator.StartAsync(CancellationToken.None);
+        await delay.WaitUntilCapturedAsync();
+        delay.ReleaseNext();
+        await backup.WaitUntilCreateCapturedAsync();
+
+        Assert.False(File.Exists(stale));
+        await coordinator.StopAsync();
+    }
+
+    [Fact]
     public async Task StartAsync_does_not_run_an_immediate_backup()
     {
         using var directory = new TemporaryDirectory();
@@ -321,8 +368,6 @@ public sealed class DatabaseMaintenanceCoordinatorTests
         public int CreateCalls { get; private set; }
         public SynchronizationContext? LastSynchronizationContext { get; private set; }
 
-        public IReadOnlyList<SqliteBackupCandidate> ScanCandidates(string backupRootDirectory) => _candidates;
-
         public Task<SqliteBackupResult> CreateValidatedBackupAsync(
             string productionDatabasePath,
             string backupRootDirectory,
@@ -340,6 +385,17 @@ public sealed class DatabaseMaintenanceCoordinatorTests
         }
 
         public Task WaitUntilCreateCapturedAsync() => _createCaptured.Task;
+
+        public Task WaitUntilScanCapturedAsync() => _scanCaptured.Task;
+
+        private readonly TaskCompletionSource<object?> _scanCaptured =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IReadOnlyList<SqliteBackupCandidate> ScanCandidates(string backupRootDirectory)
+        {
+            _scanCaptured.TrySetResult(null);
+            return _candidates;
+        }
     }
 
     private sealed class BlockingBackupService : ISqliteBackupService
@@ -450,6 +506,9 @@ public sealed class DatabaseMaintenanceCoordinatorTests
 
         public string CreateFormal(DateTime date, string time) =>
             CreateFile($"MineRailMonitor_{date:yyyyMMdd}_{time}.db", date);
+
+        public string CreateTmp(DateTime date, string time) =>
+            CreateFile($"MineRailMonitor_{date:yyyyMMdd}_{time}.tmp.db", date);
 
         private string CreateFile(string fileName, DateTime date)
         {

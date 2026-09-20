@@ -40,6 +40,19 @@ public sealed class SqliteRetentionServiceTests
     }
 
     [Fact]
+    public void Retention_does_not_delete_formal_backup_with_invalid_time()
+    {
+        using var directory = new TemporaryDirectory();
+        var malformed = directory.CreateFile(
+            "MineRailMonitor_20260906_256199.db",
+            "2026-09-06");
+
+        new SqliteRetentionService(14, new TestLogger()).Apply(directory.BackupRoot, LocalNow);
+
+        Assert.True(File.Exists(malformed));
+    }
+
+    [Fact]
     public void Retention_does_not_delete_unknown_files_inside_expired_date_directory()
     {
         using var directory = new TemporaryDirectory();
@@ -111,6 +124,34 @@ public sealed class SqliteRetentionServiceTests
     {
         using var directory = new TemporaryDirectory();
         var malformed = directory.CreateFile("MineRailMonitor_bad.tmp.db", LocalNow.Date);
+        File.SetLastWriteTimeUtc(malformed, LocalNow.UtcDateTime.AddHours(-48));
+
+        new SqliteRetentionService(14, new TestLogger()).Apply(directory.BackupRoot, LocalNow);
+
+        Assert.True(File.Exists(malformed));
+    }
+
+    [Fact]
+    public void Malformed_tmp_with_invalid_time_is_not_deleted()
+    {
+        using var directory = new TemporaryDirectory();
+        var malformed = directory.CreateFile(
+            "MineRailMonitor_20260906_246060.tmp.db",
+            "2026-09-06");
+        File.SetLastWriteTimeUtc(malformed, LocalNow.UtcDateTime.AddHours(-48));
+
+        new SqliteRetentionService(14, new TestLogger()).Apply(directory.BackupRoot, LocalNow);
+
+        Assert.True(File.Exists(malformed));
+    }
+
+    [Fact]
+    public void Malformed_tmp_with_invalid_calendar_date_is_not_deleted()
+    {
+        using var directory = new TemporaryDirectory();
+        var malformed = directory.CreateFile(
+            "MineRailMonitor_20260230_020000.tmp.db",
+            "2026-02-28");
         File.SetLastWriteTimeUtc(malformed, LocalNow.UtcDateTime.AddHours(-48));
 
         new SqliteRetentionService(14, new TestLogger()).Apply(directory.BackupRoot, LocalNow);

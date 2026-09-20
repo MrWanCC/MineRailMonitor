@@ -156,7 +156,9 @@ public sealed class DatabaseMaintenanceCoordinator : IDisposable
         await _serialGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await RunBackupIfNeededAsync(GetLocalNow(), cancellationToken).ConfigureAwait(false);
+            var localNow = GetLocalNow();
+            _retentionService.CleanupStaleTemporaryFiles(_backupRootDirectory, localNow);
+            await RunBackupIfNeededAsync(localNow, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

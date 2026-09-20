@@ -69,19 +69,20 @@ public sealed class SqliteRetentionService
         }
     }
 
-    private IEnumerable<(string Path, DateTime Date)> EnumerateDateDirectories(string rootPath)
+    private IReadOnlyList<(string Path, DateTime Date)> EnumerateDateDirectories(string rootPath)
     {
-        IEnumerable<string> directories;
+        string[] directories;
         try
         {
-            directories = Directory.EnumerateDirectories(rootPath);
+            directories = Directory.EnumerateDirectories(rootPath).ToArray();
         }
         catch (Exception exception)
         {
             LogFailure("SQLite retention directory enumeration failed.", exception);
-            yield break;
+            return Array.Empty<(string Path, DateTime Date)>();
         }
 
+        var result = new List<(string Path, DateTime Date)>();
         foreach (var directory in directories)
         {
             var name = System.IO.Path.GetFileName(directory);
@@ -95,8 +96,10 @@ public sealed class SqliteRetentionService
                 continue;
             }
 
-            yield return (directory, date.Date);
+            result.Add((directory, date.Date));
         }
+
+        return result;
     }
 
     private void DeleteExpiredFormalBackups(
@@ -109,10 +112,10 @@ public sealed class SqliteRetentionService
             return;
         }
 
-        IEnumerable<string> files;
+        string[] files;
         try
         {
-            files = Directory.EnumerateFiles(directory, "*.db", SearchOption.TopDirectoryOnly);
+            files = Directory.EnumerateFiles(directory, "*.db", SearchOption.TopDirectoryOnly).ToArray();
         }
         catch (Exception exception)
         {
@@ -162,10 +165,10 @@ public sealed class SqliteRetentionService
         DateTime directoryDate,
         DateTimeOffset localNow)
     {
-        IEnumerable<string> files;
+        string[] files;
         try
         {
-            files = Directory.EnumerateFiles(directory, "*.tmp.db", SearchOption.TopDirectoryOnly);
+            files = Directory.EnumerateFiles(directory, "*.tmp.db", SearchOption.TopDirectoryOnly).ToArray();
         }
         catch (Exception exception)
         {
@@ -212,12 +215,12 @@ public sealed class SqliteRetentionService
         var match = FormalBackupFileName.Match(System.IO.Path.GetFileName(file));
         return match.Success &&
                DateTime.TryParseExact(
-                   match.Groups["date"].Value,
-                   "yyyyMMdd",
+                   match.Groups["date"].Value + "_" + match.Groups["time"].Value,
+                   "yyyyMMdd_HHmmss",
                    CultureInfo.InvariantCulture,
                    DateTimeStyles.None,
-                   out var fileDate) &&
-               fileDate.Date == directoryDate.Date;
+                   out var fileTimestamp) &&
+               fileTimestamp.Date == directoryDate.Date;
     }
 
     private static bool TryParseTemporaryFile(string file, DateTime directoryDate)
@@ -225,12 +228,12 @@ public sealed class SqliteRetentionService
         var match = TemporaryBackupFileName.Match(System.IO.Path.GetFileName(file));
         return match.Success &&
                DateTime.TryParseExact(
-                   match.Groups["date"].Value,
-                   "yyyyMMdd",
+                   match.Groups["date"].Value + "_" + match.Groups["time"].Value,
+                   "yyyyMMdd_HHmmss",
                    CultureInfo.InvariantCulture,
                    DateTimeStyles.None,
-                   out var fileDate) &&
-               fileDate.Date == directoryDate.Date;
+                   out var fileTimestamp) &&
+               fileTimestamp.Date == directoryDate.Date;
     }
 
     private void LogFailure(string message, Exception exception)

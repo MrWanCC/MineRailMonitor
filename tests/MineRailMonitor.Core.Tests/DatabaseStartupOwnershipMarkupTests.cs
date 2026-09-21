@@ -77,6 +77,17 @@ public sealed class DatabaseStartupOwnershipMarkupTests
     }
 
     [Fact]
+    public void Startup_catch_up_is_dispatched_off_wpf_ui_thread()
+    {
+        var startupCatchUp = ExtractMethod(ReadApp(), "private async Task<bool> TryRunStartupCatchUpAsync");
+
+        Assert.Contains("Task.Run(", startupCatchUp);
+        Assert.Contains(
+            "() => databaseMaintenanceCoordinator.RunStartupCatchUpAsync(CancellationToken.None)",
+            startupCatchUp);
+    }
+
+    [Fact]
     public void Missing_store_initialization_precedes_first_backup()
     {
         var createNew = ExtractMethod(ReadApp(), "private async Task<bool> CreateNewAsync");

@@ -252,7 +252,8 @@ public partial class App : Application
     {
         try
         {
-            var backupResult = await databaseMaintenanceCoordinator.RunStartupCatchUpAsync(CancellationToken.None);
+            var backupResult = await Task.Run(
+                () => databaseMaintenanceCoordinator.RunStartupCatchUpAsync(CancellationToken.None));
             if (!backupResult.Succeeded)
             {
                 Logger.Warning($"SQLite 启动备份未完成，将继续启动业务：{backupResult.ErrorMessage ?? "未知原因"}");

@@ -16,17 +16,25 @@ MineRailMonitor 是运行在现场 Windows 工控机上的 WPF 桌面上位机�
 
 ## 2. 默认安装目录
 
-默认优先使用：
+默认安装目录优先使用：
 
 ```text
 D:\MineRailMonitor\
 ```
 
-如果设备没有 D 盘，则使用：
+只有在 D: 同时满足以下条件时，才使用该默认目录：
+
+- D: 存在；
+- `DriveType` 为 `Fixed`；
+- 是本地固定磁盘，而不是 removable、network、CD/DVD 或 RAM disk。
+
+如果 D: 不满足条件，则默认使用：
 
 ```text
 C:\MineRailMonitor\
 ```
+
+用户仍可在安装界面手动选择其他有效的本地安装目录。手动选择不改变应用的 ApplicationRoot 解析规则。
 
 不使用 `C:\Program Files\MineRailMonitor` 作为默认目录。当前应用需要持续写入 SQLite、日志、黑匣子、备份和项目配置；将可写运行数据与只读程序文件放在同一个可迁移根目录下，可以避免普通运行用户写入 Program Files 时遇到权限问题。
 
@@ -80,7 +88,7 @@ C:\MineRailMonitor\
 
 ## 4. 路径基准与 ApplicationRoot
 
-当前程序大量使用 `AppContext.BaseDirectory`。程序移动到 `<Root>\App\` 后，`AppContext.BaseDirectory` 将指向 `App`，因此不能继续直接使用：
+当前程序大量使用 `AppContext.BaseDirectory`。程序移动到 `<Root>\App\` 后，安装布局下的 `AppContext.BaseDirectory` 将指向 `App`，因此不能继续直接使用：
 
 ```csharp
 Path.Combine(AppContext.BaseDirectory, "Data")
@@ -88,12 +96,44 @@ Path.Combine(AppContext.BaseDirectory, "Data")
 
 否则会得到 `<Root>\App\Data`，与目标布局不符。
 
-正式设计引入统一的 `ApplicationRoot` 概念。其默认推导规则为：
+正式设计引入统一的 `ApplicationRoot` 概念。解析规则必须区分安装布局和开发/未打包布局：
+
+### A. Installed layout
+
+当 `AppContext.BaseDirectory` 的最终目录名为 `App`（大小写不敏感）时，视为 installed layout：
 
 ```text
-AppContext.BaseDirectory
-→ App 目录的 parent directory
-→ <Root>
+AppContext.BaseDirectory = D:\MineRailMonitor\App\
+ApplicationRoot = Directory.GetParent(AppContext.BaseDirectory)
+                 = D:\MineRailMonitor\
+```
+
+这里的 parent 必须通过路径 API 获取，禁止用 `..\` 字符串手工拼接。
+
+### B. Development / unpackaged layout
+
+当 `AppContext.BaseDirectory` 的最终目录名不是 `App` 时，视为 development / unpackaged layout：
+
+```text
+ApplicationRoot = AppContext.BaseDirectory
+```
+
+这样从 `bin\Debug`、`bin\Release` 或 Visual Studio/F5 运行时，不会错误地把 Data、Logs 或 Projects 路径跳到开发输出目录的 parent。
+
+### C. Explicit test injection
+
+路径 provider 必须允许测试显式注入 `ApplicationRoot`。显式注入优先级高于上述自动推导，测试不得依赖机器盘符、当前工作目录或真实安装位置。
+
+### D. Acceptance isolation
+
+现有 Acceptance 的显式 `DatabasePath` / `LogDirectory` contract 必须保持不变。安装目录改造不得让 Acceptance 自动切换到真实安装根目录，也不得破坏其临时目录隔离。
+
+因此最终优先级为：
+
+```text
+显式注入 ApplicationRoot
+→ 如果 BaseDirectory 最终目录名为 App：Directory.GetParent(BaseDirectory)
+→ 否则：BaseDirectory
 ```
 
 所有可写目录都必须从同一根目录派生：
@@ -114,7 +154,7 @@ ApplicationRoot\Docs
 - 让测试可以注入临时根目录；
 - 避免模块分别推导根目录。
 
-禁止各模块自行通过 `..\` 或字符串拼接猜测安装根目录。
+禁止各模块自行通过 `..\` 或字符串拼接猜测安装根目录。开发布局不能因为发布布局的 parent 规则而改变路径。
 
 路径 provider 只负责路径定义和目录准备，不改变 SQLite、备份、恢复或日志业务语义。
 
@@ -282,21 +322,23 @@ Recovery marker 是迁移的特殊边界。当前 marker 可能包含绝对路�
 
 ## 13. 权限模型
 
-正常运行不应要求管理员权限。安装器需要保证普通运行用户对 `<Root>` 及其运行时创建的子目录具有：
+正常运行不应要求管理员权限。普通用户不能对整个 `<Root>` 授予 `Modify`，否则会使 `App` 中的 exe/dll 也可写。
 
-- read；
-- write；
-- modify。
+安装器应按目录设置 ACL：
 
-特别是以下目录必须可写：
+| 目录 | 普通用户权限 |
+| --- | --- |
+| `<Root>\` | Read / Execute |
+| `<Root>\App\` | Read / Execute |
+| `<Root>\Data\` | Modify |
+| `<Root>\Backups\` | Modify |
+| `<Root>\Logs\` | Modify |
+| `<Root>\Projects\` | Modify |
+| `<Root>\Docs\` | 根据现场文档需求授予 Write / Modify |
 
-- `Data`；
-- `Backups`；
-- `Logs`；
-- `Projects`（按应用需要）；
-- recovery marker 所在目录。
+`Data`、`Backups`、`Logs`、`Projects` 以及 recovery marker 所在目录必须由安装器预创建并保证可写。程序运行时不应依赖向 `App` 写入数据，普通用户不得修改 `App` 下的 exe/dll。
 
-程序发布文件位于 `App`，但程序运行时不应依赖向 `App` 写入数据。安装器可请求提升权限完成安装和 ACL 设置，应用本身保持普通用户权限启动。
+安装器本身可请求提升权限完成安装和 ACL 设置；安装完成后的 MineRailMonitor.exe 保持普通用户权限启动。
 
 ## 14. 安装器选型
 
@@ -361,7 +403,13 @@ MSIX 对沙箱、签名、应用身份和商店/企业分发更友好，但当�
 - 新电脑运行 installer 后桌面出现“矿车编组监控系统”快捷方式；
 - 普通用户双击快捷方式可以正常启动；
 - MineRailMonitor 不需要管理员权限运行；
+- Installed layout 正确将 `App` 的 parent 解析为 ApplicationRoot；
+- Development/F5 layout 不会错误跳到 BaseDirectory 的 parent；
+- Acceptance 的显式 DatabasePath / LogDirectory 保持隔离；
 - Data、Logs、Backups 可以正常写入；
+- 普通用户可以写入 Data、Logs、Backups 和 Projects；
+- 普通用户不能修改 App 下的 exe/dll；
+- D: 不是本地固定磁盘时，默认目录正确 fallback 到 C:\MineRailMonitor；
 - SQLite health、backup、recovery 和 marker 语义不退化；
 - Projects 能正常加载；
 - 软件升级不丢失历史数据库；

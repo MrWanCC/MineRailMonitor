@@ -73,10 +73,11 @@ public partial class MainWindow : Window
         _passageRecordStore = passageRecordStore ?? throw new ArgumentNullException(nameof(passageRecordStore));
         InitializeComponent();
         _acceptanceOptions = ((App)Application.Current).AcceptanceOptions;
+        var appPaths = ((App)Application.Current).Paths;
         _externalInterfaceAvailable = false;
         _projectDirectory = _acceptanceOptions.Enabled
             ? Path.Combine(AppContext.BaseDirectory, "Projects", "Example")
-            : ResolveProjectDirectory();
+            : ResolveProjectDirectory(appPaths.ProjectsDirectory);
         if (_acceptanceOptions.Enabled)
         {
             WindowState = WindowState.Minimized;
@@ -90,7 +91,7 @@ public partial class MainWindow : Window
         _communicationPage = new CommunicationPage();
         var blackBoxRootDirectory = _acceptanceOptions.Enabled
             ? Path.Combine(_acceptanceOptions.LogDirectory!, "BlackBox")
-            : Path.Combine(AppContext.BaseDirectory, "Logs", "BlackBox");
+            : appPaths.BlackBoxDirectory;
         _rawPacketBlackBoxWriter = new RawPacketBlackBoxWriter(blackBoxRootDirectory);
         _communicationPage.OpenBlackBoxDirectoryRequested += OnOpenBlackBoxDirectoryRequested;
         _communicationPage.SetBlackBoxStatus(_rawPacketBlackBoxWriter.GetSnapshot());
@@ -113,9 +114,8 @@ public partial class MainWindow : Window
         }
     }
 
-    private static string ResolveProjectDirectory()
+    private static string ResolveProjectDirectory(string projectsDirectory)
     {
-        var projectsDirectory = Path.Combine(AppContext.BaseDirectory, "Projects");
         var defaultDirectory = Path.Combine(projectsDirectory, "Default");
         return File.Exists(Path.Combine(defaultDirectory, "project.json"))
             ? defaultDirectory

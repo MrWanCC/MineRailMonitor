@@ -368,7 +368,7 @@ Recovery marker 是迁移的特殊边界。当前 marker 可能包含绝对路�
 
 正常运行不应要求管理员权限。普通用户不能对整个 `<Root>` 授予 `Modify`，否则会使 `App` 中的 exe/dll 也可写。
 
-安装器必须设置并验证 effective ACL，而不能只追加 Inno Setup `Permissions` ACE。允许调用 Windows 自带 `icacls.exe`，使用稳定 SID，不依赖本地化组名；只修改 `<Root>` 及其子目录，不修改 Root 之外的父目录和系统目录，不授予 `Everyone` Full Control。
+安装器必须设置并验证 effective ACL，而不能只追加 Inno Setup `Permissions` ACE。允许调用 Windows 自带 `icacls.exe`，使用稳定 SID，不依赖本地化组名；只修改 `<Root>` 及其子目录，不修改 Root 之外的父目录和系统目录，不授予 `Everyone` Full Control。规范化必须先清除目标树已有的 explicit DACL，再建立受保护的批准 ACL；不能假设 `/inheritance:r` 或 `/grant:r` 会删除未列出的 `Everyone`、`Authenticated Users` 或其它组 ACE。
 
 目标 effective ACL 为：
 
@@ -382,19 +382,36 @@ Recovery marker 是迁移的特殊边界。当前 marker 可能包含绝对路�
 | `<Root>\Projects\` | Modify |
 | `<Root>\Docs\` | Modify（现场文档写入） |
 
-安装器应在管理员上下文中对目标目录关闭继承并重设 ACL。命令模板如下，`S-1-5-18` 是 SYSTEM，`S-1-5-32-544` 是 Administrators，`S-1-5-32-545` 是内置 Users：
+安装器应在管理员上下文中按固定顺序重置并保护目标目录。首先对 `<Root>` 执行 `/reset`，再执行 `/inheritance:r` 和 `/grant:r`；然后对每个 managed subtree 执行 `/reset /T /C`，使其及 descendants 回到已经安全的父级 ACL，再对该 top-level subtree 执行 `/inheritance:r` 和 `/grant:r`。这样可清除目标树原有的 explicit ACE；每条 `icacls` 命令返回非零时安装必须失败。命令模板如下，`S-1-5-18` 是 SYSTEM，`S-1-5-32-544` 是 Administrators，`S-1-5-32-545` 是内置 Users：
 
 ```powershell
-icacls "$Root" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)"
-icacls "$Root\App" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)"
-icacls "$Root\Data" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)"
-icacls "$Root\Backups" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)"
-icacls "$Root\Logs" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)"
-icacls "$Root\Projects" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)"
-icacls "$Root\Docs" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)"
+icacls "$Root" /reset
+icacls "$Root" /inheritance:r
+icacls "$Root" /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)"
+
+icacls "$Root\App" /reset /T /C
+icacls "$Root\App" /inheritance:r
+icacls "$Root\App" /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)"
+icacls "$Root\Data" /reset /T /C
+icacls "$Root\Data" /inheritance:r
+icacls "$Root\Data" /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)"
+icacls "$Root\Backups" /reset /T /C
+icacls "$Root\Backups" /inheritance:r
+icacls "$Root\Backups" /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)"
+icacls "$Root\Logs" /reset /T /C
+icacls "$Root\Logs" /inheritance:r
+icacls "$Root\Logs" /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)"
+icacls "$Root\Projects" /reset /T /C
+icacls "$Root\Projects" /inheritance:r
+icacls "$Root\Projects" /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)"
+icacls "$Root\Docs" /reset /T /C
+icacls "$Root\Docs" /inheritance:r
+icacls "$Root\Docs" /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)"
 ```
 
 `Data`、`Backups`、`Logs`、`Projects`、`Docs` 以及 recovery marker 所在目录必须由安装器预创建并经过上述 effective-permission 检查。程序运行时不应依赖向 `App` 写入数据，普通用户不得修改或删除 `App` 下的 exe/dll。
+
+验收必须覆盖 hostile pre-existing ACL：在 disposable Root 安装前预创建目录，并用 `icacls <Root> /grant:r "*S-1-1-0:(OI)(CI)(M)"` 写入 `Everyone:(M)`。安装完成后用 `icacls` 确认 Root/App 不存在 `Everyone` Modify 或其它未知 explicit write ACE，Root/App 的 Users 只有 Read/Execute，Data/Backups/Logs/Projects/Docs 的 Users 为 Modify；再使用真实普通非管理员账户验证数据目录可写而 App 下 exe/dll 不能修改或删除。markup test 不能替代这些证据。
 
 安装器本身可请求提升权限完成安装和 ACL 设置；安装完成后的 MineRailMonitor.exe 保持普通用户权限启动。
 
@@ -475,6 +492,7 @@ MSIX 对沙箱、签名、应用身份和商店/企业分发更友好，但当�
 - .NET Framework 4.8 Full Release 不满足时安装被阻止，满足时安装成功；
 - Release package 包含 `System.Data.SQLite.dll`、`App\x86\SQLite.Interop.dll` 和 `App\x64\SQLite.Interop.dll`；
 - `icacls` 实际 ACL 与普通非管理员文件操作共同证明 Root/App 为 Read/Execute、Data/Logs/Backups/Projects/Docs 为 Modify；
+- hostile pre-existing `Everyone:(M)` ACL 在安装前存在时，安装后被清除且不残留未知 explicit write ACE；
 - SQLite health、backup、recovery 和 marker 语义不退化；
 - Projects 能正常加载；
 - 软件升级不丢失历史数据库；

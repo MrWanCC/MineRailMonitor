@@ -28,8 +28,8 @@
 - `<Root>\Data`、`Backups`、`Logs`、`Projects` 授予普通用户 Modify。
 - `<Root>\Docs` 按现场文档需求授予 Write / Modify。
 - 普通用户不得修改 App 下 exe/dll。
-- 安装器必须规范化 effective ACL：关闭 Root/App 的继承，并用稳定 SID 明确授予 SYSTEM/Administrators Full Control、Users Read/Execute；数据目录明确授予 Users Modify，不依赖父目录权限或单纯追加 Inno `Permissions` ACE。
-- ACL 实现可调用 Windows 自带 `icacls.exe`，不得修改 Root 之外的父目录、系统目录，不得授予 `Everyone` Full Control。
+- 安装器必须规范化 effective ACL：Root 先 `/reset`，managed subtree 先 `/reset /T /C` 清除已有 explicit DACL，再分别关闭继承并用稳定 SID 明确授予 SYSTEM/Administrators Full Control、Users Read/Execute；数据目录明确授予 Users Modify，不依赖父目录权限或单纯追加 Inno `Permissions` ACE。
+- ACL 实现可调用 Windows 自带 `icacls.exe`，每条命令非零都必须使安装失败；不得修改 Root 之外的父目录、系统目录，不得授予 `Everyone` Full Control 或保留未知 explicit write ACE。
 - 安装器必须检查 .NET Framework 4.8 Full Release；`Release >= 528040` 才允许安装，首版不自动联网下载。
 - SQLite WAL / FULL / health / backup / recovery / marker 语义不变。
 - 不重新设计 SQLite，不修改 RFID protocol、CRC、Byte7、业务报警逻辑。
@@ -82,7 +82,7 @@
 3. 开发输出必须继续包含 `Projects`，正式 staging 的 `App` 不能再包含 `Projects`；测试归属 Task 3。
 4. 用户选中的目录必须直接成为 Root，不能生成重复 `MineRailMonitor` 子目录；测试归属 Task 4。
 5. 升级必须复用上次 Root，改变 Root 时必须阻止继续且不得复制或覆盖现场数据；测试归属 Task 5。
-6. 普通 Users 的 effective 权限只能在数据目录为 Modify，不能 Modify App 中的 exe/dll；测试归属 Task 5。
+6. 普通 Users 的 effective 权限只能在数据目录为 Modify，不能 Modify App 中的 exe/dll；测试归属 Task 5，且必须覆盖安装前已存在 `Everyone:(M)` 的 hostile Root。
 7. Acceptance 显式 DatabasePath / LogDirectory 必须继续隔离真实安装目录；测试归属 Task 2 和 Task 6。
 8. 当前 contract 的已知边界：Development output 最终目录名正好为 `App` 时，与 installed layout 无法区分，会按 installed 规则取 parent；测试和实现不得假设该情况能被自动识别为 development。
 9. ACL 必须验证 effective 权限而非只检查脚本文本；Task 5 负责脚本契约，Task 6 负责真实 `icacls` 和非管理员文件操作。
@@ -831,6 +831,8 @@ public void Installer_grants_Modify_only_to_runtime_data_directories()
     var script = ReadSource("installer", "MineRailMonitor.iss");
 
     Assert.Contains("icacls.exe", script);
+    Assert.Contains("/reset", script);
+    Assert.Contains("/reset /T /C", script);
     Assert.Contains("/inheritance:r", script);
     Assert.Contains("*S-1-5-18", script);
     Assert.Contains("*S-1-5-32-544", script);
@@ -881,9 +883,9 @@ Expected: the new upgrade/uninstall contract fails because the initial installer
 
 - [ ] **Step 3: Normalize effective ACL and add explicit uninstall data choice**
 
-Do not use Inno `Permissions` entries as the ACL implementation. Extend the existing `[Code]` section with a helper that invokes the Windows system `icacls.exe` using stable SIDs. `/inheritance:r` must be applied separately to Root, App, Data, Backups, Logs, Projects and Docs so a parent such as `D:\Software` cannot leak Users Modify into App. The helper must fail the installation if any command returns a non-zero exit code.
+Do not use Inno `Permissions` entries as the ACL implementation. Extend the existing `[Code]` section with helpers that invoke the Windows system `icacls.exe` using stable SIDs. First run `icacls <Root> /reset`; then run `/inheritance:r` and `/grant:r` on Root. For App, Data, Backups, Logs, Projects and Docs, first run `icacls <directory> /reset /T /C` so stale explicit ACEs in the subtree are removed, then run `/inheritance:r` and `/grant:r` on that top-level directory. The helper must fail the installation if any command returns a non-zero exit code. It must never assume that `/grant:r` removes ACEs for principals not named in the new grants.
 
-Use these exact rights: Root and App receive SYSTEM/Administrators `(OI)(CI)(F)` plus Users `(OI)(CI)(RX)`; Data, Backups, Logs, Projects and Docs receive SYSTEM/Administrators `(OI)(CI)(F)` plus Users `(OI)(CI)(M)`. The helper may be called from `CurStepChanged(ssPostInstall)` after the directories exist. It must not modify any parent or system directory.
+Use these exact rights: Root and App receive SYSTEM/Administrators `(OI)(CI)(F)` plus Users `(OI)(CI)(RX)`; Data, Backups, Logs, Projects and Docs receive SYSTEM/Administrators `(OI)(CI)(F)` plus Users `(OI)(CI)(M)`. The helper may be called from `CurStepChanged(ssPostInstall)` after the directories exist. It must not modify any parent or system directory. The required order is Root reset/protect first, then each managed subtree reset recursively and protect; every non-zero exit code is an installation failure.
 
 Keep the explicit uninstall data choice in the same `[Code]` section.
 
@@ -894,15 +896,10 @@ Extend the existing `[Code]` section with the following effective-ACL and uninst
   SidAdministrators = '*S-1-5-32-544';
   SidUsers = '*S-1-5-32-545';
 
-function SetEffectiveAcl(const DirectoryName, UserRights: String): Boolean;
+function RunIcacls(const Parameters: String): Boolean;
 var
-  Parameters: String;
   ResultCode: Integer;
 begin
-  Parameters := '"' + DirectoryName + '" /inheritance:r /grant:r ' +
-    '"' + SidSystem + ':(OI)(CI)(F)" ' +
-    '"' + SidAdministrators + ':(OI)(CI)(F)" ' +
-    '"' + SidUsers + ':(OI)(CI)(' + UserRights + ')"';
   if not Exec(ExpandConstant('{sys}\icacls.exe'), Parameters, '',
     SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     Result := False
@@ -910,16 +907,42 @@ begin
     Result := ResultCode = 0;
 end;
 
+function SetEffectiveAcl(const DirectoryName, UserRights: String;
+  ResetTree: Boolean): Boolean;
+var
+  ResetParameters: String;
+  Parameters: String;
+begin
+  ResetParameters := '"' + DirectoryName + '" /reset';
+  if ResetTree then
+    ResetParameters := ResetParameters + ' /T /C';
+  if not RunIcacls(ResetParameters) then begin
+    Result := False;
+    exit;
+  end;
+
+  if not RunIcacls('"' + DirectoryName + '" /inheritance:r') then begin
+    Result := False;
+    exit;
+  end;
+
+  Parameters := '"' + DirectoryName + '" /grant:r ' +
+    '"' + SidSystem + ':(OI)(CI)(F)" ' +
+    '"' + SidAdministrators + ':(OI)(CI)(F)" ' +
+    '"' + SidUsers + ':(OI)(CI)(' + UserRights + ')"';
+  Result := RunIcacls(Parameters);
+end;
+
 function ApplyMineRailMonitorAcl(): Boolean;
 begin
   Result :=
-    SetEffectiveAcl(ExpandConstant('{app}'), 'RX') and
-    SetEffectiveAcl(ExpandConstant('{app}\App'), 'RX') and
-    SetEffectiveAcl(ExpandConstant('{app}\Data'), 'M') and
-    SetEffectiveAcl(ExpandConstant('{app}\Backups'), 'M') and
-    SetEffectiveAcl(ExpandConstant('{app}\Logs'), 'M') and
-    SetEffectiveAcl(ExpandConstant('{app}\Projects'), 'M') and
-    SetEffectiveAcl(ExpandConstant('{app}\Docs'), 'M');
+    SetEffectiveAcl(ExpandConstant('{app}'), 'RX', False) and
+    SetEffectiveAcl(ExpandConstant('{app}\App'), 'RX', True) and
+    SetEffectiveAcl(ExpandConstant('{app}\Data'), 'M', True) and
+    SetEffectiveAcl(ExpandConstant('{app}\Backups'), 'M', True) and
+    SetEffectiveAcl(ExpandConstant('{app}\Logs'), 'M', True) and
+    SetEffectiveAcl(ExpandConstant('{app}\Projects'), 'M', True) and
+    SetEffectiveAcl(ExpandConstant('{app}\Docs'), 'M', True);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -998,18 +1021,24 @@ dotnet test tests/MineRailMonitor.Core.Tests/MineRailMonitor.Core.Tests.csproj -
 
 Expected: Inno Setup compilation succeeds and all ACL/upgrade/uninstall tests pass.
 
-On a disposable installed Root, run the real effective-permission checks:
+Before installing on a disposable Root, deliberately create a hostile pre-existing ACL. The root must already exist before the installer runs:
 
 ```powershell
 $Root = 'D:\MineRailMonitor-ACL-test'
+New-Item -ItemType Directory -Force -Path $Root | Out-Null
+icacls $Root /grant:r "*S-1-1-0:(OI)(CI)(M)"
+
+# Run the installer and select $Root exactly; do not create a nested MineRailMonitor directory.
 icacls $Root
 icacls (Join-Path $Root 'App')
 icacls (Join-Path $Root 'Data')
+icacls (Join-Path $Root 'Backups')
 icacls (Join-Path $Root 'Logs')
 icacls (Join-Path $Root 'Projects')
+icacls (Join-Path $Root 'Docs')
 ```
 
-Using a standard non-administrator account, create a file in Data and Logs, modify a Projects configuration, and create a Docs document; then verify attempts to modify and delete `App\MineRailMonitor.exe` and an App DLL fail. The ACL text assertions are not sufficient evidence; these commands and file operations are required on the disposable installation.
+After installation, use `icacls` to confirm Root/App have no `Everyone:(M)` and no unknown explicit write ACE, and that Users has only RX there; confirm Users has M on Data/Backups/Logs/Projects/Docs. Using a standard non-administrator account, create a file in Data and Logs, create a backup fixture, modify a Projects configuration, and create a Docs document; then verify attempts to modify and delete `App\MineRailMonitor.exe` and an App DLL fail. The ACL text assertions are not sufficient evidence; these commands and file operations are required on the disposable installation.
 
 - [ ] **Step 6: Run the application regression set**
 
@@ -1027,6 +1056,7 @@ Expected: 0 warnings / 0 errors, zero skipped tests and Acceptance 8/8. Do not r
 ```powershell
 git add installer/MineRailMonitor.iss tests/MineRailMonitor.Core.Tests/DesktopInstallerMarkupTests.cs
 git commit -m "feat: preserve desktop field data across upgrades"
+```
 
 ### Task 6: Verify the complete package on clean Windows
 
@@ -1096,8 +1126,8 @@ On a clean Windows VM or target machine, record each result without using the re
 2. On a machine/snapshot without .NET Framework 4.8 Full Release, confirm `InitializeSetup` blocks installation and shows the Chinese prerequisite message; on a machine satisfying `Release >= 528040`, confirm installation proceeds.
 3. Confirm the desktop shortcut is `矿车编组监控系统` and targets `<Root>\App\MineRailMonitor.exe`.
 4. Start as a normal user; confirm no elevation prompt and no service/autostart/scheduled task/Registry Run entry.
-5. Run `icacls <Root>` and `icacls <Root>\App`; confirm no inherited Users Modify and effective Users Read/Execute. As the same non-admin user, confirm creating a file in Data and Logs, modifying a Projects configuration, and writing Docs succeeds.
-6. As that non-admin user, confirm modifying or deleting `App\MineRailMonitor.exe` and an App DLL fails. Confirm the package contains `System.Data.SQLite.dll`, `App\x86\SQLite.Interop.dll` and `App\x64\SQLite.Interop.dll`.
+5. On a disposable pre-created Root such as `D:\MineRailMonitor-ACL-test`, grant `*S-1-1-0:(OI)(CI)(M)` to simulate hostile `Everyone:(M)` before installation. Install into that exact Root, then use `icacls` to confirm the hostile and other unknown explicit write ACEs are gone, Root/App Users has only RX, and Data/Logs/Projects/Docs Users has M.
+6. As the same non-admin user in that hostile-ACL installation, confirm creating files in Data, Logs and Docs and modifying a Projects configuration succeeds, while modifying or deleting `App\MineRailMonitor.exe` and an App DLL fails. Confirm the package contains `System.Data.SQLite.dll`, `App\x86\SQLite.Interop.dll` and `App\x64\SQLite.Interop.dll`.
 7. On independent clean Snapshot B, choose `D:\MineRailMonitor` during first install and confirm `D:\MineRailMonitor\App`, `Data`, `Backups`, `Logs`, `Projects` and `Docs` exist without `D:\MineRailMonitor\MineRailMonitor`.
 8. Upgrade the first installation without changing the directory; confirm the previous Root is reused and Data, Projects, Logs and Backups remain unchanged.
 9. During that same-AppId upgrade, deliberately select a different Root; confirm the installer blocks with the migration-not-supported message and no old field data is copied or overwritten.
@@ -1153,8 +1183,7 @@ Do not execute Task 1 from the plan in the plan-writing phase. Do not create a n
 - Placeholder scan must find no placeholder markers, vague implementation steps, or unassigned Task reference.
 - Type consistency: `ApplicationPaths` is created in Task 1, exposed as `App.Paths` in Task 2, consumed by staging/runtime wiring in Task 3, and never referenced by installer Pascal code.
 - Review Focus items are assigned to Task 1, Task 2, Task 3, Task 4, Task 5 and Task 6 as listed above.
-- Effective-permission coverage is based on `icacls /inheritance:r /grant:r` with stable SIDs plus non-admin file-operation checks; no markup test is treated as final ACL evidence.
+- Effective-permission coverage is based on Root `/reset`, managed-subtree `/reset /T /C`, then protected `/inheritance:r /grant:r` with stable SIDs plus real non-admin file-operation checks; it includes a pre-existing `Everyone:(M)` hostile ACL and no markup test is treated as final ACL evidence.
 - Upgrade coverage blocks changed Root for the same stable AppId; no same-AppId side-by-side test or cross-Root migration is planned.
 - Publish coverage records the observed output: `System.Data.SQLite.dll` is in publish, while x86/x64 `SQLite.Interop.dll` are copied from the actual Release build output into staging and then verified.
 - ApplicationRoot boundary coverage explicitly documents that a development BaseDirectory named `App` is indistinguishable from installed layout under the approved contract.
-```

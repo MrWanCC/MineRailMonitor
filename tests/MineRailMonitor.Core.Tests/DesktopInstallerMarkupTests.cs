@@ -61,6 +61,9 @@ public sealed class DesktopInstallerMarkupTests
         var script = ReadSource("installer", "MineRailMonitor.iss");
 
         Assert.Contains("AppId={{8C8B1CB5-4A4B-4B4A-9D48-6A3C93D2F0E1}", script, StringComparison.Ordinal);
+        Assert.Contains("ArchitecturesInstallIn64BitMode=x64os", script, StringComparison.Ordinal);
+        var architectureLines = script.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+        Assert.DoesNotContain("ArchitecturesInstallIn64BitMode=x64", architectureLines);
         Assert.Contains("InitializeSetup", script, StringComparison.Ordinal);
         Assert.Contains("NET Framework Setup\\NDP\\v4\\Full", script, StringComparison.Ordinal);
         Assert.Contains("Release", script, StringComparison.Ordinal);

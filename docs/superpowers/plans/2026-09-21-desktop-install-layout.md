@@ -774,7 +774,7 @@ AppVersion={#MyAppVersion}
 DefaultDirName=C:\MineRailMonitor
 UsePreviousAppDir=yes
 PrivilegesRequired=admin
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesInstallIn64BitMode=x64os
 OutputDir=..\artifacts\installer
 OutputBaseFilename=MineRailMonitor-Setup
 DisableProgramGroupPage=yes
@@ -838,7 +838,7 @@ begin
 end;
 ```
 
-The default Root is `C:\MineRailMonitor`, but the standard directory selection page allows `D:\MineRailMonitor` or `E:\Software\MineRailMonitor`; `{app}` remains exactly the selected directory. The AppId line intentionally has two opening braces and one closing brace because the GUID is a literal Inno Setup value. The App wildcard must never include `MineRailMonitor.exe.config`; the separate `onlyifdoesntexist` rule is the only rule that handles that file, so an existing site-local config is preserved on upgrade while a missing config is re-seeded. Do not add service, startup, scheduled-task or Registry Run entries. Task 5 extends this same `[Code]` section; it must not add a second `[Code]` section.
+The default Root is `C:\MineRailMonitor`, but the standard directory selection page allows `D:\MineRailMonitor` or `E:\Software\MineRailMonitor`; `{app}` remains exactly the selected directory. The AppId line intentionally has two opening braces and one closing brace because the GUID is a literal Inno Setup value. `ArchitecturesInstallIn64BitMode=x64os` uses the Inno Setup 7 non-deprecated x64-Windows identifier and preserves the existing x64-only semantics; do not change it to `x64compatible` because ARM64 native-runtime execution is not yet validated. The App wildcard must never include `MineRailMonitor.exe.config`; the separate `onlyifdoesntexist` rule is the only rule that handles that file, so an existing site-local config is preserved on upgrade while a missing config is re-seeded. Do not add service, startup, scheduled-task or Registry Run entries. Task 5 extends this same `[Code]` section; it must not add a second `[Code]` section.
 
 - [ ] **Step 4: Compile and inspect the installer script**
 

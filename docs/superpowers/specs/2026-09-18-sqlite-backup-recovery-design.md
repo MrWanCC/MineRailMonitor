@@ -160,11 +160,12 @@ retention 计数。异常命名文件不根据猜测纳入候选；`LastWriteTim
 健康结果至少包含：
 
 - 数据库路径。
-- 状态：`Missing`、`Healthy`、`Corrupt` 或 `Unavailable`。
+- 状态：`Missing`、`Healthy`、`Corrupt`、`Unavailable` 或 `UnsupportedSchema`。
 - 检查时间。
 - quick check 是否通过及返回摘要。
 - foreign key check 是否通过及违规摘要。
 - integrity check 是否执行、是否通过及详细摘要。
+- `PRAGMA user_version` 读取到的 `SchemaVersion`；文件不存在时为 `null`。
 - 原始异常类型、SQLite/IO 错误码和可供日志使用的摘要。
 - 面向日志和 Dialog 的错误摘要。
 
@@ -182,6 +183,20 @@ retention 计数。异常命名文件不根据猜测纳入候选；`LastWriteTim
 1. 用 Inspection Connection 执行 `PRAGMA quick_check;`。
 2. 执行 `PRAGMA foreign_key_check;`。
 3. 只有 quick check 返回 `ok` 且 foreign key check 无结果时才判定 Healthy。
+
+4. 读取 `PRAGMA user_version`；当前 Store 支持的版本由
+   `SqlitePassageRecordStore.CurrentSchemaVersion` 提供，不在 HealthChecker 中复制版本常量。
+5. `user_version` 为 0、1、2 或当前支持版本时，物理检查通过即可保持 `Healthy`，并返回对应
+   `SchemaVersion`。v0/v1/v2/v3 继续遵循 Store 现有初始化和 migration 语义。
+
+`UnsupportedSchema`：
+
+- 数据库物理完整性检查通过；
+- `SchemaVersion` 大于 `SqlitePassageRecordStore.CurrentSchemaVersion`；
+- 表示应用与数据库版本不兼容，不表示数据库损坏或暂时不可访问；
+- 阻止 Store 创建，不执行 migration，不创建空数据库；
+- 不进入 corrupt backup recovery，不移动或覆盖生产 `.db`、WAL、SHM；
+- 启动级 UI 只提供升级提示、重试、打开数据目录和退出。
 
 `Corrupt` 只表示已经能够确定数据库内容或 SQLite 文件结构损坏，包括：
 
@@ -209,6 +224,16 @@ quick check 异常、返回非 `ok` 或 foreign key check 有结果时，继续�
 - 启动级 UI 只提供重试、打开数据目录和退出。
 
 `Unavailable` 不能被降级成 `Corrupt`，也不能通过“再创建一个空数据库”绕过。
+
+健康状态的最终优先级固定为：
+
+```text
+Corrupt → Unavailable → UnsupportedSchema → Healthy
+```
+
+因此不能因为 `user_version` 超前就跳过物理检查；确定的 corruption 或无法可靠读取
+优先于兼容性判断。读取 `PRAGMA user_version` 本身失败时，按现有 SQLite/IO 异常分类为
+`Corrupt` 或 `Unavailable`，不能猜测为 `UnsupportedSchema`。
 
 健康检查不得因为“能打开文件”就判定健康，也不得只检查主 `.db` 文件的存在。
 
@@ -284,12 +309,19 @@ Inspection Connection。它不是业务连接，必须满足：
 
 启动补备份规则：
 
-- 启动时当天没有正式健康备份：立即创建一份。
-- 当天已经有正式健康备份：跳过。
+- `ScanCandidates` 只负责严格正式文件发现、日期目录一致性和规范文件名排序，
+  不代表候选内容当前仍 Healthy。
+- 启动时扫描全部 `candidate.LocalTimestamp.Date == localNow.Date` 的正式 candidate，
+  对每个执行 `healthChecker.Inspect(candidate.Path, SqliteInspectionMode.FullValidation)`。
+- 只有本次 FullValidation 返回 `Healthy` 的今日 candidate 才允许跳过备份。
+- 今日 candidate 为 `Corrupt`、`Unavailable` 或 `UnsupportedSchema` 时，不能视为已有
+  健康备份；继续创建新的 validated backup，不删除损坏的正式文件。
 - 例如 01:00 启动并立即备份，02:00 不再重复创建。
 - 08:00 启动且当天没有备份：08:00 创建。
 
-判断“当天已有备份”只认验证通过并成功 rename 的正式 `.db`，不认 `.tmp.db` 或失败日志。
+判断“当天已有备份”只认本次 FullValidation 仍通过并成功 rename 的正式 `.db`，不认
+仅文件名合法的 candidate、`.tmp.db` 或失败日志。多个今日 candidate 中只要有一个当前
+Healthy，即可 skip；必须检查到该结论，不能只看最新 candidate。
 
 所有备份操作必须串行。建议 `DatabaseMaintenanceCoordinator` 持有 `SemaphoreSlim`，启动补备份、02:00 调度和其他未来入口都通过同一互斥区，并在锁内再次检查当天备份是否已经存在。
 
@@ -299,8 +331,10 @@ Inspection Connection。它不是业务连接，必须满足：
 计算下一次本地 02:00
 → 可取消的 Task.Delay / 等价一次性等待
 → 获取备份互斥
-→ 检查当天正式备份
-→ 必要时创建并验证
+→ 扫描当天正式 candidate
+→ 对今日 candidate 逐个 FullValidation
+→ 存在当前 Healthy candidate：skip
+→ 否则创建并验证
 → 释放互斥
 → 计算下一天 02:00
 ```
@@ -350,6 +384,34 @@ health check
   - 初始数据库在成功初始化后可由维护协调器创建第一份正式备份；该路径不需要伪造“迁移前备份”。
 - 如果存在 recovery marker，即使生产 `.db` 不存在，也绝不能创建空数据库；必须进入“上一次恢复未完成”路径。
 
+启动决策门禁的返回状态固定为：
+
+```text
+Missing                 → CreateNew
+Healthy                 → StartHealthy
+Corrupt                 → RecoverCorrupt
+Unavailable             → Unavailable
+UnsupportedSchema       → UnsupportedSchema
+valid marker            → InterruptedRecovery
+marker read/parse error → RecoveryStateError
+```
+
+门禁先读取 recovery marker，再检查生产数据库。合法 marker 无论生产 `.db` 是否存在，
+都返回 `InterruptedRecovery`，并携带 marker 详情；不能因为生产库存在而直接返回
+`StartHealthy`，也不能因为生产库缺失而返回 `CreateNew`。marker malformed、不可读或
+contract/hash 无效返回 `RecoveryStateError`，不能降级为 marker absent。
+
+无 marker 时才执行生产数据库 `StartupFast` 检查。只有 `Corrupt` 才扫描备份目录，
+并按新到旧对每个候选执行本次 `FullValidation`；只有 `Healthy` 候选进入可恢复列表。
+`Unavailable`、`UnsupportedSchema`、`Missing` 候选均排除，并记录排除原因。最新候选
+损坏时继续检查较旧候选。真正恢复入口仍必须再次 `FullValidation`，不能把门禁结果当作
+最终恢复验证。
+
+`acceptanceMode` 是显式旁路：只检查 acceptance database 的 `StartupFast`，不读取
+production recovery marker，不扫描生产备份，不执行 recovery 或 maintenance scheduler。
+即使 acceptance 数据库返回 `Corrupt`，也只返回空 candidates 的 `RecoverCorrupt`，由
+Acceptance 流程自行处理，不接入生产恢复 UI。
+
 ### Unavailable 启动路径
 
 健康检查结果为 `Unavailable` 时：
@@ -360,6 +422,25 @@ health check
 - 启动级 UI 只提供重试、打开数据目录和退出。
 
 重试仍得到 `Unavailable` 时保持该路径，不能把暂时不可访问解释为 Corrupt。
+
+### UnsupportedSchema 启动路径
+
+健康检查结果为 `UnsupportedSchema` 时：
+
+- 显示“数据库版本高于当前应用支持版本，请升级应用程序”，同时显示当前支持版本和实际版本；
+- 不创建 `SqlitePassageRecordStore`、MainWindow 或 YardCommunicationManager；
+- 不执行 migration、backup recovery、候选扫描或空数据库初始化；
+- 不移动、覆盖或删除生产 `.db`、WAL、SHM；
+- 启动级 UI 只提供重试、打开数据目录和退出。
+
+### RecoveryStateError 启动路径
+
+recovery marker 无法可信读取或校验时：
+
+- 返回 `RecoveryStateError`，不能按 marker 缺失继续启动；
+- 不创建 Store、MainWindow、YardCommunicationManager、RFID 或空数据库；
+- 不扫描或选择 recovery candidate，不自动 Resume；
+- 启动级 UI 只提供重试、打开数据目录和退出。
 
 ### 损坏数据库路径
 
@@ -397,11 +478,33 @@ health check → Corrupt
 
 它是恢复事务边界的一部分，不是普通日志文件。marker 至少持久化以下信息：
 
-- `recoveryStarted`；
-- `sourceBackupPath`；
-- `corruptBundlePath`；
-- `stagingPath`；
-- `startedAt`（本地时间和可用于诊断的 UTC 时间）。
+- `recoveryStarted` (`bool`)；
+- `sourceBackupPath` (`string`)；
+- `corruptBundlePath` (`string`)；
+- `stagingPath` (`string`)；
+- `startedAt` (`DateTimeOffset`)；
+- `bundleManifestSha256` (`string`)。
+
+对应共享 contract 为：
+
+```csharp
+public sealed class SqliteRecoveryMarker
+{
+    public bool RecoveryStarted { get; }
+    public string SourceBackupPath { get; }
+    public string CorruptBundlePath { get; }
+    public string StagingPath { get; }
+    public DateTimeOffset StartedAt { get; }
+    public string BundleManifestSha256 { get; }
+}
+
+public sealed class SqliteRecoveryResult
+{
+    public bool Succeeded { get; }
+    public string? ErrorMessage { get; }
+    public SqliteRecoveryMarker? Marker { get; }
+}
+```
 
 恢复状态机为：
 
@@ -424,7 +527,9 @@ candidate validated
 
 - marker 存在且生产 `.db` 缺失：进入“上一次恢复未完成”路径，禁止首次安装初始化；
 - marker 存在且生产 `.db` 仍存在：仍阻止普通 Healthy 启动，不能直接忽略 marker；
-- marker 存在时，不自动把任意 staging 或生产文件当作已完成恢复。
+- marker 存在时，不自动把任意 staging 或生产文件当作已完成恢复。marker JSON malformed、
+  unreadable、path contract invalid 或 manifest hash invalid 都不是“marker absent”，
+  不得进入首次安装或 `CreateNew`。
 
 第一版不要求自动续跑恢复。可以安全地进入 startup recovery/error UI，重新检查
 staging、corrupt bundle、source backup 和 production DB，之后由明确流程完成恢复或
@@ -480,8 +585,17 @@ Backups/SQLite/2026-09-18/MineRailMonitor_20260918_020000.db
 - 复制当前 `MineRailMonitor.db`。
 - 如果存在，复制 `MineRailMonitor.db-wal`。
 - 如果存在，复制 `MineRailMonitor.db-shm`。
+- 写入 `bundle-manifest.json`，为每个实际 evidence 记录文件名、length 和 SHA-256；
+  db/WAL/SHM 的实际文件集合必须与 manifest 完全一致。
+- evidence 和 manifest 使用 durable `WriteThrough` 写入并 `Flush(true)`；marker 的
+  `BundleManifestSha256` 锚定 manifest 内容。
+- staging 和 production 路径必须限制在约定的 Data 文件名；corrupt bundle 必须限制在
+  Data/Corrupt 的直接子目录。
 
-只有实际存在的文件才复制。主库或实际存在的 WAL/SHM 复制失败时停止恢复，不得继续进入破坏性替换。
+只有实际存在的文件才复制。optional WAL/SHM 只有打开时得到
+`FileNotFoundException` 或 `DirectoryNotFoundException` 才能解释为 truly absent；权限、
+sharing、目录路径或其它 IO 异常都必须停止恢复。主库或实际存在的 WAL/SHM 复制失败时
+不得继续进入破坏性替换。
 
 ### 替换阶段
 
@@ -519,7 +633,7 @@ WAL/SHM 已在 bundle 中保存后，才允许从生产路径移走或清理，�
 ## 13. DatabaseRecoveryDialog
 
 这是 MainWindow 创建前的启动级 modal，不挂在业务页面或已启动的通信管理器上。
-`Corrupt`、`Unavailable` 和“recovery marker 存在”是不同的 UI 状态，不能共用会
+`Corrupt`、`Unavailable`、`UnsupportedSchema` 和“recovery marker 存在”是不同的 UI 状态，不能共用会
 误导用户的损坏提示。
 
 至少显示：
@@ -531,9 +645,10 @@ WAL/SHM 已在 bundle 中保存后，才允许从生产路径移走或清理，�
 - 最近健康备份文件路径。
 - 明确警告：恢复后，备份时间之后产生的历史记录可能丢失。
 
-第一版只提供：
+正常 `Corrupt` 恢复状态提供：
 
 - 恢复此备份。
+- 重试。
 - 打开备份/数据目录。
 - 退出程序。
 
@@ -552,12 +667,74 @@ WAL/SHM 已在 bundle 中保存后，才允许从生产路径移走或清理，�
 - 只显示重试、打开数据目录和退出；
 - 重试前后都不移动生产文件，也不创建空数据库。
 
+对于 `UnsupportedSchema`：
+
+- 标题和正文显示“数据库版本高于当前应用支持版本，请升级应用程序”；
+- 显示当前应用支持版本和数据库实际 `SchemaVersion`；
+- 隐藏恢复候选、恢复和继续恢复按钮；
+- 只显示重试、打开数据目录和退出；
+- 不创建 Store、不执行 migration、不创建空数据库。
+
+对于 `RecoveryStateError`：
+
+- 标题和正文明确显示 recovery marker 无法可信读取或校验；
+- 隐藏恢复候选、恢复和继续恢复按钮；
+- 只显示重试、打开数据目录和退出；
+- 不创建 Store、不执行 migration、不创建空数据库。
+
 对于 recovery marker：
 
 - 显示“上一次恢复未完成”及 marker、staging、corrupt bundle、source backup 路径；
 - 不把生产 DB 缺失显示为首次安装；
 - 第一版不自动续跑，用户只能进入明确的恢复/错误处理流程或退出；
 - 在最终 health check 成功前不允许删除 marker。
+
+## 13.1 DatabaseRecoveryDialog contract
+
+`DatabaseRecoveryDialog` 是 `MainWindow` 创建前的 startup Window，不是业务页子窗口：
+
+- `WindowStartupLocation=CenterScreen`；
+- `ShowInTaskbar=True`；
+- 不设置 `Owner=MainWindow`，不依赖 `CenterOwner`；
+- `WindowStyle=None`、`ResizeMode=NoResize`，复用现有 `Colors.xaml`、`Typography.xaml`、
+  `Cards.xaml` 工业深色资源。
+
+Dialog 只消费 `DatabaseStartupDecision`：
+
+```csharp
+public enum DatabaseRecoveryDialogAction
+{
+    Recover,
+    ResumeRecovery,
+    Retry,
+    OpenDataDirectory,
+    Exit
+}
+
+public sealed class DatabaseRecoveryDialogResult
+{
+    public DatabaseRecoveryDialogAction Action { get; }
+    public SqliteBackupCandidate? Candidate { get; }
+}
+```
+
+默认 `Result.Action` 必须是 `Exit`。X、Alt+F4、系统关闭和未选择动作关闭窗口都返回
+`Exit`。Retry、OpenDataDirectory、Exit 只返回动作，不自行重新 Inspect、扫描目录、打开
+目录或退出应用。Recover 只返回用户从 `decision.Candidates` 选中的 candidate；默认选择
+Gate 已按新到旧排序列表的第一项。ResumeRecovery 的 Candidate 必须为 `null`。
+
+`Corrupt` 只显示 Gate 提供的候选和健康摘要；无候选时隐藏或禁用 Recover。`Unavailable`
+只显示 ErrorType、ErrorCode/ErrorCodeName、ErrorMessage、Retry、打开目录和退出。
+`UnsupportedSchema` 显示 `decision.Health.SchemaVersion` 与公开的
+`SqlitePassageRecordStore.CurrentSchemaVersion`，不在 UI 复制版本常量，也不提供恢复动作。
+`InterruptedRecovery` 显示 marker 的 source backup、corrupt bundle、staging、startedAt 和
+manifest hash，但不在 UI 重新检查这些路径；真正 Resume 入口再次验证。`RecoveryStateError`
+显示 `ErrorMessage`，只允许 Retry、打开目录和退出。
+
+Recover/ResumeRecovery 附近只显示提示“执行恢复前需要管理员验证”。Task 6 不打开
+`AdminPasswordDialog`，不调用 `AdminModeService`，不执行认证；Task 7 的 App orchestration
+在调用 `Recover` 或 `ResumeInterruptedRecovery` 前检查 `AdminModeService.IsAdmin`，未验证
+时先显示现有管理员密码窗口，验证失败或取消不得调用 recovery service。
 
 ## 14. 组件边界
 
@@ -575,7 +752,13 @@ WAL/SHM 已在 bundle 中保存后，才允许从生产路径移走或清理，�
 
 ### DatabaseMaintenanceCoordinator
 
-负责正常运行期间的 startup catch-up、每日 02:00 调度、备份串行化、可取消停止和日志协调。它不把备份失败转换为 RFID 故障。
+负责正常运行期间的 startup catch-up、每日 02:00 调度、备份串行化、可取消停止和日志协调。它不把备份失败转换为 RFID 故障。构造函数必须接收
+`ISqliteDatabaseHealthChecker`。进入共享 `SemaphoreSlim` 后，Coordinator 调用
+`ScanCandidates` 找到当天全部正式 candidate，再对每个调用
+`Inspect(candidate.Path, SqliteInspectionMode.FullValidation)`；只有当前 `Healthy`
+的 candidate 才能抑制新备份。`Corrupt`、`Unavailable` 和 `UnsupportedSchema` 的今日
+candidate 不计为已有健康备份；多个 candidate 中任意一个当前 Healthy 即可 skip，
+不能只按最新文件名决定。
 
 ### SqlitePassageRecordStore
 
@@ -612,12 +795,25 @@ App.OnStartup
 → YardCommunicationManager Start
 ```
 
+由于 recovery dialog 在 `MainWindow` 之前显示，App startup gate 阶段必须使用
+`ShutdownMode.OnExplicitShutdown`（或等价且可测试的实现），不能让 startup dialog 被 WPF
+自动当作最终 `Application.MainWindow`。只有正常业务 `MainWindow` 创建并赋值给
+`Application.MainWindow` 后，才切换回 `ShutdownMode.OnMainWindowClose`。Retry、打开目录和
+Exit 的结果由 App 处理，关闭 dialog 本身不能意外结束或绕过 startup 决策流程。
+
+Recover/ResumeRecovery 是 destructive operation。App 在调用 recovery service 前检查
+`AdminModeService.IsAdmin`；未验证时显示现有 `AdminPasswordDialog`，验证失败或取消不得
+调用 `Recover` 或 `ResumeInterruptedRecovery`，已处于管理员模式时不重复弹窗。
+
 MainWindow 不再负责决定数据库是否损坏，也不应在构造早期自行打开未经门禁的生产数据库。
 
 完整退出顺序必须是：
 
 ```text
-停止 YardCommunicationManager / runtime
+停止 YardCommunicationManager / runtime（确认 StopAllAsync 完成）
+→ Dispose YardCommunicationManager
+→ Acceptance final snapshot
+→ Raw Packet Black Box drain / Dispose
 → DatabaseMaintenanceCoordinator.StopAsync()
 → 等待正在运行的 backup 安全结束
 → Dispose DatabaseMaintenanceCoordinator
@@ -627,8 +823,15 @@ MainWindow 不再负责决定数据库是否损坏，也不应在构造早期自
 
 `StopAsync` 必须等待或安全取消 in-flight backup，不能在 backup 仍使用数据库时
 Dispose Store。任何退出路径都不得让 MainWindow 和 App 同时 Dispose Store，也不得
-让 backup scheduler 在 Store Dispose 后继续运行。本设计不改变报警恢复、Raw Packet
-Black Box 或 560/620 Context 隔离。
+让 backup scheduler 在 Store Dispose 后继续运行。MainWindow 在 manager 停止失败时
+不得继续 Black Box 或数据库释放，必须保留 manager 以允许用户重试；不能用 `finally`
+强制绕过该边界。本设计不改变报警恢复、Raw Packet Black Box 或 560/620 Context 隔离。
+
+App 的 `StopDatabaseInfrastructureAsync()` 在独立同步锁内缓存 shutdown Task：并发或
+进行中的调用共享同一个 Task，成功完成后重复调用保持幂等；如果该 Task faulted 或
+cancelled，下一次调用必须创建新的 shutdown Task，不能让一次失败永久毒化后续重试。
+每次 shutdown 仍固定执行 `Coordinator.StopAsync()` → coordinator Dispose → Store
+Dispose；Coordinator 停止失败时不得 Dispose Store。
 
 ## 16. 正常运行期维护
 
@@ -684,6 +887,8 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 
 - 启动门禁是唯一允许决定“是否创建业务运行环境”的边界。
 - `Unavailable` 只允许重试、打开数据目录或退出，永远不进入 recovery candidate 流程。
+- `UnsupportedSchema` 只允许升级提示、重试、打开数据目录或退出，永远不进入 recovery
+  candidate 流程，也不创建 Store。
 - 恢复操作期间禁止创建 Store 和启动通信管理器。
 - 日常备份与 02:00 调度共享一个串行互斥，不允许 startup backup 与定时 backup 并发。
 - 备份失败只影响维护状态，不改变 `YardCommunicationManager`、`RfidRuntimeCoordinator` 或报警状态。
@@ -709,6 +914,11 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 - locked/busy 数据库判定为 `Unavailable`，而不是 `Corrupt`。
 - access denied 判定为 `Unavailable`。
 - `Unavailable` 不进入 recovery candidate 流程。
+- v0、v1、v2、v3 物理健康库分别返回对应 `SchemaVersion` 并保持 `Healthy`。
+- `user_version` 超过当前 Store 支持版本返回 `UnsupportedSchema`，而不是 `Corrupt` 或
+  `Unavailable`。
+- 物理 corruption 与后续 unavailable 错误同时存在时最终状态仍为 `Corrupt`。
+- `FullValidation` 同样拒绝超前 schema 版本。
 - 生产数据库已有 WAL 时，inspection 能读到已提交数据。
 - backup/staging inspection 不执行 WAL pragma、不产生 WAL/SHM、不修改文件。
 
@@ -719,6 +929,9 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 - 验证前只存在 `.tmp.db`。
 - 验证失败的临时文件不会变成正式备份。
 - 每天最多一份正式备份。
+- 今日 formal candidate 必须经过本次 `FullValidation`；`Corrupt`、`Unavailable`、
+  `UnsupportedSchema` 不能 suppress 新备份；多个今日 candidate 中任一当前 Healthy
+  即可 suppress。
 - startup backup 与 02:00 backup 串行化。
 - 14 天边界正确。
 - 备份失败不会触发破坏性 retention。
@@ -731,12 +944,17 @@ SQLite backup / recovery 本身通过 Infrastructure 层的隔离测试验证，
 - staging 验证通过前生产库不改变。
 - 原始 `.db` 被保存。
 - 已存在的 WAL/SHM 被保存。
+- 非文件 WAL/SHM 路径不能被 `File.Exists` 当作缺失；只有明确 not-found 才可缺省，
+  其它访问错误必须在 marker 前失败。
 - candidate/staging 验证使用非破坏性的 Inspection Connection。
 - recovery marker 至少包含 source backup、corrupt bundle、staging 和 started timestamp。
 - marker + 缺失生产 DB 永远不创建空库。
 - marker + 仍存在生产 DB 也阻止普通启动。
 - corrupt bundle 完成后、sidecar 移除后、生产替换中断后，marker 和证据仍保留。
 - marker 只在最终 health check 成功后删除。
+- marker JSON contract 包含 `RecoveryStarted`、`SourceBackupPath`、`CorruptBundlePath`、
+  `StagingPath`、`StartedAt`、`BundleManifestSha256`；Resume 必须校验 manifest hash 和
+  evidence set。
 - 恢复后的生产库再次验证。
 - 恢复失败不启动 runtime。
 - 无健康备份不创建空数据库。

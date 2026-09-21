@@ -14,8 +14,10 @@
 
 - 业务连接继续使用 `journal_mode=WAL`、`synchronous=FULL`、`foreign_keys=ON`、`busy_timeout=5000`。
 - Inspection Connection 不执行 `journal_mode=WAL`，不修改 journal mode、`user_version`、schema，不执行 migration。
-- 健康状态必须区分 `Missing`、`Healthy`、`Corrupt`、`Unavailable`。
+- 健康状态必须区分 `Missing`、`Healthy`、`Corrupt`、`Unavailable`、`UnsupportedSchema`。
 - `Unavailable` 阻止业务启动，但不进入 recovery candidate 流程，只允许重试、打开数据目录、退出。
+- `UnsupportedSchema` 阻止业务启动、Store/migration、backup/recovery candidate 和空库初始化，
+  只允许升级提示、重试、打开数据目录或退出。
 - destructive replacement 前必须完成 staging 验证、corrupt bundle 保存和 recovery marker 持久化。
 - destructive replacement 后原始生产数据安全由完整 corrupt bundle 提供，不声称生产路径永远不被覆盖。
 - final health check 失败时不创建 Store、MainWindow 正常业务或空数据库，不启动 RFID，并保留 marker、bundle 和失败证据。
@@ -56,7 +58,8 @@ public enum SqliteDatabaseHealthState
     Missing,
     Healthy,
     Corrupt,
-    Unavailable
+    Unavailable,
+    UnsupportedSchema
 }
 
 public enum SqliteInspectionMode
@@ -86,6 +89,9 @@ public sealed class SqliteDatabaseHealthResult
     public string ForeignKeyCheckSummary { get; }
     public string? ErrorType { get; }
     public string? ErrorMessage { get; }
+    public int? ErrorCode { get; }
+    public string? ErrorCodeName { get; }
+    public int? SchemaVersion { get; }
 }
 
 public sealed class SqliteBackupCandidate
@@ -103,17 +109,19 @@ public sealed class SqliteBackupResult
 
 public sealed class SqliteRecoveryMarker
 {
+    public bool RecoveryStarted { get; }
     public string SourceBackupPath { get; }
     public string CorruptBundlePath { get; }
     public string StagingPath { get; }
     public DateTimeOffset StartedAt { get; }
+    public string BundleManifestSha256 { get; }
 }
 
 public sealed class SqliteRecoveryResult
 {
     public bool Succeeded { get; }
-    public string? CorruptBundlePath { get; }
-    public string? FailureReason { get; }
+    public string? ErrorMessage { get; }
+    public SqliteRecoveryMarker? Marker { get; }
 }
 
 public enum DatabaseStartupDecisionKind
@@ -122,15 +130,18 @@ public enum DatabaseStartupDecisionKind
     StartHealthy,
     RecoverCorrupt,
     Unavailable,
-    InterruptedRecovery
+    UnsupportedSchema,
+    InterruptedRecovery,
+    RecoveryStateError
 }
 
 public sealed class DatabaseStartupDecision
 {
     public DatabaseStartupDecisionKind Kind { get; }
-    public SqliteDatabaseHealthResult Health { get; }
+    public SqliteDatabaseHealthResult? Health { get; }
     public IReadOnlyList<SqliteBackupCandidate> Candidates { get; }
     public SqliteRecoveryMarker? RecoveryMarker { get; }
+    public string? ErrorMessage { get; }
 }
 
 public interface ISqliteBackupService
@@ -160,8 +171,10 @@ public interface ISqliteBackupService
 
 正式 `.db` backup 在 promotion 前必须已经通过 `FullValidation`。
 
-`DatabaseMaintenanceCoordinator` 和 `DatabaseStartupGate` 只接收 `ISqliteBackupService`；
-不 cast 为 concrete `SqliteBackupService`，Coordinator 也不重新实现 filename parsing。
+`DatabaseMaintenanceCoordinator` 接收 `ISqliteBackupService` 和
+`ISqliteDatabaseHealthChecker`；不 cast 为 concrete `SqliteBackupService`，Coordinator
+也不重新实现 filename parsing。`ScanCandidates` 只发现严格命名 candidate，不能代替
+每日决策时对今日 candidate 的 `FullValidation`。
 
 ## Task 1: SQLite Health Model and Inspection Connection
 
@@ -171,13 +184,16 @@ public interface ISqliteBackupService
 - Create: `src/MineRailMonitor.Infrastructure/Persistence/SqliteDatabaseHealthResult.cs`
 - Create: `src/MineRailMonitor.Infrastructure/Persistence/SqliteDatabaseHealthChecker.cs`
 - Create: `tests/MineRailMonitor.Infrastructure.Tests/SqliteDatabaseHealthCheckerTests.cs`
-- Modify: none
+- Modify: `src/MineRailMonitor.Infrastructure/Persistence/SqlitePassageRecordStore.cs`
 
 **Interfaces:**
 
 - Consumes: `IRfidTimeProvider.UtcNow`、`System.Data.SQLite.SQLiteConnection`、`ILogger`。
 - Produces: `SqliteDatabaseHealthState`、`SqliteDatabaseHealthResult`、
   `SqliteInspectionMode`、`ISqliteDatabaseHealthChecker.Inspect(string, SqliteInspectionMode)`。
+- `SqlitePassageRecordStore` 暴露供 Infrastructure 和启动错误 UI 共享的
+  `public const int CurrentSchemaVersion = 3`；Store 的现有 schema SQL、migration、
+  `user_version` 写入和 CRUD 语义保持不变。
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -268,6 +284,19 @@ public void Inspection_reads_committed_wal_data_without_creating_sidecars_for_ba
 factory 抛出 `UnauthorizedAccessException`，断言 access-denied 分类仍为 `Unavailable`，
 不得把权限异常映射为 `Corrupt`。
 
+还必须添加：
+
+- `Supported_current_schema_is_healthy_and_reports_schema_version`
+- `Supported_old_schema_v1_is_healthy`
+- `Supported_old_schema_v2_is_healthy`
+- `Schema_version_zero_preserves_existing_store_semantics`
+- `Newer_schema_is_reported_as_unsupported_schema`
+- `Unsupported_schema_is_not_corrupt`
+- `Unsupported_schema_is_not_unavailable`
+- `Full_validation_also_rejects_newer_schema`
+
+测试直接创建合法 SQLite 文件并执行 `PRAGMA user_version = N`，不构造 v4 Store。
+
 - [ ] **Step 2: Run RED**
 
 Run:
@@ -276,7 +305,8 @@ Run:
 dotnet test tests/MineRailMonitor.Infrastructure.Tests/MineRailMonitor.Infrastructure.Tests.csproj -c Debug --filter "FullyQualifiedName~SqliteDatabaseHealthCheckerTests"
 ```
 
-Expected: FAIL，原因是 `SqliteDatabaseHealthChecker`、状态枚举和结果类型尚未定义。
+Expected: FAIL，原因是 `UnsupportedSchema`、`SchemaVersion` 和共享
+`CurrentSchemaVersion` 尚未实现。
 
 - [ ] **Step 3: Implement the minimum health checker**
 
@@ -311,7 +341,13 @@ public sealed class SqliteDatabaseHealthChecker : ISqliteDatabaseHealthChecker
 5. locked、busy timeout、access denied、sharing violation、路径/磁盘不可用和无法
    确定内容是否损坏的 SQLite/IO 异常返回 `Unavailable`，记录 `ErrorType`、错误码
    和摘要，不进入 recovery。
-6. Inspection Connection 只读查询，关闭连接后不产生 backup/staging 的 `-wal`、
+6. 在物理检查完成后读取 `PRAGMA user_version`。物理 corruption 优先于 unavailable，
+   unavailable 优先于超前 schema；最终状态优先级为
+   `Corrupt → Unavailable → UnsupportedSchema → Healthy`。v0/v1/v2/v3 保持 Healthy
+   并返回对应 `SchemaVersion`，超出 `CurrentSchemaVersion` 返回 UnsupportedSchema。
+7. `UnsupportedSchema` 不创建 Store、不执行 migration、不进入 recovery、不创建空库，
+   后续 UI 只允许升级提示、Retry、打开数据目录和 Exit。
+8. Inspection Connection 只读查询，关闭连接后不产生 backup/staging 的 `-wal`、
    `-shm`，并且生产 DB inspection 能看到已有 WAL 的已提交数据。
 
 - [ ] **Step 4: Run GREEN and regression**
@@ -504,6 +540,7 @@ public sealed class DatabaseMaintenanceCoordinator : IDisposable
         string productionDatabasePath,
         string backupRootDirectory,
         ISqliteBackupService backupService,
+        ISqliteDatabaseHealthChecker healthChecker,
         SqliteRetentionService retentionService,
         IRfidTimeProvider timeProvider,
         IAsyncDelay delay,
@@ -592,6 +629,17 @@ public async Task StopAsync_waits_for_in_flight_backup_before_returning()
 }
 ```
 
+`Existing_formal_backup_for_today_skips_backup_after_process_restart` 必须使用全新的
+Coordinator，并先让当天 candidate 通过
+`healthChecker.Inspect(candidate.Path, SqliteInspectionMode.FullValidation)` 返回
+`Healthy`，再断言 `CreateCalls == 0`。另加：
+
+- `Corrupt_formal_backup_for_today_does_not_suppress_new_backup`
+- `Unavailable_formal_backup_for_today_does_not_suppress_new_backup`
+- `Unsupported_schema_formal_backup_for_today_does_not_suppress_new_backup`
+- `One_healthy_candidate_for_today_suppresses_new_backup_even_if_newer_candidate_is_corrupt`
+- `Daily_backup_candidate_check_uses_full_validation`
+
 另加 `Startup_and_scheduled_backup_share_one_serial_gate`：注入 `ManualAsyncDelay`，让
 测试手工释放“等待到下一次 02:00”的 delay，再让 backup service 第一次调用阻塞，同时
 触发 startup catch-up 和 scheduled tick，断言 backup service 最大并发数为 1。
@@ -619,9 +667,12 @@ Expected: FAIL，原因是 retention service、coordinator 和 runner contracts 
   `Backups/SQLite/yyyy-MM-dd/` 日期目录；保留最近 14 个本地自然日，today 和 today-13
   均保留，today-14 才可删除；非日期目录、`Data/Corrupt` 和不属于本应用的文件不删除。
 - 启动 catch-up 和每日 02:00 调度共享一个 `SemaphoreSlim(1, 1)`；进入锁后调用
-  `backupService.ScanCandidates(backupRootDirectory)`，依据 candidate 的
-  `LocalTimestamp` 本地日期再次检查当天正式健康 backup，存在则 skip，否则调用
-  `CreateValidatedBackupAsync`。因此跨进程重启也保证一天最多一份，不依赖内存 last-run 状态。
+  `backupService.ScanCandidates(backupRootDirectory)`。`ScanCandidates` 只负责严格正式
+  文件发现、日期一致性和规范文件名排序，不代表内容当前仍 Healthy。协调器筛选
+  `candidate.LocalTimestamp.Date == localNow.Date` 的全部候选，并逐个调用
+  `healthChecker.Inspect(candidate.Path, SqliteInspectionMode.FullValidation)`；只有当前
+  `Healthy` 的候选才 skip，否则调用 `CreateValidatedBackupAsync`。因此损坏、不可用或
+  schema 不支持的今日正式文件不会压制新备份，且跨进程重启仍不依赖内存 last-run 状态。
 - `RunStartupCatchUpAsync` 对 Existing Healthy/Recovered 可在 Store 创建前运行，因为它
   只依赖数据库路径和 `ISqliteBackupService`；Missing/first install 必须等 Store 初始化
   schema 后运行以生成第一份 backup。`StartAsync` 只启动后台 02:00 loop，不在 UI、UDP 或
@@ -695,6 +746,23 @@ public sealed class SqliteRecoveryService
         string productionDatabasePath,
         SqliteRecoveryMarker marker);
 }
+
+public sealed class SqliteRecoveryMarker
+{
+    public bool RecoveryStarted { get; }
+    public string SourceBackupPath { get; }
+    public string CorruptBundlePath { get; }
+    public string StagingPath { get; }
+    public DateTimeOffset StartedAt { get; }
+    public string BundleManifestSha256 { get; }
+}
+
+public sealed class SqliteRecoveryResult
+{
+    public bool Succeeded { get; }
+    public string? ErrorMessage { get; }
+    public SqliteRecoveryMarker? Marker { get; }
+}
 ```
 
 - [ ] **Step 1: Write the failing tests**
@@ -706,6 +774,8 @@ public sealed class SqliteRecoveryService
   字节内容和路径均不变。
 - `Recover_saves_db_wal_shm_before_destructive_replacement`：准备生产 DB、实际存在的
   `-wal`、`-shm`，恢复后 `Data/Corrupt/<timestamp>/` 三个文件均存在且字节相同。
+- `Recover_does_not_treat_non_file_wal_path_as_absent`：当 production `-wal` 路径是目录
+  而不是文件时，恢复在 marker 前失败，生产文件不变且不进入 replacement。
 - `Recover_persists_marker_before_sidecar_removal`：通过 `phaseObserver` 记录顺序，断言
   `CorruptBundleSaved` → `RecoveryMarkerPersisted` → `SidecarsRemoved` →
   `ProductionReplacementStarted`。
@@ -786,10 +856,15 @@ Resume 入口必须先重新 `ReadMarker()` 并确认 marker 仍存在且可解�
   重新执行 source/staging `FullValidation`。任一步失败都不开始新的 destructive replacement。
 - Resume 在 sidecar 已移除或 replacement 已开始的 crash boundary 仍可从 marker 继续；若
   前置证据不完整则安全失败，不猜测生产状态。
-- corrupt bundle 只复制实际存在的 `.db`、`.db-wal`、`.db-shm`；任何必需复制失败都
+- corrupt bundle 只复制实际存在的 `.db`、`.db-wal`、`.db-shm`；optional WAL/SHM 只有
+  `FileNotFoundException` 或 `DirectoryNotFoundException` 才解释为 truly absent，
+  权限、sharing、directory-as-file 和其它 IO 异常都必须失败；任何必需复制失败都
   停止恢复，不开始 destructive replacement。
-- marker 使用原子临时写入/rename，包含 `SourceBackupPath`、`CorruptBundlePath`、
-  `StagingPath` 和 `StartedAt`；marker 写入失败时不移除 sidecar。
+- marker 使用原子临时写入/rename，包含 `RecoveryStarted`、`SourceBackupPath`、
+  `CorruptBundlePath`、`StagingPath`、`StartedAt` 和 `BundleManifestSha256`；marker
+  写入失败时不移除 sidecar。bundle manifest 必须列出 db/WAL/SHM evidence 的 length
+  与 SHA-256，写入使用 `WriteThrough` 和 `Flush(true)`；Resume 必须校验 manifest
+  anchor hash 和实际 evidence set，路径必须限制在约定的 data/corrupt/staging 范围。
 - replacement 前不修改生产路径；replacement 开始后原始数据安全由完整 bundle 提供，
   不声称原生产路径永远不变。
 - final health 失败时不创建 Store、MainWindow 或空库，不启动 RFID；保留 marker、
@@ -861,12 +936,27 @@ public sealed class DatabaseStartupGate
   `FullValidation` 为 `Unavailable` 时排除它，Dialog 的 candidates 不包含该文件。
 - `Unavailable_database_returns_unavailable_without_recovery_candidates`：即使备份目录
   有健康文件，也返回 `Unavailable` 且 candidates 为空。
+- `Newer_schema_returns_unsupported_schema_without_recovery_candidates`：健康但
+  `user_version > CurrentSchemaVersion` 时返回 `UnsupportedSchema`，candidates 为空，
+  不调用 `ScanCandidates`，不调用 RecoveryService replacement。
+- `Unsupported_schema_candidate_is_not_presented_for_restore`：候选的
+  `FullValidation` 返回 `UnsupportedSchema` 时从 Dialog candidates 排除。
 - `Marker_and_missing_database_returns_interrupted_recovery_not_create_new`。
 - `Marker_and_existing_database_still_blocks_normal_start`。
 - `Interrupted_recovery_decision_exposes_marker_for_resume`：marker 存在时 decision 保留
   marker 详情，供 UI 进入 ResumeRecovery，而不是只产生无状态 Retry。
+- `Malformed_recovery_marker_blocks_normal_start`：marker 存在但 JSON malformed、字段
+  缺失或 path/hash contract invalid 时，不能解释为 marker absent。
+- `Unreadable_recovery_marker_never_returns_create_new`：marker 文件不可读时不能降级为
+  `CreateNew`。
+- `Malformed_marker_and_missing_database_never_returns_create_new`：生产 DB 缺失时，
+  malformed marker 也必须返回 `RecoveryStateError`。
 - `Acceptance_mode_bypasses_production_backup_recovery_and_maintenance_paths`：只返回
   acceptance 数据路径对应的可启动决策，不访问生产 `Backups`、`Data/Corrupt` 或 recovery UI。
+- `Candidate_validation_uses_full_validation`、`Healthy_candidates_preserve_newest_to_oldest_order`：
+  候选显示前逐个执行 `FullValidation`，保留通过者的新到旧顺序。
+- `Missing_candidate_is_not_presented_for_restore`：候选验证为 `Missing` 时排除。
+- `Inspect_does_not_modify_database_or_candidate_files`：门禁检查不改变生产库或候选文件。
 
 关键断言使用：
 
@@ -888,7 +978,9 @@ Expected: FAIL，原因是 startup decision 类型和 gate 尚未实现。
 
 执行顺序固定为：
 
-1. 先读取 marker。
+1. 先读取 marker。只有 formal marker 真正不存在时才能继续检查生产 DB；marker 文件
+   malformed、unreadable、路径 contract invalid 或 manifest hash invalid 都是启动错误，
+   返回 `RecoveryStateError`，绝不能解释为 marker absent，也绝不能进入 `CreateNew`。
 2. marker 存在时先返回 `InterruptedRecovery`，不把缺失生产 DB 解释为 `Missing`，
    也不因生产 DB 存在而直接 Healthy；decision 必须携带 marker 供 App 调用
    `ResumeInterruptedRecovery`。
@@ -902,11 +994,19 @@ Expected: FAIL，原因是 startup decision 类型和 gate 尚未实现。
 7. `RecoveryService` 在真正恢复入口仍再次对 selected candidate 执行 `FullValidation`，
    不能因为 gate 已经验证过就跳过。
 8. `Unavailable` 返回 `Unavailable`，candidates 为空，不移动生产文件、不创建空库。
-9. `acceptanceMode=true` 时只使用传入 acceptance database/log 路径，跳过生产 backup、
-   recovery candidate、marker UI 和 scheduler。
+9. `UnsupportedSchema` 返回 `UnsupportedSchema`，candidates 为空，不调用
+   `ScanCandidates` 或 RecoveryService，不创建 Store/空库；UI 只提供升级提示、重试、
+   打开数据目录和退出。
+10. `acceptanceMode=true` 时只使用传入 acceptance database/log 路径，跳过生产 backup、
+   recovery candidate、marker UI 和 scheduler；只执行 acceptance 数据库的
+   `StartupFast` health check。即使结果为 `Corrupt`，也返回空 candidates 的
+   `RecoverCorrupt`，不扫描生产备份。
 
 Gate 不创建 `SqlitePassageRecordStore`，不执行 schema migration，不启动 MainWindow、
-YardCommunicationManager 或 RFID。
+YardCommunicationManager 或 RFID。marker 读取错误路径只允许进入明确的 recovery/error UI、
+重试、打开数据目录或退出；无论 marker 错误类型如何，都不得创建 Store、空数据库或
+MainWindow 正常业务环境。Gate 本身不调用 `Recover` 或 `ResumeInterruptedRecovery`，
+也不移动、删除或替换任何生产/备份文件。
 
 - [ ] **Step 4: Run GREEN and regression**
 
@@ -932,7 +1032,7 @@ git commit -m "feat: add sqlite startup decision gate"
 - Create: `src/MineRailMonitor/Pages/DatabaseRecoveryDialog.xaml`
 - Create: `src/MineRailMonitor/Pages/DatabaseRecoveryDialog.xaml.cs`
 - Create: `tests/MineRailMonitor.Core.Tests/DatabaseRecoveryDialogMarkupTests.cs`
-- Modify: none
+- Modify: `src/MineRailMonitor.Infrastructure/Persistence/SqlitePassageRecordStore.cs`
 
 **Interfaces:**
 
@@ -970,10 +1070,22 @@ public sealed partial class DatabaseRecoveryDialog : Window
 - `Corrupt` 状态显示健康检查摘要、候选时间/路径、恢复、打开目录和退出操作。
 - 无健康候选时恢复按钮隐藏或不可用。
 - `Unavailable` 状态只出现重试、打开数据目录、退出，不出现恢复按钮。
+- `UnsupportedSchema` 状态显示“数据库版本高于当前应用支持版本，请升级应用程序”、
+  当前支持版本和实际 `SchemaVersion`，只出现重试、打开数据目录、退出，不出现恢复、
+  继续恢复或忽略继续按钮。
 - interrupted recovery 显示 marker、staging、corrupt bundle、source backup 路径，
   started timestamp 和“上一次恢复未完成”，并提供“继续恢复”、打开数据目录和退出。
 - `InterruptedRecovery_offers_resume_recovery`：当 marker/source/bundle 前置证据可检查时，
   ResumeRecovery 可用；Retry 可以保留但不能是唯一恢复动作。
+- `Recovery_state_error_never_offers_recover_or_resume`、
+  `Recovery_state_error_shows_error_message`：RecoveryStateError 只显示错误、重试、打开目录
+  和退出。
+- `Closing_without_action_defaults_to_exit`：X、Alt+F4、系统关闭均返回 Exit。
+- `Unsupported_schema_shows_actual_and_supported_versions`：实际版本来自 decision，支持版本
+  来自 `SqlitePassageRecordStore.CurrentSchemaVersion`，不能在 UI 硬编码。
+- `Recover_returns_selected_candidate`：Recover 只返回 `decision.Candidates[0]` 或用户选中项。
+- `Recover_requires_admin_verification_prompt_but_does_not_authenticate_in_task_6`：Task 6 只
+  显示管理员验证提示，不创建 AdminPasswordDialog、不调用 AdminModeService。
 - 不出现“忽略错误继续运行”“创建空数据库”等文案。
 
 示例断言：
@@ -996,13 +1108,21 @@ Expected: FAIL，原因是 Dialog XAML/C# 和 markup contract 尚不存在。
 - [ ] **Step 3: Implement the minimum dialog**
 
 - 复用现有深色工业资源，不创建数据库管理页面，不改变现有主窗口布局。
+- 这是 `MainWindow` 创建前的 startup Window：`WindowStartupLocation=CenterScreen`、
+  `ShowInTaskbar=True`，不设置 MainWindow Owner；关闭动作默认是 `Exit`。
 - `Corrupt` 状态只允许用户选择 gate 在本次启动中已经通过 `FullValidation` 的 candidate；
   Dialog 不接受仅凭合法文件名的 backup。本身不复制、替换或删除数据库文件。
 - `Unavailable` 只显示重试、打开数据目录、退出。
+- `UnsupportedSchema` 只显示版本不兼容提示、重试、打开数据目录、退出；不创建 Store、
+  不执行 migration、不进入 recovery。
 - marker 状态显示 interrupted recovery，不自动静默续跑；操作结果通过
   `DatabaseRecoveryDialogResult` 返回给 App。可恢复前置条件满足时显示 ResumeRecovery，
   同时保留 Retry、打开数据目录和退出。
-- 所有按钮都只返回动作，实际恢复由 `SqliteRecoveryService` 执行。
+- `RecoveryStateError` 只显示错误信息、重试、打开目录和退出；不显示 Recover/Resume。
+- Recover/Resume 附近显示“执行恢复前需要管理员验证”，但 Task 6 不打开
+  `AdminPasswordDialog`，不调用 `AdminModeService.EnterAdminMode`；认证由 Task 7 App
+  orchestration 在调用 recovery service 前统一完成。
+- 所有按钮都只返回动作，实际恢复由后续 App/recovery 流程执行；Task 6 不调用 `SqliteRecoveryService`。
 
 - [ ] **Step 4: Run GREEN and regression**
 
@@ -1051,6 +1171,13 @@ git commit -m "feat: add sqlite startup recovery dialog"
 - `App_routes_resume_recovery_before_store_creation`：InterruptedRecovery 的
   `ResumeRecovery` 调用 `SqliteRecoveryService.ResumeInterruptedRecovery`，成功后重新做
   startup/final health gate，失败时不创建 Store/MainWindow/RFID。
+- `Recover_requires_admin_verification_before_recovery_service`、
+  `Resume_recovery_requires_admin_verification_before_recovery_service`：非管理员先显示
+  `AdminPasswordDialog`，认证成功前不得调用 recovery service。
+- `Admin_cancel_never_invokes_recovery_service`：取消或验证失败只能返回安全处理路径。
+- `Startup_dialog_uses_explicit_shutdown_until_main_window_is_created`：startup dialog 不被
+  WPF 自动认定为最终 MainWindow；正常 MainWindow 创建并赋值后才恢复
+  `OnMainWindowClose`。
 
 另在 `DatabaseStartupGateTests` 中保留实际决策测试；markup tests只约束 ownership/顺序，
 不代替 Infrastructure 行为测试。
@@ -1088,6 +1215,10 @@ resolve production/acceptance paths
 → Corrupt: ScanCandidates, FullValidation-filter candidates, show Dialog
   → Recover selected candidate with another FullValidation
   → final FullValidation
+→ UnsupportedSchema: show incompatible-schema UI
+  → no SqlitePassageRecordStore
+  → no migration, backup, or recovery candidate flow
+  → no DatabaseMaintenanceCoordinator/MainWindow/RFID startup
 → InterruptedRecovery: show marker evidence and ResumeRecovery
   → ResumeInterruptedRecovery
   → final startup gate/health check
@@ -1112,14 +1243,27 @@ resolve production/acceptance paths
   创建 Store。
 - 对 Unavailable 和 Resume 失败，App 不创建 Store、不创建 MainWindow、不启动 RFID；
   interrupted UI 提供 ResumeRecovery、Retry、打开目录或退出，Retry 不再是唯一路径。
+- 对 UnsupportedSchema，App 不创建 Store、不执行 migration、不创建
+  DatabaseMaintenanceCoordinator，不扫描或选择 recovery candidate，不创建空数据库，
+  不创建 MainWindow、不启动 RFID；UI 只显示当前 schema 与应用支持上限，并提供升级后
+  重试、打开数据目录或退出。
 - ResumeRecovery 成功后重新执行 startup gate/final health；只有 Healthy 才继续 Store/MainWindow。
 - Acceptance 使用命令行提供的独立 database/log/runtime 路径，跳过生产 backup、
   recovery UI 和 scheduler，不创建 production maintenance Coordinator；仍创建现有业务
   Store 以执行 Acceptance。
+- 对 Recover/ResumeRecovery，App 在调用 recovery service 前检查 `AdminModeService.IsAdmin`。
+  未进入管理员模式时显示现有 `AdminPasswordDialog`；验证失败或取消不得调用
+  `Recover`/`ResumeInterruptedRecovery`，而应返回 recovery dialog 或安全错误路径；已是
+  管理员时不重复验证。
 - `MainWindow` 构造函数改为接收 `SqlitePassageRecordStore`，保留现有 LoadProject、
   Yard manager、报警、Black Box 和双站场逻辑；删除构造函数中的 Store new。
 - App 保存 Store 和 coordinator 字段，后续 Task 8 负责安全停止；MainWindow 不拥有
   数据库基础设施。App 始终是 Store 和 coordinator 的唯一 owner。
+- 当前 `App.xaml` 的 `ShutdownMode=OnMainWindowClose` 与 startup dialog 先于 MainWindow
+  显示存在风险。Task 7 必须在 startup gate/dialog 阶段使用
+  `ShutdownMode.OnExplicitShutdown`（或等价可测试实现），避免 recovery dialog 被当成最终
+  MainWindow ownership；只有正常业务 MainWindow 创建并赋值给 `Application.MainWindow` 后，
+  才切回 `ShutdownMode.OnMainWindowClose`。
 
 - [ ] **Step 4: Run GREEN and regression**
 
@@ -1151,7 +1295,7 @@ git commit -m "feat: gate sqlite startup before main window"
 **Interfaces:**
 
 - Consumes: `DatabaseMaintenanceCoordinator.StopAsync()`、现有 MainWindow `OnWindowClosing` / `_allowWindowClose`、`YardCommunicationManager.Dispose()`、Raw Packet Black Box lifecycle。
-- Produces: `App.StopDatabaseInfrastructureAsync()`，幂等执行 coordinator stop → coordinator dispose → Store dispose；MainWindow 先停止 manager/runtime，再请求 App 完成数据库 shutdown。
+- Produces: `App.StopDatabaseInfrastructureAsync()`，通过缓存同一个 in-flight `Task` 让并发/重复调用共享 coordinator stop → coordinator dispose → Store dispose；MainWindow 先停止 manager/runtime，再请求 App 完成数据库 shutdown。
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1159,15 +1303,22 @@ git commit -m "feat: gate sqlite startup before main window"
 
 - `StopAsync_waits_for_in_flight_backup_before_store_can_be_disposed`：blocking runner
   未释放时 `StopAsync` 不完成；释放后才完成。
-- `StopAsync_is_idempotent`：连续调用两次不重复启动或 Dispose backup。
+- `StopAsync_is_idempotent_and_returns_same_inflight_task`：连续调用两次返回同一个 in-flight `Task`，不重复启动或 Dispose backup。
 
 在 markup tests 添加：
 
 - `Shutdown_order_is_runtime_then_coordinator_then_store`：`MainWindow.xaml.cs` 中 manager
   停止发生在调用 App database shutdown 之前；`App.xaml.cs` 中 coordinator stop 发生在
   Store dispose 之前。
-- `MainWindow_keeps_black_box_after_manager_stop_until_close_drain`：Black Box Dispose
-  排在 manager Dispose 之后，且 MainWindow 不 Dispose Store。
+- `MainWindow_keeps_black_box_alive_until_manager_is_stopped`：Black Box Dispose 排在
+  manager Dispose 之后，且事件只在 manager 完整停止后解除。
+- `MainWindow_never_disposes_app_owned_store`：MainWindow 不 Dispose App-owned Store。
+- `Faulted_database_shutdown_task_can_be_retried`：失败或取消的数据库 shutdown Task
+  不会永久阻塞后续重试。
+- `Runtime_stop_is_awaited_before_manager_dispose`：`await manager.StopAllAsync()` 先于
+  manager Dispose、Black Box drain 和数据库 shutdown。
+- `Runtime_stop_failure_cannot_reach_database_shutdown`：runtime 停止异常不会通过 finally
+  强制继续数据库释放。
 
 - [ ] **Step 2: Run RED**
 
@@ -1180,16 +1331,24 @@ Expected: FAIL，原因是 App 没有 shutdown owner 方法，MainWindow 当前�
 
 - [ ] **Step 3: Implement the minimum safe shutdown**
 
-- `App.StopDatabaseInfrastructureAsync()` 使用一次性状态标志，先 `await
-  _databaseMaintenanceCoordinator.StopAsync()`，再 Dispose coordinator，最后 Dispose
-  Store；重复调用直接返回。
-- MainWindow 继续负责停止 `_yardCommunicationManager` 和 Acceptance runtime writer，
-  manager 完整 Dispose 后才解除其 Datagram/Command 事件，再 Dispose Raw Packet Black Box。
-- 复用现有 `OnWindowClosing` 的 `_allowWindowClose`：第一次关闭时取消关闭并执行
-  `StopRuntimeThenCloseAsync`；该方法等待 manager/runtime 和 App 数据库 shutdown 后设置
-  `_allowWindowClose=true` 并重新 `Close()`。
-- `OnWindowClosed` 只做已完成关闭后的最后性清理，不再 Dispose App-owned Store；
-  App `OnExit` 对 shutdown 方法做幂等兜底，确保没有窗口关闭路径遗漏。
+- `App.StopDatabaseInfrastructureAsync()` 在独立锁内缓存并返回同一个
+  `StopDatabaseInfrastructureCoreAsync()` Task。Core 顺序固定为：
+  `await coordinator.StopAsync().ConfigureAwait(false)` → `coordinator.Dispose()` →
+  `Store.Dispose()`。只有对应步骤成功后才清空 owner 字段；coordinator stop 失败时
+  不得 Dispose Store，错误向调用方传播，`OnExit` 只记录错误。
+- MainWindow 的第一次关闭事件必须先无条件设置 `e.Cancel=true`，再用 `_closeInProgress`
+  抑制重复关闭；未保存地图/设置在用户取消时清除该标志并保持窗口打开，不停止 runtime
+  或数据库。通过确认后，`StopRuntimeThenCloseAsync` 固定执行：停止 UI timer →
+  `await manager.StopAllAsync()` → Dispose manager → 解除 manager 事件 → 清空 manager → 写入并 Dispose Acceptance 最终
+  快照 → Dispose Raw Packet Black Box（排空）→ await App database shutdown → 设置
+  `_allowWindowClose=true`、清除 `_closeInProgress` 并重新 `Close()`。
+- 如果 `StopAllAsync` 失败，manager 不 Dispose、不解除事件，Black Box 和数据库 shutdown
+  都不会执行；用户可以再次关闭并重试。
+- 关闭过程中任一 manager、Acceptance/Black Box 或数据库 shutdown 失败都记录错误，不能
+  设置 `_allowWindowClose` 或绕过 coordinator/Store 顺序；清除 `_closeInProgress` 后显示
+  “程序安全关闭失败，请重试退出。”，允许用户重新尝试。`OnWindowClosed` 仅做最终 UI/event
+  清理，不能重复 Dispose runtime、Black Box、Acceptance writer 或 App-owned Store。
+- `OnExit` 只同步等待同一个 `StopDatabaseInfrastructureAsync()` 入口，作为幂等兜底。
 - 维护 coordinator 的 `StopAsync` 取消 scheduler 并等待 in-flight backup，保证 Store
   不会在 backup 仍使用数据库时被 Dispose。
 
@@ -1246,6 +1405,9 @@ git commit -m "feat: make sqlite maintenance shutdown safe"
   后删除，失败仍停留在 interrupted recovery，不创建 Store 或空库。
 - `Unavailable_never_reaches_recovery_candidate_selection`：locked/access denied 结果不会
   扫描、移动或替换 backup/production 文件。
+- `Newer_schema_does_not_enter_recovery_or_create_store`：生产库或候选为
+  `UnsupportedSchema` 时，不扫描/展示 recovery candidate，不创建 Store、空数据库或
+  MainWindow，并返回升级/重试/打开目录/退出路径。
 - 回归中的 backup promotion、candidate selection、recovery source/staging/final health
   调用必须显式传入正确的 `SqliteInspectionMode`，不得恢复无 mode 的旧接口。
 
@@ -1273,6 +1435,7 @@ Expected:
 - Store 仍负责 CRUD/schema/migration；
 - App 仍是 Store/coordinator 唯一 owner；
 - Inspection Connection 与 Business Connection 分离；
+- `UnsupportedSchema` 只进入不兼容版本 UI，不创建 Store、不迁移、不恢复、不初始化空库；
 - acceptance bypass 生产目录和 scheduler。
 
 - [ ] **Step 4: Run Release full verification and Acceptance**
@@ -1327,6 +1490,7 @@ git commit -m "test: lock sqlite backup recovery regression contract"
 
 ### Expected modified production files
 
+- `src/MineRailMonitor.Infrastructure/Persistence/SqlitePassageRecordStore.cs`
 - `src/MineRailMonitor/App.xaml.cs`
 - `src/MineRailMonitor/MainWindow.xaml.cs`
 
@@ -1359,8 +1523,8 @@ No new package, ProjectReference, database table, schema migration, simulator fi
 - startup catch-up、02:00、SemaphoreSlim、14 local days、stale tmp、failed backup retention: Task 3。
 - staging、candidate revalidation、corrupt bundle、db/wal/shm、marker、replacement、final health: Task 4。
 - marker + missing/existing DB、crash boundaries、no empty DB: Tasks 4、5、9。
-- App startup gate、Corrupt、Unavailable、Missing、Acceptance bypass: Tasks 5、7。
-- Recovery Dialog、retry、open directory、recover、exit、no management page: Task 6。
+- App startup gate、Corrupt、Unavailable、UnsupportedSchema、Missing、Acceptance bypass: Tasks 5、7。
+- Recovery Dialog、retry、open directory、recover、exit、UnsupportedSchema 不兼容提示、no management page: Task 6。
 - App ownership、MainWindow injection、no double Dispose: Tasks 7、8。
 - runtime → coordinator → Store shutdown: Task 8。
 - schema/alarm/PendingClear/Black Box/560-620/Core/Infrastructure/Acceptance regression: Task 9。
@@ -1381,13 +1545,15 @@ No new package, ProjectReference, database table, schema migration, simulator fi
    regression contracts，接口签名前后一致。
 8. Task 9 不再要求人为制造 RED；首轮 GREEN 时只记录 contract 已满足，然后执行 Release
    全量验证和 Acceptance。
-9. `ISqliteBackupService` 是 Coordinator/Gate 的唯一 backup contract；没有 concrete cast，
+9. `UnsupportedSchema` 不进入 Store、migration、backup/recovery candidate、MainWindow 或
+   RFID；v0/v1/v2/v3 继续沿用现有 Store 语义并在结果中报告 `SchemaVersion`。
+10. `ISqliteBackupService` 是 Coordinator/Gate 的唯一 backup contract；没有 concrete cast，
    Coordinator 不重新解析文件名。
-10. InterruptedRecovery 具有 ResumeRecovery action；Resume 不覆盖 corrupt bundle，每次
+11. InterruptedRecovery 具有 ResumeRecovery action；Resume 不覆盖 corrupt bundle，每次
     重新验证 source 和新 staging，marker 仍只在 final Healthy 后删除。
-11. Healthy、Recovered、Missing 三条 startup 顺序固定，且 Existing Healthy/Recovered
+12. Healthy、Recovered、Missing 三条 startup 顺序固定，且 Existing Healthy/Recovered
     的 migration 前 backup 与 first-install 的 schema 后首次 backup 均有明确位置。
-12. `IAsyncDelay` 与 `TaskAsyncDelay` 的生产文件路径已列入 Task 3 和 File Change Summary；
+13. `IAsyncDelay` 与 `TaskAsyncDelay` 的生产文件路径已列入 Task 3 和 File Change Summary；
     `ManualAsyncDelay` 只存在于测试 helper。
 
 ### Known implementation boundary

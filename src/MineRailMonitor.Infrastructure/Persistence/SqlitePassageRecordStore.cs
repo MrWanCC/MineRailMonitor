@@ -6,7 +6,7 @@ namespace MineRailMonitor.Infrastructure.Persistence;
 
 public sealed class SqlitePassageRecordStore : IPassageRecordStore, IDisposable
 {
-    private const int SchemaVersion = 3;
+    public const int CurrentSchemaVersion = 3;
     private const string ConnectionPragmas =
         "PRAGMA journal_mode=WAL;" +
         "PRAGMA synchronous=FULL;" +
@@ -315,9 +315,9 @@ GROUP BY station_id, result;";
     {
         using var connection = OpenConnection();
         var version = ReadSchemaVersion(connection);
-        if (version > SchemaVersion)
+        if (version > CurrentSchemaVersion)
         {
-            throw new InvalidOperationException($"SQLite数据库版本 {version} 高于当前支持版本 {SchemaVersion}。 ");
+            throw new InvalidOperationException($"SQLite数据库版本 {version} 高于当前支持版本 {CurrentSchemaVersion}。 ");
         }
 
         if (version == 0)

@@ -17,6 +17,8 @@
 - 不得额外生成 `<Root>\MineRailMonitor`。
 - 正式 exe：`<Root>\App\MineRailMonitor.exe`。
 - Root 下固定包含：`App`、`Projects`、`Data`、`Backups`、`Logs`、`Docs`。
+- 当前发布源只允许使用仓库中已跟踪的脱敏 `Projects\Example`；不得把整个仓库 `Projects` 根目录或本地未跟踪的 `Default`、maps、stations、客户项目复制进安装包。
+- 首次 clean staging 只部署 `Projects\Example`；`Projects\Default` 由现场配置流程提供，不由发布脚本创建或打包。
 - Installed：BaseDirectory 最终目录名为 `App` → `ApplicationRoot = parent(BaseDirectory)`。
 - Development/F5：BaseDirectory 最终目录名不是 `App` → `ApplicationRoot = BaseDirectory`。
 - 测试显式 `ApplicationRoot` injection 优先于自动推导。
@@ -70,7 +72,9 @@
 - `scripts/run-rfid-acceptance.ps1`
   - 现有 Acceptance 入口，Task 6 原样运行，不修改其 isolation contract。
 - `Projects/Example/`
-  - 当前存在 `project.json`、`stations/560.json`、`stations/620.json`，开发输出仍需要保留模板复制。
+  - 当前唯一受发布白名单允许的项目源，存在 `project.json`、`stations/560.json`、`stations/620.json`；开发输出仍需要保留模板复制。
+- `Projects/Default/`、`Projects/*/maps/`、非 `Example` 现场站场配置以及客户项目
+  - 不属于当前仓库发布输入；不得由 Task 3 自动发现或收集。
 - 当前没有 `installer/` 目录；Task 4 创建它。
 - 已执行真实 Release publish 检查：publish 输出包含 `System.Data.SQLite.dll`，但没有复制 native `SQLite.Interop.dll` 子目录。
 - 当前 Release build 输出实际包含 `src/MineRailMonitor/bin/Release/net48/x86/SQLite.Interop.dll` 和 `src/MineRailMonitor/bin/Release/net48/x64/SQLite.Interop.dll`；Task 3 必须显式把这两个实际文件复制到最终 staging 的 `App\x86`、`App\x64`，不能假设 publish 已带出它们。
@@ -79,7 +83,7 @@
 
 1. BaseDirectory 最终目录名为 `App` 时必须取 parent，且 `App` 大小写不敏感；BaseDirectory 为开发输出目录时不能错误取 parent。测试归属 Task 1。
 2. 显式 ApplicationRoot 必须覆盖自动推导，且相对/绝对路径都必须先标准化；测试归属 Task 1。
-3. 开发输出必须继续包含 `Projects`，正式 staging 的 `App` 不能再包含 `Projects`；测试归属 Task 3。
+3. 开发输出必须继续包含 `Projects`，正式 staging 的 `App` 不能再包含 `Projects`，且正式 staging 只能包含白名单 `Projects\Example`；测试归属 Task 3。
 4. 用户选中的目录必须直接成为 Root，不能生成重复 `MineRailMonitor` 子目录；测试归属 Task 4。
 5. 升级必须复用上次 Root，改变 Root 时必须阻止继续且不得复制或覆盖现场数据；测试归属 Task 5。
 6. 普通 Users 的 effective 权限只能在数据目录为 Modify，不能 Modify App 中的 exe/dll；测试归属 Task 5，且必须覆盖安装前已存在 `Everyone:(M)` 的 hostile Root。
@@ -467,7 +471,7 @@ git commit -m "feat: wire runtime paths through application layout"
 **Interfaces:**
 
 - Consumes: Task 2 `ApplicationPaths` runtime layout and existing `dotnet publish` output.
-- Produces: `artifacts/desktop-package` with `App`, `Projects`, `Data`, `Backups`, `Logs`, `Docs` siblings.
+- Produces: `artifacts/desktop-package` with `App`, `Projects\Example`, `Data`, `Backups`, `Logs`, `Docs` siblings; `Projects` is a filtered staging tree, not a copy of the repository Projects root.
 
 - [ ] **Step 1: Add failing publish layout contracts**
 
@@ -486,14 +490,16 @@ public sealed class DesktopPublishLayoutMarkupTests
     }
 
     [Fact]
-    public void Package_script_publishes_App_and_copies_Projects_to_Root()
+    public void Package_script_publishes_App_and_copies_only_Example_to_Root()
     {
         var script = ReadSource("scripts", "build-desktop-package.ps1");
 
         Assert.Contains("dotnet publish", script);
         Assert.Contains("desktop-package", script);
         Assert.Contains("App", script);
-        Assert.Contains("Projects", script);
+        Assert.Contains("Projects\\Example", script);
+        Assert.DoesNotContain("Join-Path $repoRoot \"Projects\\*\"", script);
+        Assert.DoesNotContain("Copy-Item (Join-Path $repoRoot \"Projects\\*\")", script);
         Assert.Contains("App\\Projects", script);
         Assert.Contains("System.Data.SQLite.dll", script);
         Assert.Contains("x86\\SQLite.Interop.dll", script);
@@ -580,11 +586,17 @@ foreach ($architecture in $nativeFiles.Keys) {
     Copy-Item -LiteralPath $nativeSource -Destination (Join-Path $nativeTargetDirectory "SQLite.Interop.dll") -Force
 }
 
-Copy-Item (Join-Path $repoRoot "Projects\*") $projectsDirectory -Recurse -Force
+$exampleSource = Join-Path $repoRoot "Projects\Example"
+$exampleTarget = Join-Path $projectsDirectory "Example"
+if (-not (Test-Path -LiteralPath (Join-Path $exampleSource "project.json"))) {
+    throw "Missing tracked sanitized Example project: $exampleSource"
+}
+New-Item -ItemType Directory -Force -Path $exampleTarget | Out-Null
+Copy-Item -Path (Join-Path $exampleSource "*") -Destination $exampleTarget -Recurse -Force
 Write-Host "Desktop package created at $stagingRoot"
 ```
 
-The real publish inspection showed that `System.Data.SQLite.dll` is emitted by publish while the native files are emitted under the Release build output. The staging script therefore copies the exact existing `x86\SQLite.Interop.dll` and `x64\SQLite.Interop.dll` files into `App\x86` and `App\x64`; it must fail if either source is missing. The script owns only the artifact directory; it must not touch the live Root, Data, Logs, Backups or Projects directories.
+The real publish inspection showed that `System.Data.SQLite.dll` is emitted by publish while the native files are emitted under the Release build output. The staging script therefore copies the exact existing `x86\SQLite.Interop.dll` and `x64\SQLite.Interop.dll` files into `App\x86` and `App\x64`; it must fail if either source is missing. The project copy is deliberately a whitelist of `Projects\Example`; it must not enumerate or copy the repository `Projects` root. The script owns only the artifact directory; it must not touch the live Root, Data, Logs, Backups or Projects directories.
 
 - [ ] **Step 5: Run staging tests and inspect the real package**
 
@@ -596,10 +608,11 @@ Test-Path artifacts/desktop-package/App/System.Data.SQLite.dll
 Test-Path artifacts/desktop-package/App/x86/SQLite.Interop.dll
 Test-Path artifacts/desktop-package/App/x64/SQLite.Interop.dll
 Test-Path artifacts/desktop-package/Projects/Example/project.json
+Test-Path artifacts/desktop-package/Projects/Default
 Test-Path artifacts/desktop-package/App/Projects
 ```
 
-Expected: markup tests pass; the first two `Test-Path` calls return `True`; the last returns `False`; all root-level runtime directories exist.
+Expected: markup tests pass; the executable/runtime and `Projects/Example/project.json` paths return `True`; `Projects/Default` and `App/Projects` return `False`; all root-level runtime directories exist.
 
 - [ ] **Step 6: Run the complete regression set**
 
@@ -630,6 +643,8 @@ git commit -m "feat: add desktop release staging layout"
 
 - Consumes: `artifacts/desktop-package` from Task 3.
 - Produces: an installer whose `{app}` is the user-selected `<Root>` and whose shortcut targets `{app}\App\MineRailMonitor.exe`.
+
+The installer consumes only the generated staging tree. It may copy the filtered staging `Projects\*` directory to `{app}\Projects`, but it must never read the repository `Projects` root directly. The staging whitelist in Task 3 is the control that prevents `Default`, local maps/stations and customer projects from entering the installer input.
 
 - [ ] **Step 1: Add failing installer contract tests**
 
@@ -1085,6 +1100,7 @@ $required = @(
     (Join-Path $root "App\x86\SQLite.Interop.dll"),
     (Join-Path $root "App\x64\SQLite.Interop.dll"),
     (Join-Path $root "Projects"),
+    (Join-Path $root "Projects\Example\project.json"),
     (Join-Path $root "Data"),
     (Join-Path $root "Backups"),
     (Join-Path $root "Logs"),
@@ -1100,6 +1116,16 @@ foreach ($path in $required) {
 $nestedProjects = Join-Path $root "App\Projects"
 if (Test-Path -LiteralPath $nestedProjects) {
     throw "Projects must be a Root sibling, not App\Projects"
+}
+
+$defaultProject = Join-Path $root "Projects\Default"
+if (Test-Path -LiteralPath $defaultProject) {
+    throw "Clean staging must not contain Projects\Default"
+}
+
+$projectDirectories = @(Get-ChildItem -LiteralPath (Join-Path $root "Projects") -Directory)
+if ($projectDirectories.Count -ne 1 -or $projectDirectories[0].Name -ne "Example") {
+    throw "Clean staging must contain only the Example project"
 }
 
 Write-Host "Desktop package layout verified: $root"
@@ -1127,13 +1153,15 @@ On a clean Windows VM or target machine, record each result without using the re
 3. Confirm the desktop shortcut is `矿车编组监控系统` and targets `<Root>\App\MineRailMonitor.exe`.
 4. Start as a normal user; confirm no elevation prompt and no service/autostart/scheduled task/Registry Run entry.
 5. On a disposable pre-created Root such as `D:\MineRailMonitor-ACL-test`, grant `*S-1-1-0:(OI)(CI)(M)` to simulate hostile `Everyone:(M)` before installation. Install into that exact Root, then use `icacls` to confirm the hostile and other unknown explicit write ACEs are gone, Root/App Users has only RX, and Data/Logs/Projects/Docs Users has M.
-6. As the same non-admin user in that hostile-ACL installation, confirm creating files in Data, Logs and Docs and modifying a Projects configuration succeeds, while modifying or deleting `App\MineRailMonitor.exe` and an App DLL fails. Confirm the package contains `System.Data.SQLite.dll`, `App\x86\SQLite.Interop.dll` and `App\x64\SQLite.Interop.dll`.
-7. On independent clean Snapshot B, choose `D:\MineRailMonitor` during first install and confirm `D:\MineRailMonitor\App`, `Data`, `Backups`, `Logs`, `Projects` and `Docs` exist without `D:\MineRailMonitor\MineRailMonitor`.
-8. Upgrade the first installation without changing the directory; confirm the previous Root is reused and Data, Projects, Logs and Backups remain unchanged.
-9. During that same-AppId upgrade, deliberately select a different Root; confirm the installer blocks with the migration-not-supported message and no old field data is copied or overwritten.
-10. Uninstall with the default field-data choice; confirm App and shortcut are removed while Projects, Data, Backups, Logs and Docs remain.
-11. Repeat on a disposable snapshot with both explicit confirmations; confirm only the concrete field-data directories are removed and no unsafe whole-Root deletion occurs.
-12. Reinstall using the retained data directory and confirm the existing database and project configuration are usable.
+6. Before installation, add an untracked disposable `Projects\Default` and a customer project under a separate local checkout copy; build staging and confirm only `Projects\Example\project.json` is present, `Projects\Default` and customer content are absent, and `App\Projects` is absent. The same staging check must use the real whitelist script, not only markup assertions.
+7. As the same non-admin user in that hostile-ACL installation, confirm creating files in Data, Logs and Docs and modifying a Projects configuration succeeds, while modifying or deleting `App\MineRailMonitor.exe` and an App DLL fails. Confirm the package contains `System.Data.SQLite.dll`, `App\x86\SQLite.Interop.dll` and `App\x64\SQLite.Interop.dll`.
+8. On independent clean Snapshot B, choose `D:\MineRailMonitor` during first install and confirm `D:\MineRailMonitor\App`, `Data`, `Backups`, `Logs`, `Projects\Example` and `Docs` exist without `D:\MineRailMonitor\MineRailMonitor` or `Projects\Default`.
+9. Start the clean installation before any field `Default` project is supplied; confirm existing project selection falls back to `Example`. Then add a field-provided `Projects\Default` through the supported configuration process and confirm existing selection logic prefers `Default`; do not alter MainWindow fallback code for this acceptance.
+10. Upgrade the first installation without changing the directory; confirm the previous Root is reused and Data, Projects, Logs and Backups remain unchanged.
+11. During that same-AppId upgrade, deliberately select a different Root; confirm the installer blocks with the migration-not-supported message and no old field data is copied or overwritten.
+12. Uninstall with the default field-data choice; confirm App and shortcut are removed while Projects, Data, Backups, Logs and Docs remain.
+13. Repeat on a disposable snapshot with both explicit confirmations; confirm only the concrete field-data directories are removed and no unsafe whole-Root deletion occurs.
+14. Reinstall using the retained data directory and confirm the existing database and project configuration are usable.
 
 - [ ] **Step 4: Inspect migration/recovery boundaries**
 
@@ -1162,7 +1190,7 @@ The implementation worker should keep each Task commit independently reviewable.
 
 ```powershell
 git add docs/superpowers/specs/2026-09-21-desktop-install-layout-design.md docs/superpowers/plans/2026-09-21-desktop-install-layout.md
-git commit -m "docs: harden desktop installer implementation plan"
+git commit -m "docs: restrict desktop package to example project"
 git push origin feat/desktop-install-layout
 ```
 
@@ -1186,4 +1214,5 @@ Do not execute Task 1 from the plan in the plan-writing phase. Do not create a n
 - Effective-permission coverage is based on Root `/reset`, managed-subtree `/reset /T /C`, then protected `/inheritance:r /grant:r` with stable SIDs plus real non-admin file-operation checks; it includes a pre-existing `Everyone:(M)` hostile ACL and no markup test is treated as final ACL evidence.
 - Upgrade coverage blocks changed Root for the same stable AppId; no same-AppId side-by-side test or cross-Root migration is planned.
 - Publish coverage records the observed output: `System.Data.SQLite.dll` is in publish, while x86/x64 `SQLite.Interop.dll` are copied from the actual Release build output into staging and then verified.
+- Publish coverage uses an explicit `Projects\Example` whitelist, verifies `Projects\Example\project.json`, rejects `Projects\Default`/customer content and `App\Projects`, and never reads the raw repository Projects root; the installer consumes only this filtered staging tree.
 - ApplicationRoot boundary coverage explicitly documents that a development BaseDirectory named `App` is indistinguishable from installed layout under the approved contract.

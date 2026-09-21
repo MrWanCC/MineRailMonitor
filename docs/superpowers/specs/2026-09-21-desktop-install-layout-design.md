@@ -51,7 +51,6 @@ E:\Software\MineRailMonitor\
 │  └─ SQLite native runtime files
 │
 ├─ Projects\
-│  ├─ Default\
 │  └─ Example\
 │
 ├─ Data\
@@ -80,6 +79,8 @@ E:\Software\MineRailMonitor\
 ```
 
 `App` 只放程序发布文件和运行时依赖。`Projects`、`Data`、`Backups`、`Logs` 和 `Docs` 位于根目录，便于升级保留、备份和后续明确迁移流程管理。
+
+当前仓库只包含已审核的脱敏 `Projects\Example` 模板。首版安装包只部署这个模板；`Projects\Default` 不是仓库或安装包内容，而是由现场部署/配置流程按实际站场配置提供。安装包不得把本地未跟踪的 `Projects\Default`、`Projects\*\maps`、非 `Example` 站场配置或客户项目带入发布物。
 
 ## 4. 路径基准与 ApplicationRoot
 
@@ -181,9 +182,11 @@ ApplicationRoot\Docs
 首次安装：
 
 1. 创建 `<Root>\Projects`；
-2. 部署 `Default` 和 `Example` 模板；
+2. 仅部署仓库中已跟踪的脱敏 `<Root>\Projects\Example` 模板；不得创建或打包 `<Root>\Projects\Default`；
 3. 创建快捷方式；
 4. 可选地立即启动应用。
+
+发布 staging 必须使用明确白名单从仓库复制 `Projects\Example`，不得复制整个仓库 `Projects` 根目录，也不得自动收集本地未跟踪的 `Default`、站场 maps/stations 或客户项目。将来如果需要正式的 `Default` 模板，必须先把脱敏版本显式加入仓库，并单独更新发布契约。
 
 升级：
 
@@ -256,7 +259,7 @@ Raw Packet BlackBox 继续位于：
 安装程序（默认显示 C:\MineRailMonitor）
 → 选择安装目录
 → 将程序文件安装到 <Root>\App
-→ 首次部署 Projects 模板
+→ 首次仅部署已跟踪的脱敏 Projects\Example 模板
 → 创建 Data/Backups/Logs/Docs 等目录（按需）
 → 创建桌面快捷方式
 → 可选择立即启动
@@ -455,7 +458,7 @@ MSIX 对沙箱、签名、应用身份和商店/企业分发更友好，但当�
 
 ### Task 3：Release publish layout 构建
 
-生成 `<Root>\App` 所需的发布文件，并验证 Projects 模板不再依赖 App 目录。
+生成 `<Root>\App` 所需的发布文件，并使用白名单只把已跟踪的脱敏 `Projects\Example` 放到 `<Root>\Projects\Example`；验证 Projects 不依赖 App 目录，且发布流程不会泄漏 `Default`、现场配置或客户项目。
 
 ### Task 4：Inno Setup installer
 
@@ -491,6 +494,8 @@ MSIX 对沙箱、签名、应用身份和商店/企业分发更友好，但当�
 - 普通用户不能修改 App 下的 exe/dll；
 - .NET Framework 4.8 Full Release 不满足时安装被阻止，满足时安装成功；
 - Release package 包含 `System.Data.SQLite.dll`、`App\x86\SQLite.Interop.dll` 和 `App\x64\SQLite.Interop.dll`；
+- clean staging 只包含 `Projects\Example\project.json` 及其已跟踪脱敏内容，不包含 `Projects\Default`、客户项目或现场未跟踪配置，也不包含 `App\Projects`；
+- 首次启动在没有现场 `Projects\Default` 时按现有逻辑回退到 `Example`；后续由现场提供 `Default` 后，仍由现有项目选择逻辑优先使用 `Default`；
 - `icacls` 实际 ACL 与普通非管理员文件操作共同证明 Root/App 为 Read/Execute、Data/Logs/Backups/Projects/Docs 为 Modify；
 - hostile pre-existing `Everyone:(M)` ACL 在安装前存在时，安装后被清除且不残留未知 explicit write ACE；
 - SQLite health、backup、recovery 和 marker 语义不退化；

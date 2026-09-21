@@ -16,25 +16,20 @@ MineRailMonitor 是运行在现场 Windows 工控机上的 WPF 桌面上位机�
 
 ## 2. 默认安装目录
 
-默认安装目录优先使用：
-
-```text
-D:\MineRailMonitor\
-```
-
-只有在 D: 同时满足以下条件时，才使用该默认目录：
-
-- D: 存在；
-- `DriveType` 为 `Fixed`；
-- 是本地固定磁盘，而不是 removable、network、CD/DVD 或 RAM disk。
-
-如果 D: 不满足条件，则默认使用：
+默认安装目录固定为：
 
 ```text
 C:\MineRailMonitor\
 ```
 
-用户仍可在安装界面手动选择其他有效的本地安装目录。手动选择不改变应用的 ApplicationRoot 解析规则。
+安装界面允许用户选择其他有效的本地目录，例如：
+
+```text
+D:\MineRailMonitor\
+E:\Software\MineRailMonitor\
+```
+
+用户最终选择的目录本身就是 ApplicationRoot / `<Root>`。安装器不得在用户选择的目录下再额外嵌套一层 `MineRailMonitor`。
 
 不使用 `C:\Program Files\MineRailMonitor` 作为默认目录。当前应用需要持续写入 SQLite、日志、黑匣子、备份和项目配置；将可写运行数据与只读程序文件放在同一个可迁移根目录下，可以避免普通运行用户写入 Program Files 时遇到权限问题。
 
@@ -103,9 +98,9 @@ Path.Combine(AppContext.BaseDirectory, "Data")
 当 `AppContext.BaseDirectory` 的最终目录名为 `App`（大小写不敏感）时，视为 installed layout：
 
 ```text
-AppContext.BaseDirectory = D:\MineRailMonitor\App\
+AppContext.BaseDirectory = <Root>\App\
 ApplicationRoot = Directory.GetParent(AppContext.BaseDirectory)
-                 = D:\MineRailMonitor\
+                 = <Root>\
 ```
 
 这里的 parent 必须通过路径 API 获取，禁止用 `..\` 字符串手工拼接。
@@ -134,6 +129,23 @@ ApplicationRoot = AppContext.BaseDirectory
 显式注入 ApplicationRoot
 → 如果 BaseDirectory 最终目录名为 App：Directory.GetParent(BaseDirectory)
 → 否则：BaseDirectory
+```
+
+例如用户选择 `D:\MineRailMonitor` 时，最终布局必须是：
+
+```text
+D:\MineRailMonitor\App
+D:\MineRailMonitor\Projects
+D:\MineRailMonitor\Data
+D:\MineRailMonitor\Backups
+D:\MineRailMonitor\Logs
+D:\MineRailMonitor\Docs
+```
+
+快捷方式始终指向：
+
+```text
+<Root>\App\MineRailMonitor.exe
 ```
 
 所有可写目录都必须从同一根目录派生：
@@ -241,7 +253,7 @@ Raw Packet BlackBox 继续位于：
 目标流程：
 
 ```text
-安装程序
+安装程序（默认显示 C:\MineRailMonitor）
 → 选择安装目录
 → 将程序文件安装到 <Root>\App
 → 首次部署 Projects 模板
@@ -252,6 +264,8 @@ Raw Packet BlackBox 继续位于：
 
 安装过程可以请求管理员权限，但安装完成后的 `MineRailMonitor.exe` 不应要求“以管理员身份运行”。
 
+安装器必须记住上一次成功安装的 `<Root>`。首次安装默认显示 `C:\MineRailMonitor`；用户主动选择其他目录后，该目录成为后续升级默认复用的安装目录。
+
 不创建以下系统集成：
 
 - Windows Service；
@@ -260,6 +274,10 @@ Raw Packet BlackBox 继续位于：
 - Registry Run 自动启动项。
 
 ## 10. 升级策略
+
+升级安装必须优先复用上一次已安装的 `<Root>`。例如首次安装选择 `D:\MineRailMonitor` 后，后续升级默认继续使用 `D:\MineRailMonitor`，不能静默恢复到 `C:\MineRailMonitor`。
+
+用户仍可在升级时主动改变安装目录，但这不等同于数据迁移。安装器不得静默把已有 `Data`、`Projects`、`Backups` 或 `Logs` 复制到新目录，也不得简单覆盖新目录中的同名数据。跨目录升级/迁移必须由明确的迁移流程单独处理并取得用户确认。
 
 升级只允许替换：
 
@@ -406,10 +424,14 @@ MSIX 对沙箱、签名、应用身份和商店/企业分发更友好，但当�
 - Installed layout 正确将 `App` 的 parent 解析为 ApplicationRoot；
 - Development/F5 layout 不会错误跳到 BaseDirectory 的 parent；
 - Acceptance 的显式 DatabasePath / LogDirectory 保持隔离；
+- 首次安装默认显示 `C:\MineRailMonitor`；
+- 用户可以修改安装路径；
+- 用户选中的目录就是 Root；
+- 安装不会产生重复的 `MineRailMonitor` 子目录；
+- 升级默认记住原安装目录；
 - Data、Logs、Backups 可以正常写入；
 - 普通用户可以写入 Data、Logs、Backups 和 Projects；
 - 普通用户不能修改 App 下的 exe/dll；
-- D: 不是本地固定磁盘时，默认目录正确 fallback 到 C:\MineRailMonitor；
 - SQLite health、backup、recovery 和 marker 语义不退化；
 - Projects 能正常加载；
 - 软件升级不丢失历史数据库；

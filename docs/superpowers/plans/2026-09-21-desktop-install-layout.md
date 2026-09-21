@@ -40,6 +40,7 @@
 - 升级不得覆盖现场 Projects，不得删除 Data / Backups / Logs。
 - 卸载默认保留 Projects、Data、Backups、Logs。
 - 首版禁止已安装产品跨 Root 升级；previous Root 与当前选择不一致时必须阻止继续。
+- `<Root>\App\MineRailMonitor.exe.config` 是 site-local config：首次安装/缺失 repair 才 seed，升级不得覆盖已存在文件；本计划不实现 config schema migration。
 - 卸载第二次删除确认选择 No 时仍继续卸载，但保留 Projects、Data、Backups、Logs、Docs；仅两次 Yes 才删除这些具体目录，不删除 Root。
 - Acceptance 8/8 必须保持通过。
 
@@ -676,6 +677,7 @@ git commit -m "feat: add desktop release staging layout"
 
 - Consumes: `artifacts/desktop-package` from Task 3.
 - Produces: an installer whose `{app}` is the user-selected `<Root>` and whose shortcut targets `{app}\App\MineRailMonitor.exe`.
+- Task 4 also preserves the existing `{app}\App\MineRailMonitor.exe.config` during same-root upgrades and seeds it only when missing.
 
 The installer consumes only the generated staging tree. It may copy the filtered staging `Projects\*` directory to `{app}\Projects`, but it must never read the repository `Projects` root directly. The staging whitelist in Task 3 is the control that prevents `Default`, local maps/stations and customer projects from entering the installer input.
 
@@ -705,6 +707,21 @@ public sealed class DesktopInstallerMarkupTests
         Assert.Contains("{app}\\App", script);
         Assert.Contains("desktop-package\\Projects", script);
         Assert.Contains("{app}\\Projects", script);
+        Assert.Contains("onlyifdoesntexist", script);
+    }
+
+    [Fact]
+    public void Installer_preserves_existing_site_config_on_upgrade()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains(
+            "Source: \"..\\artifacts\\desktop-package\\App\\*\"; Excludes: \"MineRailMonitor.exe.config\";",
+            script);
+        Assert.DoesNotContain(
+            "Source: \"..\\artifacts\\desktop-package\\App\\*\"; DestDir: \"{app}\\App\";",
+            script);
+        Assert.Contains("Source: \"..\\artifacts\\desktop-package\\App\\MineRailMonitor.exe.config\"", script);
         Assert.Contains("onlyifdoesntexist", script);
     }
 
@@ -764,7 +781,8 @@ DisableProgramGroupPage=yes
 Uninstallable=yes
 
 [Files]
-Source: "..\artifacts\desktop-package\App\*"; DestDir: "{app}\App"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\artifacts\desktop-package\App\*"; Excludes: "MineRailMonitor.exe.config"; DestDir: "{app}\App"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\artifacts\desktop-package\App\MineRailMonitor.exe.config"; DestDir: "{app}\App"; Flags: onlyifdoesntexist ignoreversion
 Source: "..\artifacts\desktop-package\Projects\*"; DestDir: "{app}\Projects"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist
 Source: "..\artifacts\desktop-package\Docs\*"; DestDir: "{app}\Docs"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist skipifsourcedoesntexist
 
@@ -820,7 +838,7 @@ begin
 end;
 ```
 
-The default Root is `C:\MineRailMonitor`, but the standard directory selection page allows `D:\MineRailMonitor` or `E:\Software\MineRailMonitor`; `{app}` remains exactly the selected directory. The AppId line intentionally has two opening braces and one closing brace because the GUID is a literal Inno Setup value. Do not add service, startup, scheduled-task or Registry Run entries. Task 5 extends this same `[Code]` section; it must not add a second `[Code]` section.
+The default Root is `C:\MineRailMonitor`, but the standard directory selection page allows `D:\MineRailMonitor` or `E:\Software\MineRailMonitor`; `{app}` remains exactly the selected directory. The AppId line intentionally has two opening braces and one closing brace because the GUID is a literal Inno Setup value. The App wildcard must never include `MineRailMonitor.exe.config`; the separate `onlyifdoesntexist` rule is the only rule that handles that file, so an existing site-local config is preserved on upgrade while a missing config is re-seeded. Do not add service, startup, scheduled-task or Registry Run entries. Task 5 extends this same `[Code]` section; it must not add a second `[Code]` section.
 
 - [ ] **Step 4: Compile and inspect the installer script**
 
@@ -1190,11 +1208,12 @@ On a clean Windows VM or target machine, record each result without using the re
 7. As the same non-admin user in that hostile-ACL installation, confirm creating files in Data, Logs and Docs and modifying a Projects configuration succeeds, while modifying or deleting `App\MineRailMonitor.exe` and an App DLL fails. Confirm the package contains `System.Data.SQLite.dll`, `App\x86\SQLite.Interop.dll` and `App\x64\SQLite.Interop.dll`.
 8. On independent clean Snapshot B, choose `D:\MineRailMonitor` during first install and confirm `D:\MineRailMonitor\App`, `Data`, `Backups`, `Logs`, `Projects\Example` and `Docs` exist without `D:\MineRailMonitor\MineRailMonitor` or `Projects\Default`.
 9. Start the clean installation before any field `Default` project is supplied; confirm existing project selection falls back to `Example`. Then add a field-provided `Projects\Default` through the supported configuration process and confirm existing selection logic prefers `Default`; do not alter MainWindow fallback code for this acceptance.
-10. Upgrade the first installation without changing the directory; confirm the previous Root is reused and Data, Projects, Logs and Backups remain unchanged.
-11. During that same-AppId upgrade, deliberately select a different Root; confirm the installer blocks with the migration-not-supported message and no old field data is copied or overwritten.
-12. Uninstall with the default field-data choice; confirm App and shortcut are removed while Projects, Data, Backups, Logs and Docs remain.
-13. Repeat on a disposable snapshot with both explicit confirmations; confirm only the concrete field-data directories are removed and no unsafe whole-Root deletion occurs.
-14. Reinstall using the retained data directory and confirm the existing database and project configuration are usable.
+10. After first install, change `MineRailMonitor.exe.config` field value `RfidUdpListenPort` to `63002`, perform a same-root upgrade, and confirm the config still contains `63002` while the exe/dll payload is replaced by the new version.
+11. Delete `MineRailMonitor.exe.config`, run install/repair at the same Root, and confirm the default staging config is seeded again.
+12. During that same-AppId upgrade, deliberately select a different Root; confirm the installer blocks with the migration-not-supported message and no old field data is copied or overwritten.
+13. Uninstall with the default field-data choice; confirm App and shortcut are removed while Projects, Data, Backups, Logs and Docs remain.
+14. Repeat on a disposable snapshot with both explicit confirmations; confirm only the concrete field-data directories are removed and no unsafe whole-Root deletion occurs.
+15. Reinstall using the retained data directory and confirm the existing database and project configuration are usable.
 
 - [ ] **Step 4: Inspect migration/recovery boundaries**
 

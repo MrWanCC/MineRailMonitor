@@ -188,6 +188,16 @@ ApplicationRoot\Docs
 
 发布 staging 必须使用明确白名单从仓库复制 `Projects\Example`，不得复制整个仓库 `Projects` 根目录，也不得自动收集本地未跟踪的 `Default`、站场 maps/stations 或客户项目。将来如果需要正式的 `Default` 模板，必须先把脱敏版本显式加入仓库，并单独更新发布契约。
 
+### 5.1 App 配置文件保留规则
+
+`<Root>\App\MineRailMonitor.exe.config` 是现场本地应用配置，包含 `RfidUdpListenAddress`、`RfidUdpListenPort`、`EmptyRfidValue` 和 `AdminPassword` 等现场设置。它不是普通的每次升级覆盖文件。
+
+- 首次安装时，如果目标 config 不存在，才从 staging 的默认 config seed；
+- 同 Root 升级时，如果目标 config 已存在，安装器不得覆盖；
+- 如果现场用户删除了 config，重新安装或 repair 允许用 staging 默认 config 重新 seed；
+- 首版不实现 config schema merge 或 migration。未来新增 appSettings 必须通过独立 migration、程序兼容默认值或明确升级步骤处理，不能由安装器静默覆盖旧 config；
+- 本规则只保证现场已有 config 不丢失，不改变 `AdminPassword` 等配置项的安全处理范围。
+
 升级：
 
 - 不覆盖已经存在的现场 `Projects`；
@@ -302,7 +312,8 @@ HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full\Release
 
 升级只允许替换：
 
-- `<Root>\App\` 下的程序文件和运行时依赖；
+- `<Root>\App\` 下的程序文件和运行时依赖，但不包括已经存在的 site-local `MineRailMonitor.exe.config`；
+- 仅当 `<Root>\App\MineRailMonitor.exe.config` 缺失时，才允许 seed staging 默认 config；
 - 明确属于发布文档的必要 `Docs\` 文件。
 
 升级默认不得覆盖：
@@ -494,6 +505,8 @@ MSIX 对沙箱、签名、应用身份和商店/企业分发更友好，但当�
 - 普通用户不能修改 App 下的 exe/dll；
 - .NET Framework 4.8 Full Release 不满足时安装被阻止，满足时安装成功；
 - Release package 包含 `System.Data.SQLite.dll`、`App\x86\SQLite.Interop.dll` 和 `App\x64\SQLite.Interop.dll`；
+- 首次安装 seed `MineRailMonitor.exe.config`，同 Root 升级保留已存在的 config；删除 config 后执行 repair 可以重新 seed 默认 config；
+- Task 4 的 App wildcard 必须排除 `MineRailMonitor.exe.config`，并由单独的 `onlyifdoesntexist` 文件规则负责首次安装/repair seed；
 - clean staging 只包含 `Projects\Example\project.json` 及其已跟踪脱敏内容，不包含 `Projects\Default`、客户项目或现场未跟踪配置，也不包含 `App\Projects`；
 - 首次启动在没有现场 `Projects\Default` 时按现有逻辑回退到 `Example`；后续由现场提供 `Default` 后，仍由现有项目选择逻辑优先使用 `Default`；
 - `icacls` 实际 ACL 与普通非管理员文件操作共同证明 Root/App 为 Read/Execute、Data/Logs/Backups/Projects/Docs 为 Modify；

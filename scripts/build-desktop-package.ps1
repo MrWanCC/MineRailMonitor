@@ -56,10 +56,43 @@ foreach ($architecture in $nativeFiles.Keys) {
 
 $exampleSource = Join-Path $repoRoot "Projects\Example"
 $exampleTarget = Join-Path $projectsDirectory "Example"
-if (-not (Test-Path -LiteralPath (Join-Path $exampleSource "project.json"))) {
-    throw "Missing tracked sanitized Example project: $exampleSource"
+
+git -C $repoRoot diff --quiet -- "Projects/Example"
+if ($LASTEXITCODE -ne 0) {
+    throw "Tracked Projects/Example files contain uncommitted changes. Commit and review them before building a release package."
 }
-New-Item -ItemType Directory -Force -Path $exampleTarget | Out-Null
-Copy-Item -Path (Join-Path $exampleSource "*") -Destination $exampleTarget -Recurse -Force
+
+git -C $repoRoot diff --cached --quiet -- "Projects/Example"
+if ($LASTEXITCODE -ne 0) {
+    throw "Tracked Projects/Example files contain uncommitted changes. Commit and review them before building a release package."
+}
+
+$trackedExampleFiles = @(git -C $repoRoot ls-files -- "Projects/Example")
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to enumerate tracked Example project files."
+}
+if ($trackedExampleFiles.Count -eq 0) {
+    throw "No tracked Example project files were found."
+}
+if ($trackedExampleFiles -notcontains "Projects/Example/project.json") {
+    throw "Missing tracked sanitized Example project: Projects/Example/project.json"
+}
+
+foreach ($trackedPath in $trackedExampleFiles) {
+    if (-not $trackedPath.StartsWith("Projects/Example/", [StringComparison]::Ordinal)) {
+        throw "Unexpected tracked Example path: $trackedPath"
+    }
+
+    $relativeExamplePath = $trackedPath.Substring("Projects/Example/".Length).Replace("/", "\")
+    $source = Join-Path $repoRoot ($trackedPath.Replace("/", "\"))
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Tracked Example source file is missing: $source"
+    }
+
+    $target = Join-Path $exampleTarget $relativeExamplePath
+    $targetDirectory = Split-Path -Parent $target
+    New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
+    Copy-Item -LiteralPath $source -Destination $target -Force
+}
 
 Write-Host "Desktop package created at $stagingRoot"

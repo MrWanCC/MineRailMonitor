@@ -40,6 +40,30 @@ public sealed class DesktopPublishLayoutMarkupTests
         Assert.Contains("Publish output must not contain App\\Projects", script, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Package_script_enumerates_and_copies_only_tracked_Example_files()
+    {
+        var script = ReadSource("scripts", "build-desktop-package.ps1");
+
+        Assert.Contains("git -C $repoRoot ls-files -- \"Projects/Example\"", script, StringComparison.Ordinal);
+        Assert.Contains("$trackedExampleFiles", script, StringComparison.Ordinal);
+        Assert.Contains("Projects/Example/project.json", script, StringComparison.Ordinal);
+        Assert.Contains("Copy-Item -LiteralPath $source", script, StringComparison.Ordinal);
+        Assert.Contains("$targetDirectory", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("Join-Path $exampleSource \"*\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("$exampleTarget -Recurse", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Package_script_rejects_uncommitted_tracked_Example_changes()
+    {
+        var script = ReadSource("scripts", "build-desktop-package.ps1");
+
+        Assert.Contains("git -C $repoRoot diff --quiet -- \"Projects/Example\"", script, StringComparison.Ordinal);
+        Assert.Contains("git -C $repoRoot diff --cached --quiet -- \"Projects/Example\"", script, StringComparison.Ordinal);
+        Assert.Contains("Tracked Projects/Example files contain uncommitted changes.", script, StringComparison.Ordinal);
+    }
+
     private static string ReadSource(params string[] segments) =>
         File.ReadAllText(Locate(segments));
 

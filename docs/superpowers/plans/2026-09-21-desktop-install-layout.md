@@ -588,15 +588,48 @@ foreach ($architecture in $nativeFiles.Keys) {
 
 $exampleSource = Join-Path $repoRoot "Projects\Example"
 $exampleTarget = Join-Path $projectsDirectory "Example"
-if (-not (Test-Path -LiteralPath (Join-Path $exampleSource "project.json"))) {
-    throw "Missing tracked sanitized Example project: $exampleSource"
+
+git -C $repoRoot diff --quiet -- "Projects/Example"
+if ($LASTEXITCODE -ne 0) {
+    throw "Tracked Projects/Example files contain uncommitted changes. Commit and review them before building a release package."
 }
-New-Item -ItemType Directory -Force -Path $exampleTarget | Out-Null
-Copy-Item -Path (Join-Path $exampleSource "*") -Destination $exampleTarget -Recurse -Force
+
+git -C $repoRoot diff --cached --quiet -- "Projects/Example"
+if ($LASTEXITCODE -ne 0) {
+    throw "Tracked Projects/Example files contain uncommitted changes. Commit and review them before building a release package."
+}
+
+$trackedExampleFiles = @(git -C $repoRoot ls-files -- "Projects/Example")
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to enumerate tracked Example project files."
+}
+if ($trackedExampleFiles.Count -eq 0) {
+    throw "No tracked Example project files were found."
+}
+if ($trackedExampleFiles -notcontains "Projects/Example/project.json") {
+    throw "Missing tracked sanitized Example project: Projects/Example/project.json"
+}
+
+foreach ($trackedPath in $trackedExampleFiles) {
+    if (-not $trackedPath.StartsWith("Projects/Example/", [StringComparison]::Ordinal)) {
+        throw "Unexpected tracked Example path: $trackedPath"
+    }
+
+    $relativeExamplePath = $trackedPath.Substring("Projects/Example/".Length).Replace("/", "\")
+    $source = Join-Path $repoRoot ($trackedPath.Replace("/", "\"))
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Tracked Example source file is missing: $source"
+    }
+
+    $target = Join-Path $exampleTarget $relativeExamplePath
+    $targetDirectory = Split-Path -Parent $target
+    New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
+    Copy-Item -LiteralPath $source -Destination $target -Force
+}
 Write-Host "Desktop package created at $stagingRoot"
 ```
 
-The real publish inspection showed that `System.Data.SQLite.dll` is emitted by publish while the native files are emitted under the Release build output. The staging script therefore copies the exact existing `x86\SQLite.Interop.dll` and `x64\SQLite.Interop.dll` files into `App\x86` and `App\x64`; it must fail if either source is missing. The project copy is deliberately a whitelist of `Projects\Example`; it must not enumerate or copy the repository `Projects` root. The script owns only the artifact directory; it must not touch the live Root, Data, Logs, Backups or Projects directories.
+The real publish inspection showed that `System.Data.SQLite.dll` is emitted by publish while the native files are emitted under the Release build output. The staging script therefore copies the exact existing `x86\SQLite.Interop.dll` and `x64\SQLite.Interop.dll` files into `App\x86` and `App\x64`; it must fail if either source is missing. The project copy is a tracked-file whitelist from `git ls-files -- Projects/Example`, so ignored/untracked files and local maps are excluded; tracked Example changes must be clean in both the worktree and index before packaging. The script owns only the artifact directory; it must not touch the live Root, Data, Logs, Backups or Projects directories.
 
 - [ ] **Step 5: Run staging tests and inspect the real package**
 

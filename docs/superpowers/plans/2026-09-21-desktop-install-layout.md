@@ -28,12 +28,17 @@
 - `<Root>\Data`、`Backups`、`Logs`、`Projects` 授予普通用户 Modify。
 - `<Root>\Docs` 按现场文档需求授予 Write / Modify。
 - 普通用户不得修改 App 下 exe/dll。
+- 安装器必须规范化 effective ACL：关闭 Root/App 的继承，并用稳定 SID 明确授予 SYSTEM/Administrators Full Control、Users Read/Execute；数据目录明确授予 Users Modify，不依赖父目录权限或单纯追加 Inno `Permissions` ACE。
+- ACL 实现可调用 Windows 自带 `icacls.exe`，不得修改 Root 之外的父目录、系统目录，不得授予 `Everyone` Full Control。
+- 安装器必须检查 .NET Framework 4.8 Full Release；`Release >= 528040` 才允许安装，首版不自动联网下载。
 - SQLite WAL / FULL / health / backup / recovery / marker 语义不变。
 - 不重新设计 SQLite，不修改 RFID protocol、CRC、Byte7、业务报警逻辑。
 - 升级默认复用上次安装 Root。
 - 不静默迁移跨目录 Data / Projects / Backups / Logs。
 - 升级不得覆盖现场 Projects，不得删除 Data / Backups / Logs。
 - 卸载默认保留 Projects、Data、Backups、Logs。
+- 首版禁止已安装产品跨 Root 升级；previous Root 与当前选择不一致时必须阻止继续。
+- 卸载第二次删除确认选择 No 时仍继续卸载，但保留 Projects、Data、Backups、Logs、Docs；仅两次 Yes 才删除这些具体目录，不删除 Root。
 - Acceptance 8/8 必须保持通过。
 
 ## Repo Mapping
@@ -67,6 +72,8 @@
 - `Projects/Example/`
   - 当前存在 `project.json`、`stations/560.json`、`stations/620.json`，开发输出仍需要保留模板复制。
 - 当前没有 `installer/` 目录；Task 4 创建它。
+- 已执行真实 Release publish 检查：publish 输出包含 `System.Data.SQLite.dll`，但没有复制 native `SQLite.Interop.dll` 子目录。
+- 当前 Release build 输出实际包含 `src/MineRailMonitor/bin/Release/net48/x86/SQLite.Interop.dll` 和 `src/MineRailMonitor/bin/Release/net48/x64/SQLite.Interop.dll`；Task 3 必须显式把这两个实际文件复制到最终 staging 的 `App\x86`、`App\x64`，不能假设 publish 已带出它们。
 
 ## Review Focus
 
@@ -74,9 +81,13 @@
 2. 显式 ApplicationRoot 必须覆盖自动推导，且相对/绝对路径都必须先标准化；测试归属 Task 1。
 3. 开发输出必须继续包含 `Projects`，正式 staging 的 `App` 不能再包含 `Projects`；测试归属 Task 3。
 4. 用户选中的目录必须直接成为 Root，不能生成重复 `MineRailMonitor` 子目录；测试归属 Task 4。
-5. 升级必须复用上次 Root，改变 Root 时不得静默复制或覆盖现场数据；测试归属 Task 5。
-6. 普通 Users 只能 Modify 数据目录，不能 Modify App 中的 exe/dll；测试归属 Task 5。
+5. 升级必须复用上次 Root，改变 Root 时必须阻止继续且不得复制或覆盖现场数据；测试归属 Task 5。
+6. 普通 Users 的 effective 权限只能在数据目录为 Modify，不能 Modify App 中的 exe/dll；测试归属 Task 5。
 7. Acceptance 显式 DatabasePath / LogDirectory 必须继续隔离真实安装目录；测试归属 Task 2 和 Task 6。
+8. 当前 contract 的已知边界：Development output 最终目录名正好为 `App` 时，与 installed layout 无法区分，会按 installed 规则取 parent；测试和实现不得假设该情况能被自动识别为 development。
+9. ACL 必须验证 effective 权限而非只检查脚本文本；Task 5 负责脚本契约，Task 6 负责真实 `icacls` 和非管理员文件操作。
+10. 已安装后跨 Root 选择必须被阻止，不能用警告后 Yes 放行；Task 5 和 Task 6 负责验证。
+11. .NET Framework 4.8 prerequisite 和 `System.Data.SQLite.dll`/x86/x64 `SQLite.Interop.dll` 必须进入 Task 4/Task 6 验证。
 
 ---
 
@@ -133,6 +144,14 @@ public sealed class ApplicationPathsTests
         var paths = new ApplicationPaths(baseDirectory, explicitRootDirectory: null);
 
         Assert.Equal(Path.GetFullPath(baseDirectory), paths.RootDirectory, ignoreCase: true);
+    }
+
+    [Fact]
+    public void Development_output_named_App_is_indistinguishable_from_installed_layout()
+    {
+        var paths = new ApplicationPaths(@"C:\Build\App\", explicitRootDirectory: null);
+
+        Assert.Equal(Path.GetFullPath(@"C:\Build"), paths.RootDirectory, ignoreCase: true);
     }
 
     [Fact]
@@ -201,6 +220,8 @@ public sealed class ApplicationPathsTests
     }
 }
 ```
+
+The `Development_output_named_App_is_indistinguishable_from_installed_layout` test is intentional: under the approved contract, a base directory whose final name is exactly `App` is treated as installed layout, even if a development tool happens to use that directory name. Do not add heuristic detection beyond the explicit root override.
 
 - [ ] **Step 2: Run the tests and verify the expected RED**
 
@@ -474,6 +495,9 @@ public sealed class DesktopPublishLayoutMarkupTests
         Assert.Contains("App", script);
         Assert.Contains("Projects", script);
         Assert.Contains("App\\Projects", script);
+        Assert.Contains("System.Data.SQLite.dll", script);
+        Assert.Contains("x86\\SQLite.Interop.dll", script);
+        Assert.Contains("x64\\SQLite.Interop.dll", script);
         Assert.Contains("throw", script);
     }
 }
@@ -535,11 +559,32 @@ if (Test-Path $publishedProjects) {
     throw "Publish output must not contain App\Projects: $publishedProjects"
 }
 
+$managedSqlite = Join-Path $appDirectory "System.Data.SQLite.dll"
+if (-not (Test-Path -LiteralPath $managedSqlite)) {
+    throw "Missing managed SQLite runtime: $managedSqlite"
+}
+
+$nativeBuildRoot = Join-Path $repoRoot "src\MineRailMonitor\bin\$Configuration\net48"
+$nativeFiles = @{
+    x86 = Join-Path $nativeBuildRoot "x86\SQLite.Interop.dll"
+    x64 = Join-Path $nativeBuildRoot "x64\SQLite.Interop.dll"
+}
+foreach ($architecture in $nativeFiles.Keys) {
+    $nativeSource = $nativeFiles[$architecture]
+    if (-not (Test-Path -LiteralPath $nativeSource)) {
+        throw "Missing System.Data.SQLite native runtime: $nativeSource"
+    }
+
+    $nativeTargetDirectory = Join-Path $appDirectory $architecture
+    New-Item -ItemType Directory -Force -Path $nativeTargetDirectory | Out-Null
+    Copy-Item -LiteralPath $nativeSource -Destination (Join-Path $nativeTargetDirectory "SQLite.Interop.dll") -Force
+}
+
 Copy-Item (Join-Path $repoRoot "Projects\*") $projectsDirectory -Recurse -Force
 Write-Host "Desktop package created at $stagingRoot"
 ```
 
-The script owns only the artifact directory; it must not touch the live Root, Data, Logs, Backups or Projects directories.
+The real publish inspection showed that `System.Data.SQLite.dll` is emitted by publish while the native files are emitted under the Release build output. The staging script therefore copies the exact existing `x86\SQLite.Interop.dll` and `x64\SQLite.Interop.dll` files into `App\x86` and `App\x64`; it must fail if either source is missing. The script owns only the artifact directory; it must not touch the live Root, Data, Logs, Backups or Projects directories.
 
 - [ ] **Step 5: Run staging tests and inspect the real package**
 
@@ -547,6 +592,9 @@ The script owns only the artifact directory; it must not touch the live Root, Da
 dotnet test tests/MineRailMonitor.Core.Tests/MineRailMonitor.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~DesktopPublishLayoutMarkupTests"
 powershell -ExecutionPolicy Bypass -File scripts/build-desktop-package.ps1 -Configuration Release
 Test-Path artifacts/desktop-package/App/MineRailMonitor.exe
+Test-Path artifacts/desktop-package/App/System.Data.SQLite.dll
+Test-Path artifacts/desktop-package/App/x86/SQLite.Interop.dll
+Test-Path artifacts/desktop-package/App/x64/SQLite.Interop.dll
 Test-Path artifacts/desktop-package/Projects/Example/project.json
 Test-Path artifacts/desktop-package/App/Projects
 ```
@@ -622,6 +670,19 @@ public sealed class DesktopInstallerMarkupTests
         Assert.DoesNotContain("Service", script, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Registry Run", script, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Installer_uses_stable_AppId_and_checks_DotNet_Framework_48()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("AppId={{8C8B1CB5-4A4B-4B4A-9D48-6A3C93D2F0E1}", script);
+        Assert.Contains("InitializeSetup", script);
+        Assert.Contains("NET Framework Setup\\NDP\\v4\\Full", script);
+        Assert.Contains("Release", script);
+        Assert.Contains("528040", script);
+        Assert.Contains("请先安装 .NET Framework 4.8", script);
+    }
 }
 ```
 
@@ -642,12 +703,13 @@ Create `installer/MineRailMonitor.iss` with a stable AppId and `{app}` as the se
 #define MyAppVersion "1.0.0"
 
 [Setup]
-AppId={{8C8B1CB5-4A4B-4B4A-9D48-6A3C93D2F0E1}}
+AppId={{8C8B1CB5-4A4B-4B4A-9D48-6A3C93D2F0E1}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 DefaultDirName=C:\MineRailMonitor
 UsePreviousAppDir=yes
 PrivilegesRequired=admin
+ArchitecturesInstallIn64BitMode=x64
 OutputDir=..\artifacts\installer
 OutputBaseFilename=MineRailMonitor-Setup
 DisableProgramGroupPage=yes
@@ -659,13 +721,13 @@ Source: "..\artifacts\desktop-package\Projects\*"; DestDir: "{app}\Projects"; Fl
 Source: "..\artifacts\desktop-package\Docs\*"; DestDir: "{app}\Docs"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist skipifsourcedoesntexist
 
 [Dirs]
-Name: "{app}"; Permissions: users-readexec
-Name: "{app}\App"; Permissions: users-readexec
-Name: "{app}\Data"; Permissions: users-modify
-Name: "{app}\Backups\SQLite"; Permissions: users-modify
-Name: "{app}\Logs\BlackBox"; Permissions: users-modify
-Name: "{app}\Projects"; Permissions: users-modify
-Name: "{app}\Docs"; Permissions: users-modify
+Name: "{app}"
+Name: "{app}\App"
+Name: "{app}\Data"
+Name: "{app}\Backups\SQLite"
+Name: "{app}\Logs\BlackBox"
+Name: "{app}\Projects"
+Name: "{app}\Docs"
 
 [Icons]
 Name: "{autodesktop}\矿车编组监控系统"; Filename: "{app}\App\MineRailMonitor.exe"
@@ -678,9 +740,39 @@ Type: filesandordirs; Name: "{app}\App"
 
 [Registry]
 Root: HKLM; Subkey: "Software\MineRailMonitor"; ValueType: string; ValueName: "InstallLocation"; ValueData: "{app}"; Flags: uninsdeletekeyifempty
+
+[Code]
+const
+  DotNet48MinimumRelease = 528040;
+
+var
+  DeleteFieldData: Boolean;
+
+function HasDotNet48(): Boolean;
+var
+  Release: Cardinal;
+begin
+  Result := False;
+  if IsWin64 then
+    Result := RegQueryDWordValue(HKLM64,
+      'SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full',
+      'Release', Release) and (Release >= DotNet48MinimumRelease);
+  if not Result then
+    Result := RegQueryDWordValue(HKLM,
+      'SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full',
+      'Release', Release) and (Release >= DotNet48MinimumRelease);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  Result := HasDotNet48;
+  if not Result then
+    MsgBox('本机未检测到 .NET Framework 4.8，请先安装 .NET Framework 4.8。',
+      mbCriticalError, MB_OK);
+end;
 ```
 
-The default Root is `C:\MineRailMonitor`, but the standard directory selection page allows `D:\MineRailMonitor` or `E:\Software\MineRailMonitor`; `{app}` remains exactly the selected directory. Do not add service, startup, scheduled-task or Registry Run entries.
+The default Root is `C:\MineRailMonitor`, but the standard directory selection page allows `D:\MineRailMonitor` or `E:\Software\MineRailMonitor`; `{app}` remains exactly the selected directory. The AppId line intentionally has two opening braces and one closing brace because the GUID is a literal Inno Setup value. Do not add service, startup, scheduled-task or Registry Run entries. Task 5 extends this same `[Code]` section; it must not add a second `[Code]` section.
 
 - [ ] **Step 4: Compile and inspect the installer script**
 
@@ -726,7 +818,7 @@ git commit -m "feat: add desktop installer layout"
 **Interfaces:**
 
 - Consumes: Task 4 stable AppId, `{app}` Root and staging layout.
-- Produces: explicit ACL and retention behavior for install, upgrade, changed-root install and uninstall.
+- Produces: effective ACL normalization, same-Root upgrade reuse, changed-Root blocking and uninstall retention behavior.
 
 - [ ] **Step 1: Add failing retention and ACL tests**
 
@@ -738,14 +830,14 @@ public void Installer_grants_Modify_only_to_runtime_data_directories()
 {
     var script = ReadSource("installer", "MineRailMonitor.iss");
 
-    Assert.Contains("{app}\\Data\"; Permissions: users-modify", script);
-    Assert.Contains("{app}\\Backups\\SQLite\"; Permissions: users-modify", script);
-    Assert.Contains("{app}\\Logs\\BlackBox\"; Permissions: users-modify", script);
-    Assert.Contains("{app}\\Projects\"; Permissions: users-modify", script);
-    Assert.Contains("{app}\"; Permissions: users-readexec", script);
-    Assert.Contains("{app}\\App\"; Permissions: users-readexec", script);
-    Assert.DoesNotContain("{app}\"; Permissions: users-modify", script);
-    Assert.DoesNotContain("{app}\\App\"; Permissions: users-modify", script);
+    Assert.Contains("icacls.exe", script);
+    Assert.Contains("/inheritance:r", script);
+    Assert.Contains("*S-1-5-18", script);
+    Assert.Contains("*S-1-5-32-544", script);
+    Assert.Contains("*S-1-5-32-545", script);
+    Assert.Contains("(OI)(CI)(RX)", script);
+    Assert.Contains("(OI)(CI)(M)", script);
+    Assert.DoesNotContain("Permissions: users-modify", script);
 }
 
 [Fact]
@@ -755,7 +847,8 @@ public void Installer_reuses_previous_Root_on_upgrade()
 
     Assert.Contains("UsePreviousAppDir=yes", script);
     Assert.Contains("DefaultDirName=C:\\MineRailMonitor", script);
-    Assert.Contains("旧 Data / Projects / Backups / Logs 不自动迁移", script);
+    Assert.Contains("当前版本不支持升级时迁移安装目录", script);
+    Assert.Contains("Result := False", script);
 }
 
 [Fact]
@@ -765,12 +858,16 @@ public void Uninstall_keeps_field_data_by_default_and_requires_explicit_confirma
 
     Assert.Contains("[UninstallDelete]", script);
     Assert.Contains("{app}\\App", script);
-    Assert.DoesNotContain("Name: \"{app}\\Data\"", script);
-    Assert.DoesNotContain("Name: \"{app}\\Projects\"", script);
+    Assert.DoesNotContain("Type: filesandordirs; Name: \"{app}\\Data\"", script);
+    Assert.DoesNotContain("Type: filesandordirs; Name: \"{app}\\Projects\"", script);
     Assert.Contains("InitializeUninstall", script);
     Assert.Contains("是否同时删除现场数据和历史记录", script);
+    Assert.Contains("将删除 Projects、Data、Backups、Logs 和 Docs 中的现场文件", script);
+    Assert.Contains("DeleteFieldData := False", script);
     Assert.Contains("DelTree(ExpandConstant('{app}\\Data')", script);
     Assert.Contains("DelTree(ExpandConstant('{app}\\Projects')", script);
+    Assert.Contains("DelTree(ExpandConstant('{app}\\Docs')", script);
+    Assert.DoesNotContain("DelTree(ExpandConstant('{app}')", script);
 }
 ```
 
@@ -782,16 +879,57 @@ dotnet test tests/MineRailMonitor.Core.Tests/MineRailMonitor.Core.Tests.csproj -
 
 Expected: the new upgrade/uninstall contract fails because the initial installer script has no explicit cross-directory warning or optional field-data deletion hook.
 
-- [ ] **Step 3: Keep App read-only and add explicit uninstall data choice**
+- [ ] **Step 3: Normalize effective ACL and add explicit uninstall data choice**
 
-Keep ACL entries only on Data, Backups, Logs, Projects and Docs. Do not add `Permissions: users-modify` to Root or App.
+Do not use Inno `Permissions` entries as the ACL implementation. Extend the existing `[Code]` section with a helper that invokes the Windows system `icacls.exe` using stable SIDs. `/inheritance:r` must be applied separately to Root, App, Data, Backups, Logs, Projects and Docs so a parent such as `D:\Software` cannot leak Users Modify into App. The helper must fail the installation if any command returns a non-zero exit code.
 
-Add a real Inno Setup uninstall hook after `[UninstallDelete]`:
+Use these exact rights: Root and App receive SYSTEM/Administrators `(OI)(CI)(F)` plus Users `(OI)(CI)(RX)`; Data, Backups, Logs, Projects and Docs receive SYSTEM/Administrators `(OI)(CI)(F)` plus Users `(OI)(CI)(M)`. The helper may be called from `CurStepChanged(ssPostInstall)` after the directories exist. It must not modify any parent or system directory.
+
+Keep the explicit uninstall data choice in the same `[Code]` section.
+
+Extend the existing `[Code]` section with the following effective-ACL and uninstall logic. Add the SID constants to Task 4's existing `const` block, keep `DeleteFieldData` in its existing `var` block, and add the functions below after the prerequisite functions; do not create a second `[Code]`, `const` or `var` section. The ACL helper uses only the target directory paths; it never calls `icacls` on a parent of `{app}`:
 
 ```pascal
-[Code]
+  SidSystem = '*S-1-5-18';
+  SidAdministrators = '*S-1-5-32-544';
+  SidUsers = '*S-1-5-32-545';
+
+function SetEffectiveAcl(const DirectoryName, UserRights: String): Boolean;
 var
-  DeleteFieldData: Boolean;
+  Parameters: String;
+  ResultCode: Integer;
+begin
+  Parameters := '"' + DirectoryName + '" /inheritance:r /grant:r ' +
+    '"' + SidSystem + ':(OI)(CI)(F)" ' +
+    '"' + SidAdministrators + ':(OI)(CI)(F)" ' +
+    '"' + SidUsers + ':(OI)(CI)(' + UserRights + ')"';
+  if not Exec(ExpandConstant('{sys}\icacls.exe'), Parameters, '',
+    SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := False
+  else
+    Result := ResultCode = 0;
+end;
+
+function ApplyMineRailMonitorAcl(): Boolean;
+begin
+  Result :=
+    SetEffectiveAcl(ExpandConstant('{app}'), 'RX') and
+    SetEffectiveAcl(ExpandConstant('{app}\App'), 'RX') and
+    SetEffectiveAcl(ExpandConstant('{app}\Data'), 'M') and
+    SetEffectiveAcl(ExpandConstant('{app}\Backups'), 'M') and
+    SetEffectiveAcl(ExpandConstant('{app}\Logs'), 'M') and
+    SetEffectiveAcl(ExpandConstant('{app}\Projects'), 'M') and
+    SetEffectiveAcl(ExpandConstant('{app}\Docs'), 'M');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and not ApplyMineRailMonitorAcl then begin
+    MsgBox('无法规范化 MineRailMonitor 目录权限，安装将停止。',
+      mbCriticalError, MB_OK);
+    Abort;
+  end;
+end;
 
 function InitializeUninstall(): Boolean;
 begin
@@ -800,11 +938,13 @@ begin
     '是否同时删除现场数据和历史记录？',
     mbConfirmation,
     MB_YESNO) = IDYES;
-  if DeleteFieldData then
-    Result := MsgBox(
-      '将删除 Projects、Data、Backups 和 Logs，是否继续？',
-      mbError,
-      MB_YESNO) = IDYES;
+  if DeleteFieldData and
+     (MsgBox(
+       '将删除 Projects、Data、Backups、Logs 和 Docs 中的现场文件，是否继续？',
+       mbConfirmation,
+       MB_YESNO) = IDNO) then
+    DeleteFieldData := False;
+  Result := True;
 end;
 
 procedure CurUninstallStepChanged(Changes: TUninstallStep);
@@ -814,15 +954,16 @@ begin
     DelTree(ExpandConstant('{app}\Data'), True, True, True);
     DelTree(ExpandConstant('{app}\Backups'), True, True, True);
     DelTree(ExpandConstant('{app}\Logs'), True, True, True);
+    DelTree(ExpandConstant('{app}\Docs'), True, True, True);
   end;
 end;
 ```
 
-The default `No` response leaves field data in place. The second confirmation is required before any field-data deletion. The normal uninstall list still removes App and the shortcut only.
+The first `No` response leaves field data in place and continues uninstall. If the second confirmation is `No`, the code explicitly resets `DeleteFieldData := False` and still returns `Result := True`; it does not cancel uninstall. Only two `Yes` responses delete the five concrete field-data directories. There is no `DelTree(ExpandConstant('{app}'))`; the normal uninstall list removes App, shortcut and registration, and Inno may remove an empty Root afterward.
 
 - [ ] **Step 4: Add changed-root upgrade warning without migration**
 
-Add an Inno Setup `NextButtonClick` guard for the directory selection page. It must compare the selected `{app}` with the previous install directory and warn when they differ:
+Add an Inno Setup `NextButtonClick` guard for the directory selection page. It must compare the selected `{app}` with the previous install directory and block when they differ:
 
 ```pascal
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -836,15 +977,17 @@ begin
   PreviousRoot := ExpandConstant('{reg:HKLM\\Software\\MineRailMonitor,InstallLocation|}');
   if (PreviousRoot <> '') and
      (CompareText(ExpandConstant('{app}'), PreviousRoot) <> 0) then begin
-    Result := MsgBox(
-      '已选择新的安装目录。旧 Data、Projects、Backups 和 Logs 不会自动迁移或覆盖。是否继续？',
-      mbConfirmation,
-      MB_YESNO) = IDYES;
+    MsgBox(
+      '已安装版本位于 ' + PreviousRoot + '。当前版本不支持升级时迁移安装目录。' +
+      '请继续使用原安装目录；如需迁移，请先完成独立的数据迁移流程。',
+      mbCriticalError,
+      MB_OK);
+    Result := False;
   end;
 end;
 ```
 
-The exact registry value name used by the installer must be kept stable with its AppId registration. This hook only warns and permits/blocks the install; it must not copy field data. `UsePreviousAppDir=yes` remains the default same-root upgrade path.
+The exact registry value name used by the installer must be kept stable with its AppId registration. This hook blocks a changed Root; it must not copy field data, move Backups or rewrite recovery markers. `UsePreviousAppDir=yes` remains the default same-root upgrade path.
 
 - [ ] **Step 5: Compile and test the installer contract**
 
@@ -854,6 +997,19 @@ dotnet test tests/MineRailMonitor.Core.Tests/MineRailMonitor.Core.Tests.csproj -
 ```
 
 Expected: Inno Setup compilation succeeds and all ACL/upgrade/uninstall tests pass.
+
+On a disposable installed Root, run the real effective-permission checks:
+
+```powershell
+$Root = 'D:\MineRailMonitor-ACL-test'
+icacls $Root
+icacls (Join-Path $Root 'App')
+icacls (Join-Path $Root 'Data')
+icacls (Join-Path $Root 'Logs')
+icacls (Join-Path $Root 'Projects')
+```
+
+Using a standard non-administrator account, create a file in Data and Logs, modify a Projects configuration, and create a Docs document; then verify attempts to modify and delete `App\MineRailMonitor.exe` and an App DLL fail. The ACL text assertions are not sufficient evidence; these commands and file operations are required on the disposable installation.
 
 - [ ] **Step 6: Run the application regression set**
 
@@ -895,6 +1051,9 @@ param([Parameter(Mandatory = $true)][string]$StagingRoot)
 $root = [IO.Path]::GetFullPath($StagingRoot)
 $required = @(
     (Join-Path $root "App\MineRailMonitor.exe"),
+    (Join-Path $root "App\System.Data.SQLite.dll"),
+    (Join-Path $root "App\x86\SQLite.Interop.dll"),
+    (Join-Path $root "App\x64\SQLite.Interop.dll"),
     (Join-Path $root "Projects"),
     (Join-Path $root "Data"),
     (Join-Path $root "Backups"),
@@ -933,17 +1092,18 @@ Expected: Release build has 0 warnings / 0 errors, Core and Infrastructure suite
 
 On a clean Windows VM or target machine, record each result without using the real production directory for destructive tests:
 
-1. First install with default `C:\MineRailMonitor`.
-2. Confirm the desktop shortcut is `矿车编组监控系统` and targets `<Root>\App\MineRailMonitor.exe`.
-3. Start as a normal user; confirm no elevation prompt and no service/autostart/scheduled task/Registry Run entry.
-4. Confirm Data can create/open SQLite, Logs and BlackBox can write, Backups can be generated, and Projects can load.
-5. Confirm ordinary users cannot modify an App exe/dll.
-6. Install a disposable second copy into `D:\MineRailMonitor` and confirm no `D:\MineRailMonitor\MineRailMonitor` is created.
-7. Upgrade the first installation without changing the directory; confirm the previous Root is reused and Data, Projects, Logs and Backups remain unchanged.
-8. Re-run upgrade with a deliberately changed Root; confirm the warning appears and no old field data is copied or overwritten.
-9. Uninstall with the default field-data choice; confirm App and shortcut are removed while Projects, Data, Backups and Logs remain.
-10. Repeat uninstall with both explicit confirmations; confirm only the selected disposable field-data directory is removed.
-11. Reinstall using the retained data directory and confirm the existing database and project configuration are usable.
+1. On clean Snapshot A, run the installer with the default `C:\MineRailMonitor`.
+2. On a machine/snapshot without .NET Framework 4.8 Full Release, confirm `InitializeSetup` blocks installation and shows the Chinese prerequisite message; on a machine satisfying `Release >= 528040`, confirm installation proceeds.
+3. Confirm the desktop shortcut is `矿车编组监控系统` and targets `<Root>\App\MineRailMonitor.exe`.
+4. Start as a normal user; confirm no elevation prompt and no service/autostart/scheduled task/Registry Run entry.
+5. Run `icacls <Root>` and `icacls <Root>\App`; confirm no inherited Users Modify and effective Users Read/Execute. As the same non-admin user, confirm creating a file in Data and Logs, modifying a Projects configuration, and writing Docs succeeds.
+6. As that non-admin user, confirm modifying or deleting `App\MineRailMonitor.exe` and an App DLL fails. Confirm the package contains `System.Data.SQLite.dll`, `App\x86\SQLite.Interop.dll` and `App\x64\SQLite.Interop.dll`.
+7. On independent clean Snapshot B, choose `D:\MineRailMonitor` during first install and confirm `D:\MineRailMonitor\App`, `Data`, `Backups`, `Logs`, `Projects` and `Docs` exist without `D:\MineRailMonitor\MineRailMonitor`.
+8. Upgrade the first installation without changing the directory; confirm the previous Root is reused and Data, Projects, Logs and Backups remain unchanged.
+9. During that same-AppId upgrade, deliberately select a different Root; confirm the installer blocks with the migration-not-supported message and no old field data is copied or overwritten.
+10. Uninstall with the default field-data choice; confirm App and shortcut are removed while Projects, Data, Backups, Logs and Docs remain.
+11. Repeat on a disposable snapshot with both explicit confirmations; confirm only the concrete field-data directories are removed and no unsafe whole-Root deletion occurs.
+12. Reinstall using the retained data directory and confirm the existing database and project configuration are usable.
 
 - [ ] **Step 4: Inspect migration/recovery boundaries**
 
@@ -968,11 +1128,11 @@ git commit -m "test: verify desktop installation package"
 
 ## Commit Strategy
 
-The implementation worker should keep each Task commit independently reviewable. The plan itself is committed now with:
+The implementation worker should keep each Task commit independently reviewable. This documentation follow-up is committed with:
 
 ```powershell
-git add docs/superpowers/plans/2026-09-21-desktop-install-layout.md
-git commit -m "docs: plan desktop installation layout"
+git add docs/superpowers/specs/2026-09-21-desktop-install-layout-design.md docs/superpowers/plans/2026-09-21-desktop-install-layout.md
+git commit -m "docs: harden desktop installer implementation plan"
 git push origin feat/desktop-install-layout
 ```
 
@@ -985,12 +1145,16 @@ Do not execute Task 1 from the plan in the plan-writing phase. Do not create a n
 - Spec sections 6–8 map to Task 2 runtime paths and Task 6 verification; SQLite implementation remains unchanged.
 - Spec sections 9–11 map to Task 4 installer layout and Task 5 upgrade/uninstall behavior.
 - Spec section 12 maps to Task 1 root resolution and Task 6 recovery-marker migration boundary.
-- Spec section 13 maps to Task 5 ACL checks.
-- Spec section 14 maps to Task 4 Inno Setup selection.
+- Spec section 13 maps to Task 5 SID-based effective ACL normalization and Task 6 real permission checks.
+- Spec section 14 maps to Task 4 Inno Setup selection, fixed AppId and .NET Framework 4.8 prerequisite.
 - Spec section 15 maps to the six Tasks in this plan.
 - Spec section 16 maps to Task 6 automated and manual acceptance.
 - Spec section 17 maps to the scope constraints in this plan.
 - Placeholder scan must find no placeholder markers, vague implementation steps, or unassigned Task reference.
 - Type consistency: `ApplicationPaths` is created in Task 1, exposed as `App.Paths` in Task 2, consumed by staging/runtime wiring in Task 3, and never referenced by installer Pascal code.
-- Review Focus items are assigned to Task 1, Task 2, Task 3, Task 4 and Task 5 as listed above.
+- Review Focus items are assigned to Task 1, Task 2, Task 3, Task 4, Task 5 and Task 6 as listed above.
+- Effective-permission coverage is based on `icacls /inheritance:r /grant:r` with stable SIDs plus non-admin file-operation checks; no markup test is treated as final ACL evidence.
+- Upgrade coverage blocks changed Root for the same stable AppId; no same-AppId side-by-side test or cross-Root migration is planned.
+- Publish coverage records the observed output: `System.Data.SQLite.dll` is in publish, while x86/x64 `SQLite.Interop.dll` are copied from the actual Release build output into staging and then verified.
+- ApplicationRoot boundary coverage explicitly documents that a development BaseDirectory named `App` is indistinguishable from installed layout under the approved contract.
 ```

@@ -7,6 +7,7 @@ using System.Windows.Threading;
 using MineRailMonitor.Core.Acceptance;
 using MineRailMonitor.Core.Communication;
 using MineRailMonitor.Core.Services;
+using MineRailMonitor.Infrastructure.Configuration;
 using MineRailMonitor.Infrastructure.Logging;
 using MineRailMonitor.Infrastructure.Persistence;
 using MineRailMonitor.Pages;
@@ -18,9 +19,10 @@ public partial class App : Application
     public App()
     {
         AcceptanceOptions = AcceptanceCommandLineOptions.Parse(Environment.GetCommandLineArgs());
+        Paths = new ApplicationPaths(AppContext.BaseDirectory, explicitRootDirectory: null);
         var logDirectory = AcceptanceOptions.Enabled
             ? AcceptanceOptions.LogDirectory!
-            : System.IO.Path.Combine(AppContext.BaseDirectory, "Logs");
+            : Paths.LogsDirectory;
         Logger = new FileLogger(logDirectory);
         AdminModeService = new AdminModeService(ReadAdminPassword());
         DispatcherUnhandledException += OnDispatcherUnhandledException;
@@ -30,6 +32,8 @@ public partial class App : Application
     public ILogger Logger { get; }
 
     public AcceptanceCommandLineOptions AcceptanceOptions { get; }
+
+    public ApplicationPaths Paths { get; }
 
     public AdminModeService AdminModeService { get; }
 
@@ -137,9 +141,10 @@ public partial class App : Application
 
     private async Task StartProductionAsync()
     {
-        var dataDirectory = Path.Combine(AppContext.BaseDirectory, "Data");
-        var productionDatabasePath = Path.Combine(dataDirectory, "MineRailMonitor.db");
-        var backupRootDirectory = Path.Combine(AppContext.BaseDirectory, "Backups", "SQLite");
+        Paths.EnsureWritableDirectories();
+        var dataDirectory = Paths.DataDirectory;
+        var productionDatabasePath = Paths.DatabasePath;
+        var backupRootDirectory = Paths.SqliteBackupDirectory;
         var timeProvider = new SystemRfidTimeProvider();
         var healthChecker = new SqliteDatabaseHealthChecker(timeProvider, Logger);
         var backupService = new SqliteBackupService(healthChecker, Logger);

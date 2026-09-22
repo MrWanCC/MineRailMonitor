@@ -64,6 +64,48 @@ public sealed class DatabaseStartupOwnershipMarkupTests
         Assert.DoesNotContain("DatabaseMaintenanceCoordinator", acceptance);
         Assert.DoesNotContain("Backups", acceptance);
         Assert.DoesNotContain("Corrupt", acceptance);
+        Assert.DoesNotContain("Paths.", acceptance);
+        Assert.DoesNotContain("EnsureWritableDirectories", acceptance);
+    }
+
+    [Fact]
+    public void App_exposes_application_paths_for_production_layout()
+    {
+        var app = ReadApp();
+
+        Assert.Contains("public ApplicationPaths Paths { get; }", app);
+        Assert.Contains(
+            "new ApplicationPaths(AppContext.BaseDirectory, explicitRootDirectory: null)",
+            app);
+        Assert.Contains("Paths.DataDirectory", app);
+        Assert.Contains("Paths.DatabasePath", app);
+        Assert.Contains("Paths.SqliteBackupDirectory", app);
+        Assert.Contains("Paths.LogsDirectory", app);
+    }
+
+    [Fact]
+    public void Acceptance_keeps_explicit_database_and_log_paths()
+    {
+        var app = ReadApp();
+
+        Assert.Contains("AcceptanceOptions.DatabasePath!", app);
+        Assert.Contains("_acceptanceOptions.LogDirectory!", ReadMainWindow());
+    }
+
+    [Fact]
+    public void MainWindow_uses_application_paths_for_production_projects_and_black_box()
+    {
+        var mainWindow = ReadMainWindow();
+
+        Assert.Contains("appPaths.ProjectsDirectory", mainWindow);
+        Assert.Contains("appPaths.BlackBoxDirectory", mainWindow);
+        Assert.Contains(
+            "Path.Combine(AppContext.BaseDirectory, \"Projects\", \"Example\")",
+            mainWindow);
+        Assert.DoesNotContain(
+            "Path.Combine(AppContext.BaseDirectory, \"Logs\", \"BlackBox\")",
+            mainWindow);
+        Assert.DoesNotContain("ResolveProjectDirectory()", mainWindow);
     }
 
     [Fact]
@@ -222,13 +264,17 @@ public sealed class DatabaseStartupOwnershipMarkupTests
     }
 
     [Fact]
-    public void App_creates_production_services_from_fixed_paths()
+    public void App_creates_production_services_from_application_paths()
     {
         var production = ExtractMethod(ReadApp(), "private async Task StartProductionAsync");
 
-        Assert.Contains("Path.Combine(AppContext.BaseDirectory, \"Data\")", production);
-        Assert.Contains("Path.Combine(dataDirectory, \"MineRailMonitor.db\")", production);
-        Assert.Contains("Path.Combine(AppContext.BaseDirectory, \"Backups\", \"SQLite\")", production);
+        Assert.Contains("Paths.EnsureWritableDirectories()", production);
+        Assert.Contains("var dataDirectory = Paths.DataDirectory", production);
+        Assert.Contains("var productionDatabasePath = Paths.DatabasePath", production);
+        Assert.Contains("var backupRootDirectory = Paths.SqliteBackupDirectory", production);
+        Assert.DoesNotContain("Path.Combine(AppContext.BaseDirectory, \"Data\")", production);
+        Assert.DoesNotContain("Path.Combine(dataDirectory, \"MineRailMonitor.db\")", production);
+        Assert.DoesNotContain("Path.Combine(AppContext.BaseDirectory, \"Backups\", \"SQLite\")", production);
         Assert.Contains("new SqliteDatabaseHealthChecker", production);
         Assert.Contains("new SqliteBackupService", production);
         Assert.Contains("new SqliteRecoveryService", production);

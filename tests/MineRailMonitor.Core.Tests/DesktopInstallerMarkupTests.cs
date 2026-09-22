@@ -240,6 +240,77 @@ public sealed class DesktopInstallerMarkupTests
     }
 
     [Fact]
+    public void Installer_rejects_reparse_point_on_selected_root()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("function ValidateRootPathChain", script, StringComparison.Ordinal);
+        Assert.Contains("FILE_ATTRIBUTE_REPARSE_POINT", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_rejects_reparse_point_in_existing_root_ancestor()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("function ValidateRootPathChain", script, StringComparison.Ordinal);
+        Assert.Contains("ExtractFileDir", script, StringComparison.Ordinal);
+        Assert.Contains("FindFirst", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_scans_managed_subtrees_for_reparse_points_before_acl()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+        var prepareToInstall = script.IndexOf("function PrepareToInstall", StringComparison.Ordinal);
+        var prepareEnd = script.IndexOf("function IsSilentUninstall", prepareToInstall, StringComparison.Ordinal);
+
+        Assert.True(prepareToInstall >= 0);
+        Assert.True(prepareEnd > prepareToInstall);
+
+        var prepareBody = script.Substring(prepareToInstall, prepareEnd - prepareToInstall);
+        Assert.Contains(
+            "ValidateInstallRoot(ExpandConstant('{app}'), PreviousRoot)",
+            prepareBody,
+            StringComparison.Ordinal);
+        Assert.Contains("ApplyMineRailMonitorAcl", script, StringComparison.Ordinal);
+
+        var validateInstallRoot = script.IndexOf("function ValidateInstallRoot", StringComparison.Ordinal);
+        var validatePreviousRoot = script.IndexOf("function ValidatePreviousRoot", validateInstallRoot, StringComparison.Ordinal);
+        Assert.True(validateInstallRoot >= 0);
+        Assert.True(validatePreviousRoot > validateInstallRoot);
+        Assert.Contains(
+            "ScanManagedTreeForReparsePoints",
+            script.Substring(validateInstallRoot, validatePreviousRoot - validateInstallRoot),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_scans_reparse_points_even_on_same_root_upgrade()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+        var validateInstallRoot = script.IndexOf("function ValidateInstallRoot", StringComparison.Ordinal);
+        var validatePreviousRoot = script.IndexOf("function ValidatePreviousRoot", validateInstallRoot, StringComparison.Ordinal);
+
+        Assert.True(validateInstallRoot >= 0);
+        Assert.True(validatePreviousRoot > validateInstallRoot);
+
+        var validationBody = script.Substring(validateInstallRoot, validatePreviousRoot - validateInstallRoot);
+        Assert.Contains("ScanManagedTreeForReparsePoints", validationBody, StringComparison.Ordinal);
+        Assert.Contains("PreviousRoot", validationBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_never_recurses_into_detected_reparse_point()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("function IsReparsePoint", script, StringComparison.Ordinal);
+        Assert.Contains("if IsReparsePoint(FindData) then", script, StringComparison.Ordinal);
+        Assert.Contains("FILE_ATTRIBUTE_DIRECTORY", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Installer_disallows_UNC_and_network_roots()
     {
         var script = ReadSource("installer", "MineRailMonitor.iss");

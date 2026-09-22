@@ -322,6 +322,13 @@ HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full\Release
 
 retained-data 顶层条目只有在名称属于 `Projects`、`Data`、`Backups`、`Logs`、`Docs`，且属性包含 `FILE_ATTRIBUTE_DIRECTORY`、不包含 `FILE_ATTRIBUTE_REPARSE_POINT` 时才允许。普通文件、junction 和 directory symlink 都必须拒绝；安装器不得跟随、删除 link 或修改 link target 的 ACL。
 
+在任何递归 `icacls` 操作前，安装器还必须执行 reparse point 安全预检。预检覆盖：
+
+- selected `<Root>` 自身，以及从该路径向上直到 volume root 的所有已经存在的目录组件；
+- `<Root>\App`、`<Root>\Data`、`<Root>\Backups`、`<Root>\Logs`、`<Root>\Projects`、`<Root>\Docs`（如果存在）及其全部 descendants。
+
+上述路径的任一 `TFindRec.Attributes` 含 `FILE_ATTRIBUTE_REPARSE_POINT` 都必须立即返回中文错误并停止安装。遍历时必须先检查当前 entry 的属性，发现 reparse point 后不得继续递归、跟随目标或对目标执行 ACL 操作；只有明确为普通 directory 的 entry 才能递归。该预检必须在首次安装和同一 Root 升级中都执行，`previous Root` 记录不得绕过它。`PrepareToInstall` 的最终顺序必须是：本地 Root/系统路径与网络路径校验 → Root 及 ancestors reparse 校验 → managed subtrees reparse 递归校验 → previous Root 相等性校验 → 允许 payload；所有这些步骤都必须早于 payload 写入和 `ApplyMineRailMonitorAcl`。
+
 卸载删除现场数据的两次 destructive confirmation 均以 No 为默认按钮（`MB_YESNO or MB_DEFBUTTON2`）。第一次 No 或 Yes→No 都继续卸载但保留现场目录，只有 Yes→Yes 才删除五个明确的现场目录。
 
 ## 10. 升级策略

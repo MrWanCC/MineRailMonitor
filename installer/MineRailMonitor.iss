@@ -54,6 +54,8 @@ const
   UsersModifyRights = '(OI)(CI)(M)';
   UnsafeRootMessage =
     '请选择一个 MineRailMonitor 专用安装目录，不能使用磁盘根目录、Windows/Program Files 等系统目录，也不能直接使用包含其它文件的共享目录。';
+  ReparsePointMessage =
+    '安装目录中检测到符号链接或目录联接，为防止权限操作影响目录外数据，安装已停止。';
 
 var
   DeleteFieldData: Boolean;
@@ -217,6 +219,137 @@ begin
     (ExpandedPath[1] = '\') and (ExpandedPath[2] = '\');
 end;
 
+function IsReparsePoint(const FindData: TFindRec): Boolean;
+begin
+  Result := (FindData.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0;
+end;
+
+function TryGetEntryAttributes(const ParentDirectory, EntryName: String;
+  var Attributes: Cardinal): Boolean;
+var
+  FindData: TFindRec;
+begin
+  Result := False;
+  Attributes := 0;
+  if not FindFirst(AddBackslash(ParentDirectory) + '*', FindData) then
+    exit;
+
+  try
+    repeat
+      if CompareText(FindData.Name, EntryName) = 0 then begin
+        Attributes := FindData.Attributes;
+        Result := True;
+        exit;
+      end;
+    until not FindNext(FindData);
+  finally
+    FindClose(FindData);
+  end;
+end;
+
+function TryGetPathAttributes(const Path: String;
+  var Attributes: Cardinal): Boolean;
+var
+  ParentDirectory: String;
+  EntryName: String;
+begin
+  Result := False;
+  Attributes := 0;
+  if (Path = '') or IsDriveRoot(Path) then
+    exit;
+
+  ParentDirectory := NormalizeRoot(ExtractFileDir(Path));
+  EntryName := ExtractFileName(Path);
+  if (ParentDirectory = '') or (EntryName = '') then
+    exit;
+
+  Result := TryGetEntryAttributes(ParentDirectory, EntryName, Attributes);
+end;
+
+function ValidateRootPathChain(const DirectoryName: String): Boolean;
+var
+  Current: String;
+  ParentDirectory: String;
+  Attributes: Cardinal;
+begin
+  Result := True;
+  Current := NormalizeRoot(DirectoryName);
+
+  while (Current <> '') and not IsDriveRoot(Current) and
+    (not DirExists(Current)) and (not FileExists(Current)) do begin
+    ParentDirectory := NormalizeRoot(ExtractFileDir(Current));
+    if ParentDirectory = Current then
+      break;
+    Current := ParentDirectory;
+  end;
+
+  while (Current <> '') and not IsDriveRoot(Current) do begin
+    if not TryGetPathAttributes(Current, Attributes) then begin
+      if DirExists(Current) or FileExists(Current) then begin
+        Result := False;
+        exit;
+      end;
+    end
+    else if (Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then begin
+      Result := False;
+      exit;
+    end;
+
+    ParentDirectory := NormalizeRoot(ExtractFileDir(Current));
+    if ParentDirectory = Current then
+      break;
+    Current := ParentDirectory;
+  end;
+end;
+
+function ScanManagedTreeForReparsePoints(const DirectoryName: String): Boolean;
+var
+  Attributes: Cardinal;
+  FindData: TFindRec;
+  ChildPath: String;
+begin
+  Result := True;
+  if not TryGetPathAttributes(DirectoryName, Attributes) then begin
+    if (not DirExists(DirectoryName)) and (not FileExists(DirectoryName)) then
+      exit;
+    Result := False;
+    exit;
+  end;
+
+  if (Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then begin
+    Result := False;
+    exit;
+  end;
+
+  if (Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0 then begin
+    Result := False;
+    exit;
+  end;
+
+  if FindFirst(AddBackslash(DirectoryName) + '*', FindData) then begin
+    try
+      repeat
+        if (FindData.Name <> '.') and (FindData.Name <> '..') then begin
+          if IsReparsePoint(FindData) then begin
+            Result := False;
+            exit;
+          end;
+
+          if (FindData.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then begin
+            ChildPath := AddBackslash(DirectoryName) + FindData.Name;
+            if not ScanManagedTreeForReparsePoints(ChildPath) then begin
+              Result := False;
+              exit;
+            end;
+          end;
+        end;
+      until not FindNext(FindData);
+    finally
+      FindClose(FindData);
+    end;
+  end;
+end;
+
 function ValidateInstallRoot(const SelectedRoot, PreviousRoot: String): String;
 var
   Root: String;
@@ -234,13 +367,43 @@ begin
     exit;
   end;
 
-  if PreviousRoot <> '' then
+  if not ValidateRootPathChain(Root) then begin
+    Result := ReparsePointMessage;
     exit;
+  end;
+
+  if not ScanManagedTreeForReparsePoints(AddBackslash(Root) + 'App') then begin
+    Result := ReparsePointMessage;
+    exit;
+  end;
+  if not ScanManagedTreeForReparsePoints(AddBackslash(Root) + 'Data') then begin
+    Result := ReparsePointMessage;
+    exit;
+  end;
+  if not ScanManagedTreeForReparsePoints(AddBackslash(Root) + 'Backups') then begin
+    Result := ReparsePointMessage;
+    exit;
+  end;
+  if not ScanManagedTreeForReparsePoints(AddBackslash(Root) + 'Logs') then begin
+    Result := ReparsePointMessage;
+    exit;
+  end;
+  if not ScanManagedTreeForReparsePoints(AddBackslash(Root) + 'Projects') then begin
+    Result := ReparsePointMessage;
+    exit;
+  end;
+  if not ScanManagedTreeForReparsePoints(AddBackslash(Root) + 'Docs') then begin
+    Result := ReparsePointMessage;
+    exit;
+  end;
 
   if FileExists(Root) then begin
     Result := UnsafeRootMessage;
     exit;
   end;
+
+  if PreviousRoot <> '' then
+    exit;
 
   if not DirExists(Root) then
     exit;

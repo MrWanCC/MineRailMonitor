@@ -903,6 +903,8 @@ Final review hardening also requires:
 - `[Setup]` sets `AllowUNCPath=no`, `AllowNetworkDrive=no` and `ArchitecturesAllowed=x64os` alongside `ArchitecturesInstallIn64BitMode=x64os`;
 - the same `PrepareToInstall` validator rejects UNC and mapped-network paths even when the wizard is hidden or `/DIR=` is supplied. ARM64 remains outside the supported contract.
 
+Before any recursive `icacls` call, add equivalent explicit reparse-point hardening. The validation must check the selected Root itself and every existing directory component from that Root up to the volume root; it must also scan existing `<Root>\App`, `<Root>\Data`, `<Root>\Backups`, `<Root>\Logs`, `<Root>\Projects` and `<Root>\Docs` recursively. Use Inno Setup 7.1 `TFindRec`, `FindFirst`, `FindNext`, `FindClose`, `FILE_ATTRIBUTE_DIRECTORY` and `FILE_ATTRIBUTE_REPARSE_POINT`. Inspect an entry before recursing; if it is a reparse point, fail immediately and never follow it or call ACL operations on its target. Missing managed subtrees are allowed for a first install, but an existing managed subtree root that is a reparse point is rejected. This scan runs for both first install and same-Root upgrade; `PreviousRoot` must not bypass it. `PrepareToInstall` must keep the final pre-write order: safe local/network/system Root validation, Root/ancestor reparse scan, managed-tree reparse scan, previous-Root equality check, then allow payload. All checks must complete before payload or `ApplyMineRailMonitorAcl`.
+
 - [ ] **Step 1: Add failing retention and ACL tests**
 
 Add these source-contract tests:

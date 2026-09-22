@@ -72,6 +72,21 @@ public sealed class DesktopInstallerMarkupTests
     }
 
     [Fact]
+    public void Installer_uses_simplified_chinese_inno_messages()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains(
+            "Name: \"chinesesimp\"; MessagesFile: \"compiler:Languages\\ChineseSimplified.isl\"",
+            script,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Name: \"english\"",
+            script,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Installer_grants_Modify_only_to_runtime_data_directories()
     {
         var script = ReadSource("installer", "MineRailMonitor.iss");

@@ -17,6 +17,9 @@ OutputBaseFilename=MineRailMonitor-Setup
 DisableProgramGroupPage=yes
 Uninstallable=yes
 
+[Languages]
+Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+
 [Files]
 Source: "..\artifacts\desktop-package\App\*"; Excludes: "MineRailMonitor.exe.config"; DestDir: "{app}\App"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "..\artifacts\desktop-package\App\MineRailMonitor.exe.config"; DestDir: "{app}\App"; Flags: onlyifdoesntexist ignoreversion

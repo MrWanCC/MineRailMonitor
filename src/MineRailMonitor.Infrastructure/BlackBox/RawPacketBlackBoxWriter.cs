@@ -85,16 +85,18 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
 
     public RawPacketBlackBoxStatus GetSnapshot()
     {
+        long droppedCount;
         string? lastError;
         lock (_statusSyncRoot)
         {
+            droppedCount = _droppedCount;
             lastError = _lastError;
         }
 
         return new RawPacketBlackBoxStatus(
             Volatile.Read(ref _isRunning) == 1,
             Interlocked.Read(ref _writtenCount),
-            Interlocked.Read(ref _droppedCount),
+            droppedCount,
             lastError,
             RootDirectory);
     }
@@ -208,13 +210,12 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
             closeException = CloseWriter(writer);
         }
 
-        Interlocked.Increment(ref _droppedCount);
         var message = GetErrorMessage(exception);
         if (closeException is not null)
         {
             message = $"{message}；关闭黑匣子文件失败：{GetErrorMessage(closeException)}";
         }
-        SetLastError(message);
+        RecordDrop(message);
     }
 
     private void PurgeIfNeeded(bool force)
@@ -311,8 +312,11 @@ public sealed class RawPacketBlackBoxWriter : IDisposable
 
     private void RecordDrop(string message)
     {
-        Interlocked.Increment(ref _droppedCount);
-        SetLastError(message);
+        lock (_statusSyncRoot)
+        {
+            _droppedCount++;
+            SetLastErrorUnsafe(message);
+        }
     }
 
     private void SetLastError(string message)

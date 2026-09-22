@@ -155,6 +155,28 @@ public sealed class DesktopInstallerMarkupTests
     }
 
     [Fact]
+    public void Installer_removes_install_location_value_and_empty_registry_key_on_uninstall()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+        var registryEntry = script
+            .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+            .Single(line => line.StartsWith(
+                "Root: HKLM; Subkey: \"Software\\MineRailMonitor\";",
+                StringComparison.Ordinal));
+        var flags = registryEntry
+            .Split(new[] { "Flags:" }, StringSplitOptions.None)
+            [1]
+            .Trim()
+            .Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+
+        Assert.Contains("ValueName: \"InstallLocation\"", registryEntry, StringComparison.Ordinal);
+        Assert.Contains("ValueData: \"{app}\"", registryEntry, StringComparison.Ordinal);
+        Assert.Contains("uninsdeletevalue", flags);
+        Assert.Contains("uninsdeletekeyifempty", flags);
+        Assert.DoesNotContain("uninsdeletekey", flags);
+    }
+
+    [Fact]
     public void Installer_rejects_volume_root_before_acl_changes()
     {
         var script = ReadSource("installer", "MineRailMonitor.iss");

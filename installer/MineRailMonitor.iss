@@ -45,7 +45,7 @@ Filename: "{app}\App\MineRailMonitor.exe"; Description: "立即启动 MineRailMo
 Type: filesandordirs; Name: "{app}\App"
 
 [Registry]
-Root: HKLM; Subkey: "Software\MineRailMonitor"; ValueType: string; ValueName: "InstallLocation"; ValueData: "{app}"; Flags: uninsdeletekeyifempty
+Root: HKLM; Subkey: "Software\MineRailMonitor"; ValueType: string; ValueName: "InstallLocation"; ValueData: "{app}"; Flags: uninsdeletevalue uninsdeletekeyifempty
 
 [Code]
 const

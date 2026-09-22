@@ -209,6 +209,56 @@ public sealed class DesktopInstallerMarkupTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Uninstall_confirmation_defaults_to_No()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        var defaultNoCount = script.Split(
+            new[] { "MB_YESNO or MB_DEFBUTTON2" },
+            StringSplitOptions.None).Length - 1;
+
+        Assert.Equal(2, defaultNoCount);
+    }
+
+    [Fact]
+    public void Installer_requires_retained_entries_to_be_real_directories()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("function IsSafeRetainedFieldDataEntry", script, StringComparison.Ordinal);
+        Assert.Contains("FILE_ATTRIBUTE_DIRECTORY", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_rejects_reparse_points_in_retained_root()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("FILE_ATTRIBUTE_REPARSE_POINT", script, StringComparison.Ordinal);
+        Assert.Contains("IsSafeRetainedFieldDataEntry(FindData)", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_disallows_UNC_and_network_roots()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("AllowUNCPath=no", script, StringComparison.Ordinal);
+        Assert.Contains("AllowNetworkDrive=no", script, StringComparison.Ordinal);
+        Assert.Contains("ExpandUNCFileName", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_explicitly_allows_only_x64_os()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+        var architectureLines = script.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+        Assert.Contains("ArchitecturesAllowed=x64os", architectureLines);
+        Assert.Contains("ArchitecturesInstallIn64BitMode=x64os", architectureLines);
+    }
+
     private static string ReadSource(params string[] segments) =>
         File.ReadAllText(Locate(segments));
 

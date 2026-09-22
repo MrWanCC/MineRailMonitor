@@ -896,6 +896,13 @@ When a previous Root is registered, a same-Root upgrade remains valid after the 
 
 Add source-contract coverage for volume roots, system/Program Files roots, unrelated non-empty first-install directories, empty pre-created directories, retained-data reinstall roots and invocation from `PrepareToInstall`. Add disposable real checks using only `D:\MineRailMonitor-UnsafeRoot-Test`-style roots: an empty root is allowed, an `unrelated.txt` root is blocked before payload/ACL changes, and a root containing only the five retained directories is allowed. Never point the installer at a real volume root, Windows directory, Program Files directory or field Root.
 
+Final review hardening also requires:
+
+- both destructive uninstall confirmations use `MB_YESNO or MB_DEFBUTTON2`, keeping No as the default while preserving the existing Yes→No/Yes→Yes semantics;
+- retained top-level entries are accepted only when `TFindRec.Attributes` contains `FILE_ATTRIBUTE_DIRECTORY` and excludes `FILE_ATTRIBUTE_REPARSE_POINT`; files, junctions and directory symlinks are rejected without following or changing their targets;
+- `[Setup]` sets `AllowUNCPath=no`, `AllowNetworkDrive=no` and `ArchitecturesAllowed=x64os` alongside `ArchitecturesInstallIn64BitMode=x64os`;
+- the same `PrepareToInstall` validator rejects UNC and mapped-network paths even when the wizard is hidden or `/DIR=` is supplied. ARM64 remains outside the supported contract.
+
 - [ ] **Step 1: Add failing retention and ACL tests**
 
 Add these source-contract tests:

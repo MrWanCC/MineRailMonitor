@@ -318,6 +318,12 @@ HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full\Release
 
 安全校验失败必须返回非空中文错误并停止安装，不能进入 payload 写入或 ACL normalization。允许的空目录、retained-data 重装目录仍可复用既有的 hostile ACL 测试；ACL normalization 只作用于已通过安全校验的 selected Root 及其 managed subtrees。
 
+安装器只支持经过验证的本地 x64 Windows 环境。`[Setup]` 必须同时使用 `ArchitecturesAllowed=x64os` 和 `ArchitecturesInstallIn64BitMode=x64os`；当前只验证了 x86/x64 SQLite native runtime，不承诺 ARM64 Windows。安装器必须设置 `AllowUNCPath=no` 和 `AllowNetworkDrive=no`，并在 `PrepareToInstall` 的最终 Root 校验中再次拒绝 UNC 或映射网络路径。
+
+retained-data 顶层条目只有在名称属于 `Projects`、`Data`、`Backups`、`Logs`、`Docs`，且属性包含 `FILE_ATTRIBUTE_DIRECTORY`、不包含 `FILE_ATTRIBUTE_REPARSE_POINT` 时才允许。普通文件、junction 和 directory symlink 都必须拒绝；安装器不得跟随、删除 link 或修改 link target 的 ACL。
+
+卸载删除现场数据的两次 destructive confirmation 均以 No 为默认按钮（`MB_YESNO or MB_DEFBUTTON2`）。第一次 No 或 Yes→No 都继续卸载但保留现场目录，只有 Yes→Yes 才删除五个明确的现场目录。
+
 ## 10. 升级策略
 
 升级安装必须优先复用上一次已安装的 `<Root>`。例如首次安装选择 `D:\MineRailMonitor` 后，后续升级默认继续使用 `D:\MineRailMonitor`，不能静默恢复到 `C:\MineRailMonitor`。

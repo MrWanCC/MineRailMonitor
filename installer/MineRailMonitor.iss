@@ -9,6 +9,9 @@ DefaultDirName=C:\MineRailMonitor
 UsePreviousAppDir=yes
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64os
+ArchitecturesAllowed=x64os
+AllowUNCPath=no
+AllowNetworkDrive=no
 OutputDir=..\artifacts\installer
 OutputBaseFilename=MineRailMonitor-Setup
 DisableProgramGroupPage=yes
@@ -174,6 +177,14 @@ begin
     (CompareText(DirectoryName, 'Docs') = 0);
 end;
 
+function IsSafeRetainedFieldDataEntry(const FindData: TFindRec): Boolean;
+begin
+  Result :=
+    IsRetainedFieldDataDirectory(FindData.Name) and
+    ((FindData.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) and
+    ((FindData.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) = 0);
+end;
+
 function ContainsOnlyRetainedMineRailData(const DirectoryName: String): Boolean;
 var
   FindData: TFindRec;
@@ -186,7 +197,7 @@ begin
     try
       repeat
         if (FindData.Name <> '.') and (FindData.Name <> '..') and
-          not IsRetainedFieldDataDirectory(FindData.Name) then begin
+          not IsSafeRetainedFieldDataEntry(FindData) then begin
           Result := False;
           exit;
         end;
@@ -197,6 +208,15 @@ begin
   end;
 end;
 
+function IsUncOrNetworkPath(const DirectoryName: String): Boolean;
+var
+  ExpandedPath: String;
+begin
+  ExpandedPath := ExpandUNCFileName(DirectoryName);
+  Result := (Length(ExpandedPath) >= 2) and
+    (ExpandedPath[1] = '\') and (ExpandedPath[2] = '\');
+end;
+
 function ValidateInstallRoot(const SelectedRoot, PreviousRoot: String): String;
 var
   Root: String;
@@ -204,7 +224,7 @@ begin
   Root := NormalizeRoot(SelectedRoot);
   Result := '';
 
-  if (Root = '') or IsDriveRoot(Root) or
+  if (Root = '') or IsDriveRoot(Root) or IsUncOrNetworkPath(Root) or
     IsPathEqualOrBelow(Root, ExpandConstant('{win}')) or
     IsPathEqualOrBelow(Root, ExpandConstant('{sys}')) or
     IsPathEqualOrBelow(Root, ExpandConstant('{pf}')) or
@@ -300,12 +320,12 @@ begin
   DeleteFieldData := MsgBox(
     '是否同时删除现场数据和历史记录？',
     mbConfirmation,
-    MB_YESNO) = IDYES;
+    MB_YESNO or MB_DEFBUTTON2) = IDYES;
   if DeleteFieldData and
      (MsgBox(
        '将删除 Projects、Data、Backups、Logs 和 Docs 中的现场文件，是否继续？',
        mbConfirmation,
-       MB_YESNO) = IDNO) then
+       MB_YESNO or MB_DEFBUTTON2) = IDNO) then
     DeleteFieldData := False;
 end;
 

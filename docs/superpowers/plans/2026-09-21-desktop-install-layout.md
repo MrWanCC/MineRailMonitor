@@ -886,6 +886,16 @@ git commit -m "feat: add desktop installer layout"
 - Consumes: Task 4 stable AppId, `{app}` Root and staging layout.
 - Produces: effective ACL normalization, same-Root upgrade reuse, changed-Root blocking and uninstall retention behavior.
 
+#### Final-review hardening: validate a safe dedicated Root before writes
+
+Before Task 5's ACL normalization or any payload write, the installer must validate the selected `{app}` as a dedicated MineRailMonitor Root. Keep the rules in one `ValidateInstallRoot` helper plus small path helpers; call the same validator from both `NextButtonClick(wpSelectDir)` and `PrepareToInstall`. `PrepareToInstall` is the final authority for hidden Select Directory pages, `/SILENT`, `/VERYSILENT` and `/DIR=`.
+
+The validator must use Inno Setup/Windows path APIs and constants, not hardcoded `C:\Windows` paths. It rejects volume roots and paths equal to or below `{win}`, `{sys}`, `{pf}`, `{pf32}` or `{pf64}`. It also rejects a file path and, for a first install with no registered previous Root, rejects an existing directory unless its top level is empty or contains only `Projects`, `Data`, `Backups`, `Logs` and `Docs`. It must not inspect, delete, migrate or rewrite the contents of those retained directories, including `Data\.sqlite-recovery-in-progress`.
+
+When a previous Root is registered, a same-Root upgrade remains valid after the safety checks; a different selected Root is rejected by the existing migration guard. Registry state must never bypass the volume/system-directory checks. Any validator failure returns a non-empty Chinese error before payload or ACL work starts. The existing `ssPostInstall` ACL normalization remains unchanged after this gate.
+
+Add source-contract coverage for volume roots, system/Program Files roots, unrelated non-empty first-install directories, empty pre-created directories, retained-data reinstall roots and invocation from `PrepareToInstall`. Add disposable real checks using only `D:\MineRailMonitor-UnsafeRoot-Test`-style roots: an empty root is allowed, an `unrelated.txt` root is blocked before payload/ACL changes, and a root containing only the five retained directories is allowed. Never point the installer at a real volume root, Windows directory, Program Files directory or field Root.
+
 - [ ] **Step 1: Add failing retention and ACL tests**
 
 Add these source-contract tests:

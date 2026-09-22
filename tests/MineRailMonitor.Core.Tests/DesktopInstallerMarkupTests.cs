@@ -139,6 +139,76 @@ public sealed class DesktopInstallerMarkupTests
         Assert.Contains("DeleteFieldData := False", script, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Installer_rejects_volume_root_before_acl_changes()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("function IsDriveRoot", script, StringComparison.Ordinal);
+        Assert.Contains("function ValidateInstallRoot", script, StringComparison.Ordinal);
+        Assert.Contains("ExpandConstant('{app}')", script, StringComparison.Ordinal);
+        Assert.Contains("ValidateInstallRoot", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_rejects_system_and_program_files_roots()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("ExpandConstant('{win}')", script, StringComparison.Ordinal);
+        Assert.Contains("ExpandConstant('{sys}')", script, StringComparison.Ordinal);
+        Assert.Contains("ExpandConstant('{pf}')", script, StringComparison.Ordinal);
+        Assert.Contains("ExpandConstant('{pf32}')", script, StringComparison.Ordinal);
+        Assert.Contains("ExpandConstant('{pf64}')", script, StringComparison.Ordinal);
+        Assert.Contains("IsPathEqualOrBelow", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_rejects_unrelated_nonempty_first_install_root()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("ContainsOnlyRetainedMineRailData", script, StringComparison.Ordinal);
+        Assert.Contains("FindFirst", script, StringComparison.Ordinal);
+        Assert.Contains("请选择一个 MineRailMonitor 专用安装目录", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_allows_empty_precreated_root()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("if not DirExists", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_allows_retained_field_data_root_for_reinstall()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+
+        Assert.Contains("Projects", script, StringComparison.Ordinal);
+        Assert.Contains("Data", script, StringComparison.Ordinal);
+        Assert.Contains("Backups", script, StringComparison.Ordinal);
+        Assert.Contains("Logs", script, StringComparison.Ordinal);
+        Assert.Contains("Docs", script, StringComparison.Ordinal);
+        Assert.Contains("IsRetainedFieldDataDirectory", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_runs_root_validation_from_PrepareToInstall()
+    {
+        var script = ReadSource("installer", "MineRailMonitor.iss");
+        var prepareToInstall = script.IndexOf("function PrepareToInstall", StringComparison.Ordinal);
+        var prepareEnd = script.IndexOf("function IsSilentUninstall", prepareToInstall, StringComparison.Ordinal);
+
+        Assert.True(prepareToInstall >= 0);
+        Assert.True(prepareEnd > prepareToInstall);
+        Assert.Contains(
+            "ValidateInstallRoot(ExpandConstant('{app}'), PreviousRoot)",
+            script.Substring(prepareToInstall, prepareEnd - prepareToInstall),
+            StringComparison.Ordinal);
+    }
+
     private static string ReadSource(params string[] segments) =>
         File.ReadAllText(Locate(segments));
 

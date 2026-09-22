@@ -296,6 +296,28 @@ HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full\Release
 - Startup shortcut；
 - Registry Run 自动启动项。
 
+### 9.1 安全专用安装根目录
+
+安装器只有在确认用户选择的是 MineRailMonitor 专用 `<Root>` 后，才能写入 payload 或执行 ACL normalization。该校验必须集中实现，并由目录选择页和 `PrepareToInstall` 同时调用；后者是 GUI 隐藏、`/SILENT`、`/VERYSILENT` 及 `/DIR=` 场景的最终安全门。
+
+安全校验必须使用 Inno Setup/Windows 的路径 API 和常量，不得硬编码 `C:\Windows` 等盘符路径。必须拒绝：
+
+- 任何 volume root，例如 `C:\`、`D:\`；
+- Windows 目录、System 目录、Program Files、Program Files (x86) 及其子目录；
+- 首次安装时包含非 MineRailMonitor 内容的已有目录。
+
+首次安装（没有已注册的 previous Root）只允许目标目录：
+
+1. 尚不存在；
+2. 已存在但为空；
+3. 只包含上次卸载保留的顶层现场目录 `Projects`、`Data`、`Backups`、`Logs`、`Docs`。
+
+其它顶层文件或目录（例如 `App`、`OtherSoftware`、`foo.txt` 或客户无关目录）都必须在写入前阻止。目录内部内容不由安装器删除、迁移或解释；`Data\.sqlite-recovery-in-progress` 也不得被安装器修改。
+
+已注册 previous Root 时，规范化后的 selected Root 必须与 previous Root 相同才可升级；不同 Root 继续使用既有的跨 Root 阻止规则。即使 registry 中存在 previous Root，也必须先执行 volume root 和系统目录安全校验，不能借此放行 `C:\`、`C:\Windows` 或其它危险路径。
+
+安全校验失败必须返回非空中文错误并停止安装，不能进入 payload 写入或 ACL normalization。允许的空目录、retained-data 重装目录仍可复用既有的 hostile ACL 测试；ACL normalization 只作用于已通过安全校验的 selected Root 及其 managed subtrees。
+
 ## 10. 升级策略
 
 升级安装必须优先复用上一次已安装的 `<Root>`。例如首次安装选择 `D:\MineRailMonitor` 后，后续升级默认继续使用 `D:\MineRailMonitor`，不能静默恢复到 `C:\MineRailMonitor`。

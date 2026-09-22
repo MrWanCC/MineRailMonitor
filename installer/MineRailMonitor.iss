@@ -49,6 +49,8 @@ const
   SidUsers = '*S-1-5-32-545';
   UsersReadExecuteRights = '(OI)(CI)(RX)';
   UsersModifyRights = '(OI)(CI)(M)';
+  UnsafeRootMessage =
+    '请选择一个 MineRailMonitor 专用安装目录，不能使用磁盘根目录、Windows/Program Files 等系统目录，也不能直接使用包含其它文件的共享目录。';
 
 var
   DeleteFieldData: Boolean;
@@ -137,10 +139,105 @@ end;
 
 function NormalizeRoot(const DirectoryName: String): String;
 begin
-  Result := DirectoryName;
-  while (Length(Result) > 3) and
-    (Result[Length(Result)] = '\') do
-    Delete(Result, Length(Result), 1);
+  Result := RemoveBackslashUnlessRoot(DirectoryName);
+end;
+
+function IsDriveRoot(const DirectoryName: String): Boolean;
+var
+  Root: String;
+begin
+  Root := NormalizeRoot(DirectoryName);
+  Result := (ExtractFileDrive(Root) <> '') and
+    (CompareText(Root, AddBackslash(ExtractFileDrive(Root))) = 0);
+end;
+
+function IsPathEqualOrBelow(const Candidate, Base: String): Boolean;
+var
+  CandidateValue: String;
+  BaseValue: String;
+begin
+  CandidateValue := NormalizeRoot(Candidate);
+  BaseValue := AddBackslash(NormalizeRoot(Base));
+  Result :=
+    (CompareText(CandidateValue, NormalizeRoot(Base)) = 0) or
+    ((Length(CandidateValue) >= Length(BaseValue)) and
+      (CompareText(Copy(CandidateValue, 1, Length(BaseValue)), BaseValue) = 0));
+end;
+
+function IsRetainedFieldDataDirectory(const DirectoryName: String): Boolean;
+begin
+  Result :=
+    (CompareText(DirectoryName, 'Projects') = 0) or
+    (CompareText(DirectoryName, 'Data') = 0) or
+    (CompareText(DirectoryName, 'Backups') = 0) or
+    (CompareText(DirectoryName, 'Logs') = 0) or
+    (CompareText(DirectoryName, 'Docs') = 0);
+end;
+
+function ContainsOnlyRetainedMineRailData(const DirectoryName: String): Boolean;
+var
+  FindData: TFindRec;
+begin
+  Result := True;
+  if not DirExists(DirectoryName) then
+    exit;
+
+  if FindFirst(AddBackslash(DirectoryName) + '*', FindData) then begin
+    try
+      repeat
+        if (FindData.Name <> '.') and (FindData.Name <> '..') and
+          not IsRetainedFieldDataDirectory(FindData.Name) then begin
+          Result := False;
+          exit;
+        end;
+      until not FindNext(FindData);
+    finally
+      FindClose(FindData);
+    end;
+  end;
+end;
+
+function ValidateInstallRoot(const SelectedRoot, PreviousRoot: String): String;
+var
+  Root: String;
+begin
+  Root := NormalizeRoot(SelectedRoot);
+  Result := '';
+
+  if (Root = '') or IsDriveRoot(Root) or
+    IsPathEqualOrBelow(Root, ExpandConstant('{win}')) or
+    IsPathEqualOrBelow(Root, ExpandConstant('{sys}')) or
+    IsPathEqualOrBelow(Root, ExpandConstant('{pf}')) or
+    IsPathEqualOrBelow(Root, ExpandConstant('{pf32}')) or
+    IsPathEqualOrBelow(Root, ExpandConstant('{pf64}')) then begin
+    Result := UnsafeRootMessage;
+    exit;
+  end;
+
+  if PreviousRoot <> '' then
+    exit;
+
+  if FileExists(Root) then begin
+    Result := UnsafeRootMessage;
+    exit;
+  end;
+
+  if not DirExists(Root) then
+    exit;
+
+  if not ContainsOnlyRetainedMineRailData(Root) then
+    Result := UnsafeRootMessage;
+end;
+
+function ValidatePreviousRoot(const SelectedRoot, PreviousRoot: String): String;
+begin
+  Result := '';
+  if (PreviousRoot <> '') and
+    (CompareText(NormalizeRoot(SelectedRoot), NormalizeRoot(PreviousRoot)) <> 0) then
+    Result :=
+      '已安装版本位于 ' + PreviousRoot + '。' +
+      '当前版本不支持升级时迁移安装目录，请继续使用原安装目录。' +
+      '如需迁移，请先完成独立的数据迁移流程。';
 end;
 
 function GetPreviousRoot(): String;
@@ -151,20 +248,23 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   PreviousRoot: String;
+  ValidationError: String;
 begin
   Result := True;
   if CurPageID <> wpSelectDir then
     exit;
 
   PreviousRoot := GetPreviousRoot();
-  if (PreviousRoot <> '') and
-     (CompareText(NormalizeRoot(ExpandConstant('{app}')),
-       NormalizeRoot(PreviousRoot)) <> 0) then begin
-    MsgBox(
-      '已安装版本位于 ' + PreviousRoot + '。当前版本不支持升级时迁移安装目录。' +
-      '请继续使用原安装目录；如需迁移，请先完成独立的数据迁移流程。',
-      mbCriticalError,
-      MB_OK);
+  ValidationError := ValidateInstallRoot(ExpandConstant('{app}'), PreviousRoot);
+  if ValidationError <> '' then begin
+    MsgBox(ValidationError, mbCriticalError, MB_OK);
+    Result := False;
+    exit;
+  end;
+
+  ValidationError := ValidatePreviousRoot(ExpandConstant('{app}'), PreviousRoot);
+  if ValidationError <> '' then begin
+    MsgBox(ValidationError, mbCriticalError, MB_OK);
     Result := False;
   end;
 end;
@@ -173,12 +273,12 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   PreviousRoot: String;
 begin
-  Result := '';
   PreviousRoot := GetPreviousRoot();
-  if (PreviousRoot <> '') and
-     (CompareText(NormalizeRoot(ExpandConstant('{app}')),
-       NormalizeRoot(PreviousRoot)) <> 0) then
-    Result := '当前版本不支持升级时迁移安装目录，请继续使用原安装目录。';
+  Result := ValidateInstallRoot(ExpandConstant('{app}'), PreviousRoot);
+  if Result <> '' then
+    exit;
+
+  Result := ValidatePreviousRoot(ExpandConstant('{app}'), PreviousRoot);
 end;
 
 function IsSilentUninstall(): Boolean;

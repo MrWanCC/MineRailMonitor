@@ -23,6 +23,11 @@ public interface IProjectConfigService
         IEnumerable<YardCommunicationConfig> configurations,
         CancellationToken cancellationToken = default);
 
+    Task<ProjectConfigSaveResult> SaveYardAlarmForwardsAsync(
+        string projectDirectory,
+        IEnumerable<YardAlarmForwardConfig> configurations,
+        CancellationToken cancellationToken = default);
+
     Task<ProjectConfigSaveResult> SaveRfidStationsAsync(
         string projectDirectory,
         IEnumerable<RfidStationConfig> stations,

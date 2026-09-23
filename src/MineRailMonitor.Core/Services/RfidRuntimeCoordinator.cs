@@ -84,6 +84,8 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
     public event Action<RfidStationConfig, RfidPollCommand, DateTimeOffset>? StationCommandSent;
 
+    public event Action<AlarmForwardRequest>? AlarmForwardRequested;
+
     public void UpdateDefaults(RfidSettings settings)
     {
         lock (_syncRoot)
@@ -100,14 +102,22 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
     public StationRecognitionSession? ProcessFrame(RfidStationFrame frame)
     {
         if (frame is null) throw new ArgumentNullException(nameof(frame));
+        AlarmForwardRequest? alarmForwardRequest;
+        StationRecognitionSession? result;
         lock (_syncRoot)
         {
-            return ProcessFrameCore(frame);
+            result = ProcessFrameCore(frame, out alarmForwardRequest);
         }
+
+        PublishAlarmForwardRequest(alarmForwardRequest);
+        return result;
     }
 
-    private StationRecognitionSession? ProcessFrameCore(RfidStationFrame frame)
+    private StationRecognitionSession? ProcessFrameCore(
+        RfidStationFrame frame,
+        out AlarmForwardRequest? alarmForwardRequest)
     {
+        alarmForwardRequest = null;
         var state = FindState(frame);
         if (state is null)
         {
@@ -127,7 +137,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
         if (state.LifecycleState == PassageLifecycleState.Finalizing)
         {
-            TryPersistPendingPassage(state);
+            alarmForwardRequest = TryPersistPendingPassage(state);
             UpdateVisualState(state);
             return state.RecognitionSession;
         }
@@ -162,12 +172,23 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             state.ExpectedVehicleCount = _defaults.ExpectedVehicleCount;
             state.LastPassageRecord = null;
             state.AlarmMessage = null;
+            state.LastNewVehicleRawPacket = null;
+            state.LastNewVehicleRawPacketAt = null;
+            state.AlarmForwardTriggeredPassageId = null;
             state.EmptyRfidValue = _defaults.EmptyRfidValue;
             state.ClearAttempts = 0;
             state.ConsecutiveEmptyReads = 0;
         }
 
+        var detectedVehicleCountBeforeApply = state.RecognitionSession.DetectedVehicleCount;
         state.RecognitionSession.Apply(frame);
+        if (state.RecognitionSession.DetectedVehicleCount > detectedVehicleCountBeforeApply)
+        {
+            state.LastNewVehicleRawPacket = frame.RawData is { Length: > 0 }
+                ? (byte[])frame.RawData.Clone()
+                : Array.Empty<byte>();
+            state.LastNewVehicleRawPacketAt = frame.ReceivedAt;
+        }
         UpdateFromRecognition(state);
         state.LifecycleState = PassageLifecycleState.Recognizing;
         if (state.RecognitionSession.State == StationRecognitionState.Completed)
@@ -285,13 +306,19 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
     public void Evaluate(DateTimeOffset now)
     {
+        var alarmForwardRequests = new List<AlarmForwardRequest>();
         lock (_syncRoot)
         {
-            EvaluateCore(now);
+            EvaluateCore(now, alarmForwardRequests);
+        }
+
+        foreach (var request in alarmForwardRequests)
+        {
+            PublishAlarmForwardRequest(request);
         }
     }
 
-    private void EvaluateCore(DateTimeOffset now)
+    private void EvaluateCore(DateTimeOffset now, ICollection<AlarmForwardRequest> alarmForwardRequests)
     {
         foreach (var state in _statesByEndpoint.Values)
         {
@@ -305,7 +332,11 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             state.CommunicationState = StationCommunicationState.Online;
             if (state.LifecycleState == PassageLifecycleState.Finalizing)
             {
-                TryPersistPendingPassage(state);
+                var retryRequest = TryPersistPendingPassage(state);
+                if (retryRequest is not null)
+                {
+                    alarmForwardRequests.Add(retryRequest);
+                }
                 UpdateVisualState(state);
                 continue;
             }
@@ -319,7 +350,11 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             UpdateFromRecognition(state);
             if (state.RecognitionSession.State == StationRecognitionState.UncouplingAlarm)
             {
-                FreezePassage(state, PassageOutcome.UncouplingAlarm, now);
+                var alarmRequest = FreezePassage(state, PassageOutcome.UncouplingAlarm, now);
+                if (alarmRequest is not null)
+                {
+                    alarmForwardRequests.Add(alarmRequest);
+                }
             }
             UpdateVisualState(state);
         }
@@ -506,11 +541,11 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         AddWarning(state, $"清除重试已达{_policy.MaxClearAttempts}次，继续等待标签离开");
     }
 
-    private void FreezePassage(StationRuntimeState state, PassageOutcome outcome, DateTimeOffset completedAt)
+    private AlarmForwardRequest? FreezePassage(StationRuntimeState state, PassageOutcome outcome, DateTimeOffset completedAt)
     {
         if (state.RecognitionSession is null)
         {
-            return;
+            return null;
         }
 
         if (state.LastPassageRecord is null)
@@ -532,15 +567,15 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
                 state.RecognitionSession.RfidObservations);
         }
 
-        TryPersistPendingPassage(state);
+        return TryPersistPendingPassage(state);
     }
 
-    private void TryPersistPendingPassage(StationRuntimeState state)
+    private AlarmForwardRequest? TryPersistPendingPassage(StationRuntimeState state)
     {
         var record = state.LastPassageRecord;
         if (record is null || state.PersistenceAttemptCount >= _policy.MaxPersistenceAttempts)
         {
-            return;
+            return null;
         }
 
         state.PersistenceAttemptCount++;
@@ -562,6 +597,18 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             state.PendingClear = true;
             state.ClearAttempts = 0;
             state.ConsecutiveEmptyReads = 0;
+
+            if (record.Outcome == PassageOutcome.UncouplingAlarm &&
+                state.AlarmForwardTriggeredPassageId != record.PassageId)
+            {
+                state.AlarmForwardTriggeredPassageId = record.PassageId;
+                return new AlarmForwardRequest(
+                    record.PassageId,
+                    state.StationId,
+                    state.StationAddress,
+                    state.LastNewVehicleRawPacket ?? Array.Empty<byte>(),
+                    record.CompletedAt);
+            }
         }
         catch (Exception exception)
         {
@@ -571,6 +618,8 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             AddWarning(state, state.PersistenceErrorMessage);
             state.PendingClear = false;
         }
+
+        return null;
     }
 
     private void TryMarkCleared(StationRuntimeState state, DateTimeOffset clearedAt)
@@ -653,6 +702,9 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         state.WarningMessages = Array.Empty<string>();
         state.AlarmMessage = null;
         state.LastPassageRecord = null;
+        state.LastNewVehicleRawPacket = null;
+        state.LastNewVehicleRawPacketAt = null;
+        state.AlarmForwardTriggeredPassageId = null;
         state.PersistenceWarning = false;
         state.PersistenceErrorMessage = null;
         state.PersistenceAttemptCount = 0;
@@ -720,6 +772,14 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         InterVehicleTimeoutSeconds = settings.InterVehicleTimeoutSeconds,
         EmptyRfidValue = settings.EmptyRfidValue
     };
+
+    private void PublishAlarmForwardRequest(AlarmForwardRequest? request)
+    {
+        if (request is not null)
+        {
+            AlarmForwardRequested?.Invoke(request);
+        }
+    }
 
     private static IEnumerable<RfidStationConfig> CreateCompatibilityStations(IEnumerable<byte> stationAddresses)
     {

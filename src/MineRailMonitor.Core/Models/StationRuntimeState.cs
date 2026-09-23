@@ -75,6 +75,12 @@ public sealed class StationRuntimeState
 
     public DateTimeOffset? LastNewVehicleAt { get; internal set; }
 
+    public byte[]? LastNewVehicleRawPacket { get; internal set; }
+
+    public DateTimeOffset? LastNewVehicleRawPacketAt { get; internal set; }
+
+    public Guid? AlarmForwardTriggeredPassageId { get; internal set; }
+
     public bool PendingClear { get; internal set; }
 
     public int ClearAttempts { get; internal set; }

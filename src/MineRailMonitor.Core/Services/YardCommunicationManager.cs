@@ -16,6 +16,7 @@ public sealed class YardCommunicationManager : IDisposable
     private readonly IReadOnlyList<RfidStationConfig> _stations;
     private readonly IPassageRecordStore _recordStore;
     private readonly IRfidTimeProvider? _timeProvider;
+    private IReadOnlyDictionary<string, IExternalDataInterface> _alarmForwardSenders;
     private RfidSettings _settings;
     private readonly IReadOnlyList<string> _diagnostics;
     private bool _isStarted;
@@ -26,7 +27,8 @@ public sealed class YardCommunicationManager : IDisposable
         IEnumerable<RfidStationConfig> stations,
         RfidSettings settings,
         IPassageRecordStore recordStore,
-        IRfidTimeProvider? timeProvider = null)
+        IRfidTimeProvider? timeProvider = null,
+        IReadOnlyDictionary<string, IExternalDataInterface>? alarmForwardSenders = null)
     {
         if (configurations is null) throw new ArgumentNullException(nameof(configurations));
         if (stations is null) throw new ArgumentNullException(nameof(stations));
@@ -36,6 +38,7 @@ public sealed class YardCommunicationManager : IDisposable
         _settings = settings;
         _recordStore = recordStore;
         _timeProvider = timeProvider;
+        _alarmForwardSenders = CopyAlarmForwardSenders(alarmForwardSenders);
         _stations = stations.Where(item => item is not null).ToArray();
 
         var diagnostics = new List<string>();
@@ -105,6 +108,8 @@ public sealed class YardCommunicationManager : IDisposable
     public event Action<YardCommunicationContext, byte, RfidPollCommand, DateTimeOffset>? CommandSent;
 
     public event Action<YardCommunicationContext, RfidStationConfig, RfidPollCommand, DateTimeOffset>? StationCommandSent;
+
+    public event Action<YardCommunicationContext, AlarmForwardRequest, Exception>? AlarmForwardFailed;
 
     public YardCommunicationContext? GetContext(string yardId)
     {
@@ -209,6 +214,25 @@ public sealed class YardCommunicationManager : IDisposable
         }
     }
 
+    public void ApplyAlarmForwardSenders(
+        IReadOnlyDictionary<string, IExternalDataInterface> alarmForwardSenders)
+    {
+        if (alarmForwardSenders is null) throw new ArgumentNullException(nameof(alarmForwardSenders));
+        ThrowIfDisposed();
+        var previousSenders = _alarmForwardSenders;
+        _alarmForwardSenders = CopyAlarmForwardSenders(alarmForwardSenders);
+        foreach (var context in _contexts.Values)
+        {
+            var sender = context.IsLegacySharedListener
+                ? null
+                : _alarmForwardSenders.TryGetValue(context.YardId, out var configuredSender)
+                    ? configuredSender
+                    : null;
+            context.UpdateAlarmForwardSender(sender);
+        }
+        DisposeReplacedSenders(previousSenders, _alarmForwardSenders);
+    }
+
     public Task StartYardAsync(string yardId, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -270,6 +294,7 @@ public sealed class YardCommunicationManager : IDisposable
             context.Dispose();
         }
         _contexts.Clear();
+        DisposeSenders(_alarmForwardSenders.Values);
     }
 
     private YardCommunicationContext CreateContext(YardCommunicationConfig configuration)
@@ -285,7 +310,12 @@ public sealed class YardCommunicationManager : IDisposable
             contextStations,
             _settings,
             _recordStore,
-            _timeProvider);
+            _timeProvider,
+            configuration.IsLegacySharedListener
+                ? null
+                : _alarmForwardSenders.TryGetValue(configuration.YardId.Trim(), out var sender)
+                    ? sender
+                    : null);
     }
 
     private async Task ReplaceContextAsync(
@@ -355,6 +385,7 @@ public sealed class YardCommunicationManager : IDisposable
         context.ReceiveError += OnContextReceiveError;
         context.CommandSent += OnContextCommandSent;
         context.StationCommandSent += OnContextStationCommandSent;
+        context.AlarmForwardFailed += OnContextAlarmForwardFailed;
     }
 
     private void DetachContext(YardCommunicationContext context)
@@ -368,6 +399,7 @@ public sealed class YardCommunicationManager : IDisposable
         context.ReceiveError -= OnContextReceiveError;
         context.CommandSent -= OnContextCommandSent;
         context.StationCommandSent -= OnContextStationCommandSent;
+        context.AlarmForwardFailed -= OnContextAlarmForwardFailed;
     }
 
     private void DetachDatagramEvents(YardCommunicationContext context)
@@ -430,6 +462,56 @@ public sealed class YardCommunicationManager : IDisposable
         RfidPollCommand command,
         DateTimeOffset sentAt) =>
         StationCommandSent?.Invoke(context, station, command, sentAt);
+
+    private void OnContextAlarmForwardFailed(
+        YardCommunicationContext context,
+        AlarmForwardRequest request,
+        Exception exception) =>
+        AlarmForwardFailed?.Invoke(context, request, exception);
+
+    private static IReadOnlyDictionary<string, IExternalDataInterface> CopyAlarmForwardSenders(
+        IReadOnlyDictionary<string, IExternalDataInterface>? senders)
+    {
+        var result = new Dictionary<string, IExternalDataInterface>(StringComparer.OrdinalIgnoreCase);
+        if (senders is null)
+        {
+            return result;
+        }
+
+        foreach (var pair in senders)
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
+            {
+                continue;
+            }
+
+            result[pair.Key.Trim()] = pair.Value;
+        }
+
+        return result;
+    }
+
+    private static void DisposeReplacedSenders(
+        IReadOnlyDictionary<string, IExternalDataInterface> previous,
+        IReadOnlyDictionary<string, IExternalDataInterface> current)
+    {
+        DisposeSenders(previous.Values.Where(previousSender =>
+            !current.Values.Any(currentSender => ReferenceEquals(previousSender, currentSender))));
+    }
+
+    private static void DisposeSenders(IEnumerable<IExternalDataInterface> senders)
+    {
+        var disposed = new List<IExternalDataInterface>();
+        foreach (var sender in senders)
+        {
+            if (sender is IDisposable disposable &&
+                !disposed.Any(item => ReferenceEquals(item, sender)))
+            {
+                disposable.Dispose();
+                disposed.Add(sender);
+            }
+        }
+    }
 
     private void ThrowIfDisposed()
     {

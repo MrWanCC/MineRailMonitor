@@ -22,6 +22,7 @@ using MineRailMonitor.Core.Recognition;
 using MineRailMonitor.Core.Services;
 using MineRailMonitor.Infrastructure.Configuration;
 using MineRailMonitor.Infrastructure.BlackBox;
+using MineRailMonitor.Infrastructure.ExternalData;
 using MineRailMonitor.Infrastructure.Persistence;
 using MineRailMonitor.Pages;
 
@@ -219,10 +220,12 @@ public partial class MainWindow : Window
             yards: result.Project.Stations,
             bindingSaveRequested: SaveRfidBindingAsync,
             viewMapPointRequested: ViewRfidMapPoint,
-            yardCommunications: result.Project.YardCommunications);
+            yardCommunications: result.Project.YardCommunications,
+            yardAlarmForwards: result.Project.YardAlarmForwards);
         _settingsPage.SaveRequested += SaveRfidSettingsAsync;
         _settingsPage.StationsSaveRequested += SaveRfidStationsAsync;
         _settingsPage.SaveYardCommunicationsRequested += SaveYardCommunicationsAsync;
+        _settingsPage.SaveYardAlarmForwardsRequested += SaveYardAlarmForwardsAsync;
         await RecreateYardCommunicationManagerAsync(result.Project, settingsStations, runtimeSettings);
         _acceptanceRuntimeStateWriter?.Write("loaded");
         _historyPage = new HistoryPage(
@@ -465,6 +468,33 @@ public partial class MainWindow : Window
         return true;
     }
 
+    private async Task<bool> SaveYardAlarmForwardsAsync(IReadOnlyList<YardAlarmForwardConfig> configurations)
+    {
+        if (_loadedProject is null || _settingsPage is null || !_adminModeService.IsAdmin)
+        {
+            return false;
+        }
+
+        if (_acceptanceOptions.Enabled)
+        {
+            _settingsPage.SetSaveResult("验收模式禁止保存正式报警转发配置。", true);
+            return false;
+        }
+
+        var result = await _configService.SaveYardAlarmForwardsAsync(_projectDirectory, configurations);
+        if (!result.Succeeded)
+        {
+            _settingsPage.SetSaveResult(string.Join(Environment.NewLine, result.Errors), true);
+            return false;
+        }
+
+        _loadedProject.YardAlarmForwards = configurations.ToArray();
+        var senders = CreateAlarmForwardSenders(_loadedProject);
+        _yardCommunicationManager?.ApplyAlarmForwardSenders(senders);
+        _settingsPage.SetSaveResult("报警 UDP 转发配置已保存。", false);
+        return true;
+    }
+
     private async Task<bool> SaveRfidStationsAsync(IReadOnlyList<RfidStationConfig> stations)
     {
         if (_loadedProject is null || _settingsPage is null)
@@ -633,19 +663,22 @@ public partial class MainWindow : Window
             _yardCommunicationManager.ReceiveError -= OnYardReceiveError;
             _yardCommunicationManager.CommandSent -= OnYardCommandSent;
             _yardCommunicationManager.StationCommandSent -= OnYardStationCommandSent;
+            _yardCommunicationManager.AlarmForwardFailed -= OnYardAlarmForwardFailed;
         }
         _yardCommunicationManager = null;
         _acceptanceRuntimeStateWriter?.Dispose();
         _acceptanceRuntimeStateWriter = null;
 
         YardCommunicationManager manager;
+        var alarmForwardSenders = CreateAlarmForwardSenders(project);
         if (_acceptanceOptions.Enabled)
         {
             manager = new YardCommunicationManager(
                 CreateAcceptanceYardCommunications(),
                 stations,
                 runtimeSettings,
-                _passageRecordStore);
+                _passageRecordStore,
+                alarmForwardSenders: new Dictionary<string, IExternalDataInterface>());
         }
         else if (project.UsesLegacySharedListener || project.YardCommunications.Count == 0)
         {
@@ -663,7 +696,8 @@ public partial class MainWindow : Window
                 project.YardCommunications,
                 stations,
                 runtimeSettings,
-                _passageRecordStore);
+                _passageRecordStore,
+                alarmForwardSenders: alarmForwardSenders);
         }
 
         manager.DatagramReceived += OnYardDatagramReceived;
@@ -671,6 +705,7 @@ public partial class MainWindow : Window
         manager.ReceiveError += OnYardReceiveError;
         manager.CommandSent += OnYardCommandSent;
         manager.StationCommandSent += OnYardStationCommandSent;
+        manager.AlarmForwardFailed += OnYardAlarmForwardFailed;
         _yardCommunicationManager = manager;
 
         var pendingClearRecords = _passageRecordStore.GetPendingClear();
@@ -836,6 +871,21 @@ public partial class MainWindow : Window
         }));
     }
 
+    private void OnYardAlarmForwardFailed(
+        YardCommunicationContext context,
+        AlarmForwardRequest request,
+        Exception exception)
+    {
+        var target = _loadedProject?.YardAlarmForwards
+            .FirstOrDefault(item => string.Equals(item.YardId, context.YardId, StringComparison.OrdinalIgnoreCase));
+        var targetText = target is null ? "未配置" : $"{target.TargetIp}:{target.TargetPort}";
+        ((App)Application.Current).Logger.Error(
+            $"报警 UDP 转发失败 Yard={context.YardId} StationId={request.StationId} " +
+            $"PassageId={request.PassageId} Target={targetText} " +
+            $"Timestamp={request.RequestedAt:O} Error={exception.Message}",
+            exception);
+    }
+
     private async Task StopRuntimeThenCloseAsync()
     {
         try
@@ -853,6 +903,7 @@ public partial class MainWindow : Window
                 manager.ReceiveError -= OnYardReceiveError;
                 manager.CommandSent -= OnYardCommandSent;
                 manager.StationCommandSent -= OnYardStationCommandSent;
+                manager.AlarmForwardFailed -= OnYardAlarmForwardFailed;
                 _yardCommunicationManager = null;
             }
 
@@ -1450,6 +1501,33 @@ public partial class MainWindow : Window
 
     private IReadOnlyList<RfidStationPollingStatus> GetAllPollingStatuses() =>
         _yardCommunicationManager?.GetPollingStatuses() ?? Array.Empty<RfidStationPollingStatus>();
+
+    private IReadOnlyDictionary<string, IExternalDataInterface> CreateAlarmForwardSenders(ProjectConfig project)
+    {
+        if (_acceptanceOptions.Enabled)
+        {
+            return new Dictionary<string, IExternalDataInterface>(StringComparer.OrdinalIgnoreCase);
+        }
+        if (project.UsesLegacySharedListener)
+        {
+            return new Dictionary<string, IExternalDataInterface>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var senders = new Dictionary<string, IExternalDataInterface>(StringComparer.OrdinalIgnoreCase);
+        foreach (var configuration in project.YardAlarmForwards.Where(item => item is not null && item.Enabled))
+        {
+            if (!configuration.TryResolveEndpoint(out var endpoint))
+            {
+                ((App)Application.Current).Logger.Warning(
+                    $"站场 {configuration.YardId} 的报警转发目标无效，已禁用本次运行。 ");
+                continue;
+            }
+
+            senders[configuration.YardId.Trim()] = new UdpExternalDataInterface(endpoint);
+        }
+
+        return senders;
+    }
 
     private bool IsCommunicationHealthy()
     {

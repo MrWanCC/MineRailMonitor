@@ -108,6 +108,7 @@
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="Auto" />
                                                     <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
                                                 </Grid.RowDefinitions>
                                                 <Grid>
                                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -139,6 +140,30 @@
                                                     <CheckBox Grid.Column="2" Content="启用通信"
                                                               Style="{StaticResource ConfigCheckBoxStyle}"
                                                               IsChecked="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}"
+                                                              IsEnabled="{Binding IsEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}" />
+                                                </Grid>
+
+                                                <Grid Grid.Row="2" Margin="0,12,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="150" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock Text="报警 UDP 目标 IP" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                        <TextBox Text="{Binding AlarmForwardIp, UpdateSourceTrigger=PropertyChanged}"
+                                                                 Style="{StaticResource ConfigTextBoxStyle}"
+                                                                 IsEnabled="{Binding IsEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Margin="14,0,0,0">
+                                                        <TextBlock Text="报警目标端口" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                        <TextBox Text="{Binding AlarmForwardPort, UpdateSourceTrigger=PropertyChanged}"
+                                                                 Style="{StaticResource ConfigTextBoxStyle}"
+                                                                 IsEnabled="{Binding IsEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}" />
+                                                    </StackPanel>
+                                                    <CheckBox Grid.Column="2" Content="启用报警转发"
+                                                              Style="{StaticResource ConfigCheckBoxStyle}"
+                                                              IsChecked="{Binding AlarmForwardEnabled, UpdateSourceTrigger=PropertyChanged}"
                                                               IsEnabled="{Binding IsEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}" />
                                                 </Grid>
                                             </Grid>

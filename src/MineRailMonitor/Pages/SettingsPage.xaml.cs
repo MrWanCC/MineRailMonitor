@@ -38,7 +38,8 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         IEnumerable<StationConfig>? yards = null,
         Func<StationConfig, Task<bool>>? bindingSaveRequested = null,
         Action<string, string>? viewMapPointRequested = null,
-        IEnumerable<YardCommunicationConfig>? yardCommunications = null)
+        IEnumerable<YardCommunicationConfig>? yardCommunications = null,
+        IEnumerable<YardAlarmForwardConfig>? yardAlarmForwards = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _adminModeService = adminModeService ?? throw new ArgumentNullException(nameof(adminModeService));
@@ -58,7 +59,10 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         _stationIdOptions = BuildStationIdOptions(configuredStations);
         _yardOptions = BuildYardOptions(_yardConfigs);
         _yardFilterOptions = BuildYardFilterOptions(_yardOptions);
-        foreach (var row in BuildYardCommunicationRows(yardCommunications ?? Array.Empty<YardCommunicationConfig>(), _yardConfigs))
+        foreach (var row in BuildYardCommunicationRows(
+                     yardCommunications ?? Array.Empty<YardCommunicationConfig>(),
+                     yardAlarmForwards ?? Array.Empty<YardAlarmForwardConfig>(),
+                     _yardConfigs))
         {
             _yardCommunicationRows.Add(row);
         }
@@ -94,6 +98,8 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
     public event Func<IReadOnlyList<RfidStationConfig>, Task<bool>>? StationsSaveRequested;
 
     public event Func<IReadOnlyList<YardCommunicationConfig>, Task<bool>>? SaveYardCommunicationsRequested;
+
+    public event Func<IReadOnlyList<YardAlarmForwardConfig>, Task<bool>>? SaveYardAlarmForwardsRequested;
 
     public static readonly DependencyProperty BindingEditingEnabledProperty =
         DependencyProperty.Register(nameof(BindingEditingEnabled), typeof(bool), typeof(SettingsPage), new PropertyMetadata(false));
@@ -292,6 +298,9 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             row.ListenIp = editedRow.ListenIp;
             row.ListenPort = editedRow.ListenPort;
             row.Enabled = editedRow.Enabled;
+            row.AlarmForwardIp = editedRow.AlarmForwardIp;
+            row.AlarmForwardPort = editedRow.AlarmForwardPort;
+            row.AlarmForwardEnabled = editedRow.AlarmForwardEnabled;
         }
 
         RefreshBindingOverview();
@@ -847,7 +856,10 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         var yardCommunications = _stationsEditable && SaveYardCommunicationsRequested is not null
             ? TryBuildYardCommunications(errors)
             : Array.Empty<YardCommunicationConfig>();
-        if (errors.Count > 0 || stations is null || yardCommunications is null)
+        var yardAlarmForwards = _stationsEditable && SaveYardAlarmForwardsRequested is not null
+            ? TryBuildYardAlarmForwards(errors)
+            : Array.Empty<YardAlarmForwardConfig>();
+        if (errors.Count > 0 || stations is null || yardCommunications is null || yardAlarmForwards is null)
         {
             SetSaveResult(string.Join(Environment.NewLine, errors), true);
             return false;
@@ -862,6 +874,11 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             }
             if (_stationsEditable && _adminModeService.IsAdmin && SaveYardCommunicationsRequested is not null &&
                 !await SaveYardCommunicationsRequested(yardCommunications))
+            {
+                return false;
+            }
+            if (_stationsEditable && _adminModeService.IsAdmin && SaveYardAlarmForwardsRequested is not null &&
+                !await SaveYardAlarmForwardsRequested(yardAlarmForwards))
             {
                 return false;
             }
@@ -976,6 +993,39 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
                      .Where(group => group.Count() > 1))
         {
             errors.Add($"启用的站场监听端点重复：{duplicate.First().ListenIp}:{duplicate.First().ListenPort}。");
+        }
+
+        return configurations;
+    }
+
+    private IReadOnlyList<YardAlarmForwardConfig>? TryBuildYardAlarmForwards(ICollection<string> errors)
+    {
+        var configurations = new List<YardAlarmForwardConfig>();
+        foreach (var row in _yardCommunicationRows)
+        {
+            var targetPort = 0;
+            if (!string.IsNullOrWhiteSpace(row.AlarmForwardPort) &&
+                !int.TryParse(row.AlarmForwardPort, NumberStyles.Integer, CultureInfo.InvariantCulture, out targetPort))
+            {
+                errors.Add($"站场 {row.YardId} 的报警转发目标端口无效：{row.AlarmForwardPort}。");
+                continue;
+            }
+
+            configurations.Add(new YardAlarmForwardConfig
+            {
+                YardId = row.YardId.Trim(),
+                Enabled = row.AlarmForwardEnabled,
+                TargetIp = row.AlarmForwardIp.Trim(),
+                TargetPort = targetPort
+            });
+        }
+
+        foreach (var configuration in configurations)
+        {
+            foreach (var validationError in configuration.Validate())
+            {
+                errors.Add(validationError);
+            }
         }
 
         return configurations;
@@ -1120,9 +1170,14 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
     private static IReadOnlyList<YardCommunicationEditorRow> BuildYardCommunicationRows(
         IEnumerable<YardCommunicationConfig> configurations,
+        IEnumerable<YardAlarmForwardConfig> alarmForwards,
         IReadOnlyList<StationConfig> yards)
     {
         var configured = configurations
+            .Where(configuration => configuration is not null && !string.IsNullOrWhiteSpace(configuration.YardId))
+            .GroupBy(configuration => configuration.YardId.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var configuredAlarmForwards = alarmForwards
             .Where(configuration => configuration is not null && !string.IsNullOrWhiteSpace(configuration.YardId))
             .GroupBy(configuration => configuration.YardId.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
@@ -1132,6 +1187,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             .Select(yard =>
             {
                 configured.TryGetValue(yard.Id.Trim(), out var configuration);
+                configuredAlarmForwards.TryGetValue(yard.Id.Trim(), out var alarmForward);
                 return new YardCommunicationEditorRow
                 {
                     YardId = yard.Id.Trim(),
@@ -1140,7 +1196,12 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
                     ListenPort = configuration is not null && configuration.ListenPort > 0
                         ? configuration.ListenPort.ToString(CultureInfo.InvariantCulture)
                         : string.Empty,
-                    Enabled = configuration?.Enabled ?? true
+                    Enabled = configuration?.Enabled ?? true,
+                    AlarmForwardEnabled = alarmForward?.Enabled ?? false,
+                    AlarmForwardIp = alarmForward?.TargetIp ?? string.Empty,
+                    AlarmForwardPort = alarmForward is not null && alarmForward.TargetPort > 0
+                        ? alarmForward.TargetPort.ToString(CultureInfo.InvariantCulture)
+                        : string.Empty
                 };
             })
             .ToArray();
@@ -1180,12 +1241,22 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
     private sealed class YardCommunicationDraft
     {
-        public YardCommunicationDraft(string yardId, string listenIp, string listenPort, bool enabled)
+        public YardCommunicationDraft(
+            string yardId,
+            string listenIp,
+            string listenPort,
+            bool enabled,
+            string alarmForwardIp,
+            string alarmForwardPort,
+            bool alarmForwardEnabled)
         {
             YardId = yardId;
             ListenIp = listenIp;
             ListenPort = listenPort;
             Enabled = enabled;
+            AlarmForwardIp = alarmForwardIp;
+            AlarmForwardPort = alarmForwardPort;
+            AlarmForwardEnabled = alarmForwardEnabled;
         }
 
         public string YardId { get; }
@@ -1196,11 +1267,20 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
         public bool Enabled { get; }
 
+        public string AlarmForwardIp { get; }
+
+        public string AlarmForwardPort { get; }
+
+        public bool AlarmForwardEnabled { get; }
+
         public static YardCommunicationDraft FromRow(YardCommunicationEditorRow row) => new(
             row.YardId,
             row.ListenIp,
             row.ListenPort,
-            row.Enabled);
+            row.Enabled,
+            row.AlarmForwardIp,
+            row.AlarmForwardPort,
+            row.AlarmForwardEnabled);
 
         public YardCommunicationEditorRow ToRow(IReadOnlyList<RfidStationYardOption> yardOptions) => new()
         {
@@ -1210,14 +1290,20 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
                 ?? YardId,
             ListenIp = ListenIp,
             ListenPort = ListenPort,
-            Enabled = Enabled
+            Enabled = Enabled,
+            AlarmForwardIp = AlarmForwardIp,
+            AlarmForwardPort = AlarmForwardPort,
+            AlarmForwardEnabled = AlarmForwardEnabled
         };
 
         public bool IsSameAs(YardCommunicationDraft other) =>
             string.Equals(YardId, other.YardId, StringComparison.Ordinal) &&
             string.Equals(ListenIp, other.ListenIp, StringComparison.Ordinal) &&
             string.Equals(ListenPort, other.ListenPort, StringComparison.Ordinal) &&
-            Enabled == other.Enabled;
+            Enabled == other.Enabled &&
+            string.Equals(AlarmForwardIp, other.AlarmForwardIp, StringComparison.Ordinal) &&
+            string.Equals(AlarmForwardPort, other.AlarmForwardPort, StringComparison.Ordinal) &&
+            AlarmForwardEnabled == other.AlarmForwardEnabled;
     }
 
     private sealed class StationDraft
@@ -1302,6 +1388,12 @@ public sealed class YardCommunicationEditorRow
     public string ListenPort { get; set; } = string.Empty;
 
     public bool Enabled { get; set; }
+
+    public string AlarmForwardIp { get; set; } = string.Empty;
+
+    public string AlarmForwardPort { get; set; } = string.Empty;
+
+    public bool AlarmForwardEnabled { get; set; }
 }
 
 public sealed class RfidStationBindingOption

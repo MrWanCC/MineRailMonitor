@@ -132,6 +132,19 @@ public sealed class ProjectConfigService : IProjectConfigService
             return ProjectConfigLoadResult.Failure(errors);
         }
 
+        var yardAlarmForwards = (manifest.YardAlarmForwards ?? Array.Empty<ProjectConfigService.ProjectManifest.YardAlarmForwardManifest>())
+            .Select(item => item.ToConfig())
+            .ToArray();
+        ValidateYardAlarmForwards(
+            stations,
+            yardAlarmForwards,
+            manifest.YardCommunications is null,
+            errors);
+        if (errors.Count > 0)
+        {
+            return ProjectConfigLoadResult.Failure(errors);
+        }
+
         var project = new ProjectConfig
         {
             Id = manifest.Id,
@@ -141,6 +154,7 @@ public sealed class ProjectConfigService : IProjectConfigService
             RfidSettings = manifest.RfidSettings ?? new RfidSettings(),
             RfidStations = rfidStations,
             YardCommunications = yardCommunications,
+            YardAlarmForwards = yardAlarmForwards,
             UsesLegacySharedListener = manifest.YardCommunications is null
         };
         // Legacy map entries may still carry only ProtocolAddress. Resolve them in memory
@@ -511,6 +525,62 @@ public sealed class ProjectConfigService : IProjectConfigService
         }
     }
 
+    public async Task<ProjectConfigSaveResult> SaveYardAlarmForwardsAsync(
+        string projectDirectory,
+        IEnumerable<YardAlarmForwardConfig> configurations,
+        CancellationToken cancellationToken = default)
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(projectDirectory))
+        {
+            return SaveFailure(errors, "项目目录不能为空。");
+        }
+        if (configurations is null)
+        {
+            return SaveFailure(errors, "报警转发配置不能为空。");
+        }
+
+        var configurationList = configurations.ToArray();
+        var currentProject = await LoadAsync(projectDirectory, cancellationToken);
+        if (!currentProject.Succeeded || currentProject.Project is null)
+        {
+            return SaveFailure(
+                errors,
+                currentProject.Errors.Count == 0
+                    ? "读取项目配置失败，无法保存报警转发配置。"
+                    : string.Join(Environment.NewLine, currentProject.Errors));
+        }
+
+        ValidateYardAlarmForwards(
+            currentProject.Project.Stations,
+            configurationList,
+            currentProject.Project.UsesLegacySharedListener,
+            errors);
+        if (errors.Count > 0)
+        {
+            return ProjectConfigSaveResult.Failure(errors);
+        }
+
+        var manifestPath = Path.Combine(projectDirectory, "project.json");
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var root = JObject.Parse(File.ReadAllText(manifestPath));
+            SetProperty(root, "YardAlarmForwards", new JArray(configurationList.Select(ToManifestObject)));
+            using (var writer = File.CreateText(manifestPath))
+            {
+                await writer.WriteAsync(root.ToString(Newtonsoft.Json.Formatting.Indented));
+            }
+
+            _logger.Information("站场报警转发配置保存成功。");
+            return ProjectConfigSaveResult.Success();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Newtonsoft.Json.JsonException)
+        {
+            return SaveFailure(errors, $"保存站场报警转发配置失败：{exception.Message}", exception);
+        }
+    }
+
     private async Task<string?> ResolveStationPathAsync(
         string projectDirectory,
         string stationId,
@@ -637,6 +707,41 @@ public sealed class ProjectConfigService : IProjectConfigService
         }
     }
 
+    private static void ValidateYardAlarmForwards(
+        IReadOnlyList<StationConfig> yards,
+        IReadOnlyList<YardAlarmForwardConfig> configurations,
+        bool isLegacySharedListener,
+        ICollection<string> errors)
+    {
+        var yardIds = new HashSet<string>(
+            yards.Where(yard => yard is not null && !string.IsNullOrWhiteSpace(yard.Id))
+                .Select(yard => yard.Id.Trim()),
+            StringComparer.OrdinalIgnoreCase);
+        var seenYardIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var configuration in configurations.Where(item => item is not null))
+        {
+            foreach (var validationError in configuration.Validate())
+            {
+                errors.Add(validationError);
+            }
+
+            var yardId = configuration.YardId?.Trim() ?? string.Empty;
+            if (!seenYardIds.Add(yardId))
+            {
+                errors.Add($"报警转发所属站场重复：{yardId}。");
+            }
+            if (yardId.Length > 0 && !yardIds.Contains(yardId))
+            {
+                errors.Add($"报警转发所属站场不存在：{yardId}。");
+            }
+            if (isLegacySharedListener && configuration.Enabled)
+            {
+                errors.Add("旧项目必须迁移为独立站场通信配置后才能启用报警转发。");
+            }
+        }
+    }
+
     private static JObject ToManifestObject(RfidStationConfig station)
     {
         var result = new JObject
@@ -667,6 +772,14 @@ public sealed class ProjectConfigService : IProjectConfigService
         ["ListenIp"] = configuration.ListenIp.Trim(),
         ["ListenPort"] = configuration.ListenPort,
         ["Enabled"] = configuration.Enabled
+    };
+
+    private static JObject ToManifestObject(YardAlarmForwardConfig configuration) => new()
+    {
+        ["YardId"] = configuration.YardId.Trim(),
+        ["Enabled"] = configuration.Enabled,
+        ["TargetIp"] = configuration.TargetIp?.Trim() ?? string.Empty,
+        ["TargetPort"] = configuration.TargetPort
     };
 
     private static JArray ToByteArrayToken(IEnumerable<byte>? values) =>
@@ -751,6 +864,8 @@ public sealed class ProjectConfigService : IProjectConfigService
 
         public IReadOnlyList<YardCommunicationManifest>? YardCommunications { get; set; }
 
+        public IReadOnlyList<YardAlarmForwardManifest>? YardAlarmForwards { get; set; }
+
         public sealed class YardCommunicationManifest
         {
             public string YardId { get; set; } = string.Empty;
@@ -764,6 +879,22 @@ public sealed class ProjectConfigService : IProjectConfigService
                 ListenIp = ListenIp,
                 ListenPort = ListenPort,
                 Enabled = Enabled
+            };
+        }
+
+        public sealed class YardAlarmForwardManifest
+        {
+            public string YardId { get; set; } = string.Empty;
+            public bool Enabled { get; set; }
+            public string TargetIp { get; set; } = string.Empty;
+            public int TargetPort { get; set; }
+
+            public YardAlarmForwardConfig ToConfig() => new()
+            {
+                YardId = YardId,
+                Enabled = Enabled,
+                TargetIp = TargetIp,
+                TargetPort = TargetPort
             };
         }
 

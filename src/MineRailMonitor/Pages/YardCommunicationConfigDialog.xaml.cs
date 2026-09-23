@@ -52,9 +52,20 @@ public partial class YardCommunicationConfigDialog : Window
     private static YardCommunicationEditorRow CloneRow(YardCommunicationEditorRow row) => new()
     {
         YardId = row.YardId,
-        DisplayName = row.DisplayName,
+        DisplayName = NormalizeDisplayName(row.DisplayName),
         ListenIp = row.ListenIp,
         ListenPort = row.ListenPort,
-        Enabled = row.Enabled
+        Enabled = row.Enabled,
+        AlarmForwardIp = row.AlarmForwardIp,
+        AlarmForwardPort = row.AlarmForwardPort,
+        AlarmForwardEnabled = row.AlarmForwardEnabled
     };
+
+    private static string NormalizeDisplayName(string displayName)
+    {
+        var normalized = displayName?.Trim() ?? string.Empty;
+        return normalized.StartsWith("-", System.StringComparison.Ordinal)
+            ? normalized.Substring(1).TrimStart()
+            : normalized;
+    }
 }

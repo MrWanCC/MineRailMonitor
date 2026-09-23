@@ -18,6 +18,7 @@ public sealed class YardCommunicationContext : IDisposable
     private RfidSettings _settings;
     private readonly IPassageRecordStore _recordStore;
     private readonly IRfidTimeProvider _timeProvider;
+    private IExternalDataInterface? _alarmForwardSender;
     private RfidUdpTransport? _transport;
     private RfidStationPoller? _poller;
     private RfidRuntimeCoordinator? _runtimeCoordinator;
@@ -39,7 +40,8 @@ public sealed class YardCommunicationContext : IDisposable
         IEnumerable<RfidStationConfig> stations,
         RfidSettings settings,
         IPassageRecordStore recordStore,
-        IRfidTimeProvider? timeProvider = null)
+        IRfidTimeProvider? timeProvider = null,
+        IExternalDataInterface? alarmForwardSender = null)
     {
         Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         if (stations is null) throw new ArgumentNullException(nameof(stations));
@@ -47,6 +49,7 @@ public sealed class YardCommunicationContext : IDisposable
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _recordStore = recordStore ?? throw new ArgumentNullException(nameof(recordStore));
         _timeProvider = timeProvider ?? new SystemRfidTimeProvider();
+        _alarmForwardSender = alarmForwardSender;
         try
         {
             _runtimeCoordinator = CreateRuntimeCoordinator();
@@ -54,6 +57,7 @@ public sealed class YardCommunicationContext : IDisposable
             {
                 _runtimeCoordinator.CommandSent += OnRuntimeCommandSent;
                 _runtimeCoordinator.StationCommandSent += OnRuntimeStationCommandSent;
+                _runtimeCoordinator.AlarmForwardRequested += OnRuntimeAlarmForwardRequested;
             }
         }
         catch (Exception exception)
@@ -150,6 +154,8 @@ public sealed class YardCommunicationContext : IDisposable
     public event Action<YardCommunicationContext, byte, RfidPollCommand, DateTimeOffset>? CommandSent;
 
     public event Action<YardCommunicationContext, RfidStationConfig, RfidPollCommand, DateTimeOffset>? StationCommandSent;
+
+    public event Action<YardCommunicationContext, AlarmForwardRequest, Exception>? AlarmForwardFailed;
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -303,6 +309,15 @@ public sealed class YardCommunicationContext : IDisposable
         }
     }
 
+    public void UpdateAlarmForwardSender(IExternalDataInterface? sender)
+    {
+        ThrowIfDisposed();
+        lock (_syncRoot)
+        {
+            _alarmForwardSender = sender;
+        }
+    }
+
     public bool RecordResponse(IPEndPoint sourceEndpoint, byte protocolAddress, DateTimeOffset receivedAt) =>
         _poller?.RecordResponse(sourceEndpoint, protocolAddress, receivedAt) == true;
 
@@ -373,6 +388,7 @@ public sealed class YardCommunicationContext : IDisposable
         {
             _runtimeCoordinator.CommandSent -= OnRuntimeCommandSent;
             _runtimeCoordinator.StationCommandSent -= OnRuntimeStationCommandSent;
+            _runtimeCoordinator.AlarmForwardRequested -= OnRuntimeAlarmForwardRequested;
         }
         StopAsync().GetAwaiter().GetResult();
     }
@@ -453,6 +469,44 @@ public sealed class YardCommunicationContext : IDisposable
         RfidPollCommand command,
         DateTimeOffset sentAt) =>
         PublishStationCommandSent(station, command, sentAt);
+
+    private void OnRuntimeAlarmForwardRequested(AlarmForwardRequest request)
+    {
+        IExternalDataInterface? sender;
+        lock (_syncRoot)
+        {
+            sender = _alarmForwardSender;
+        }
+
+        if (sender is null)
+        {
+            return;
+        }
+
+        if (!request.HasPayload)
+        {
+            var exception = new InvalidOperationException(
+                $"脱节报警 Passage 缺少原始 UDP 报文，未执行外部转发：{request.PassageId}。");
+            AlarmForwardFailed?.Invoke(this, request, exception);
+            return;
+        }
+
+        _ = SendAlarmForwardAsync(sender, request);
+    }
+
+    private async Task SendAlarmForwardAsync(
+        IExternalDataInterface sender,
+        AlarmForwardRequest request)
+    {
+        try
+        {
+            await sender.SendAsync(request.Payload, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AlarmForwardFailed?.Invoke(this, request, exception);
+        }
+    }
 
     private void PublishCommandSent(byte stationAddress, RfidPollCommand command, DateTimeOffset sentAt)
     {

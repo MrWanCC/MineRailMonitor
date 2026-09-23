@@ -194,11 +194,12 @@ public sealed class RfidUdpTransportTests
         using var receiver = new RfidUdpTransport(IPAddress.Loopback, 0);
         using var pollerCancellation = new CancellationTokenSource();
         using var responderCancellation = new CancellationTokenSource();
-        using var responder = new SimulatorUdpResponder(IPAddress.Loopback, 62001);
+        var livePort = GetUnusedLoopbackPort();
+        using var responder = new SimulatorUdpResponder(IPAddress.Loopback, livePort);
         var stations = Enumerable.Range(1, 6)
             .Select(address => CreateStation(
                 (byte)address,
-                new IPEndPoint(IPAddress.Loopback, address == 1 ? 62001 : 10000 + address)))
+                new IPEndPoint(IPAddress.Loopback, address == 1 ? livePort : 10000 + address)))
             .ToArray();
         var poller = new RfidStationPoller(
             stations,

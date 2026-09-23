@@ -131,6 +131,32 @@ public sealed class SimulatorProtocolTests
     }
 
     [Fact]
+    public async Task Cancellation_during_pending_response_send_completes_responder_cleanly()
+    {
+        using var server = new SimulatorUdpResponder(IPAddress.Loopback, 0);
+        using var cancellation = new CancellationTokenSource();
+        var factoryEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseResponse = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serverTask = server.RunAsync(
+            async (request, _, _) =>
+            {
+                factoryEntered.TrySetResult(true);
+                await releaseResponse.Task.ConfigureAwait(false);
+                return new[] { request[2] };
+            },
+            cancellation.Token);
+        using var client = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+
+        var request = CreateRequest(0x01);
+        await client.SendAsync(request, request.Length, server.LocalEndPoint);
+        await factoryEntered.Task;
+
+        cancellation.Cancel();
+        releaseResponse.TrySetResult(true);
+        await serverTask;
+    }
+
+    [Fact]
     public async Task Async_responder_continues_receiving_while_previous_response_is_delayed()
     {
         using var server = new SimulatorUdpResponder(IPAddress.Loopback, 0);

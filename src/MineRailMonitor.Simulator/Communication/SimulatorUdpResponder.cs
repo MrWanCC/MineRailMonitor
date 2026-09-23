@@ -133,6 +133,14 @@ public sealed class SimulatorUdpResponder : IDisposable
             {
                 // Cancellation is the expected completion path during responder shutdown.
             }
+            catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Closing the socket is the expected completion path during responder shutdown.
+            }
+            catch (SocketException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Closing the socket is the expected completion path during responder shutdown.
+            }
             catch (Exception exception)
             {
                 firstFailure ??= exception;

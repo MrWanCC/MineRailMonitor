@@ -50,6 +50,7 @@ public sealed class YardCommunicationClosedLoopTests
             Assert.Equal(new[] { "RFID-620-01" }, context620.Stations.Select(item => item.StationId));
 
             await WaitUntilAsync(() => simulator560.ResponseCount > 0 && simulator620.ResponseCount > 0);
+            await WaitUntilAsync(() => context560.ResponseCount > 0 && context620.ResponseCount > 0);
             Assert.True(context560.ResponseCount > 0);
             Assert.True(context620.ResponseCount > 0);
             Assert.Equal(0x01, context560.PollingStatuses.Single().StationAddress);

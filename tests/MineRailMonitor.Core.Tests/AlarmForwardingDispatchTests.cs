@@ -41,7 +41,7 @@ public sealed class AlarmForwardingDispatchTests
     }
 
     [Fact]
-    public async Task Sender_failure_is_reported_without_retrying_or_breaking_runtime()
+    public async Task Sender_failure_does_not_affect_rfid_communication_health()
     {
         var station = CreateStation("RFID-560", "560", 0x01, 63103);
         var sender = new RecordingExternalDataInterface(new InvalidOperationException("loopback unavailable"));
@@ -58,6 +58,7 @@ public sealed class AlarmForwardingDispatchTests
         manager.AlarmForwardFailed += (_, _, exception) => failure.TrySetResult(exception);
 
         var context = manager.GetContext("560")!;
+        var beforeErrorCount = context.ErrorCount;
         TriggerAlarm(context, station, new byte[] { 0x70, 0x01 });
 
         var completed = await Task.WhenAny(failure.Task, Task.Delay(TimeSpan.FromSeconds(3)));
@@ -66,7 +67,10 @@ public sealed class AlarmForwardingDispatchTests
         Assert.Equal(1, sender.SendCount);
         var passage = context.RuntimeStates.Single().LastPassageRecord;
         Assert.NotNull(passage);
-        context.AcknowledgeAlarm(passage!.PassageId, Start.AddSeconds(31));
+        Assert.Equal(PassageOutcome.UncouplingAlarm, passage!.Outcome);
+        Assert.Null(context.LastError);
+        Assert.Equal(beforeErrorCount, context.ErrorCount);
+        context.AcknowledgeAlarm(passage.PassageId, Start.AddSeconds(31));
         context.RuntimeCoordinator!.MarkCommandSent(station, RfidPollCommand.Clear, Start.AddSeconds(31));
         context.ProcessFrame(CreateFrame(station, Start.AddSeconds(32), Array.Empty<ushort>(), new byte[] { 0x80 }));
         context.ProcessFrame(CreateFrame(station, Start.AddSeconds(33), Array.Empty<ushort>(), new byte[] { 0x81 }));
@@ -74,7 +78,7 @@ public sealed class AlarmForwardingDispatchTests
     }
 
     [Fact]
-    public async Task Missing_raw_payload_is_not_sent_and_is_reported_as_a_diagnostic()
+    public async Task Missing_raw_does_not_affect_rfid_communication_health()
     {
         var station = CreateStation("RFID-560", "560", 0x01, 63104);
         var sender = new RecordingExternalDataInterface();
@@ -90,12 +94,19 @@ public sealed class AlarmForwardingDispatchTests
         var failure = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
         manager.AlarmForwardFailed += (_, _, exception) => failure.TrySetResult(exception);
 
-        TriggerAlarm(manager.GetContext("560")!, station, Array.Empty<byte>());
+        var context = manager.GetContext("560")!;
+        var beforeErrorCount = context.ErrorCount;
+        TriggerAlarm(context, station, Array.Empty<byte>());
 
         var completed = await Task.WhenAny(failure.Task, Task.Delay(TimeSpan.FromSeconds(3)));
         Assert.Same(failure.Task, completed);
         Assert.Contains("缺少原始 UDP 报文", (await failure.Task).Message, StringComparison.Ordinal);
         Assert.Equal(0, sender.SendCount);
+        var passage = context.RuntimeStates.Single().LastPassageRecord;
+        Assert.NotNull(passage);
+        Assert.Equal(PassageOutcome.UncouplingAlarm, passage!.Outcome);
+        Assert.Null(context.LastError);
+        Assert.Equal(beforeErrorCount, context.ErrorCount);
     }
 
     private static void TriggerAlarm(

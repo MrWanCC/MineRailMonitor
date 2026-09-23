@@ -8,7 +8,7 @@
 
 **Tech Stack:** C#/.NET Framework 4.8, WPF, xUnit, `System.Net.Sockets.UdpClient`, existing JSON configuration and SQLite record store.
 
-**Spec:** `C:/Users/Wan/.codex/attachments/30cdac22-faeb-4b8a-9629-40b19c9ce33f/已粘贴的文本.txt`
+**Spec:** User-provided requirements in the task conversation; no machine-local attachment path is required.
 
 ## Global Constraints
 

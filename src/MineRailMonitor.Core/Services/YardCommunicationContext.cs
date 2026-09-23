@@ -487,8 +487,6 @@ public sealed class YardCommunicationContext : IDisposable
         {
             var exception = new InvalidOperationException(
                 $"脱节报警 Passage 缺少原始 UDP 报文，未执行外部转发：{request.PassageId}。");
-            Interlocked.Increment(ref _errorCount);
-            SetError(exception.Message);
             AlarmForwardFailed?.Invoke(this, request, exception);
             return;
         }
@@ -506,8 +504,6 @@ public sealed class YardCommunicationContext : IDisposable
         }
         catch (Exception exception)
         {
-            Interlocked.Increment(ref _errorCount);
-            SetError(exception.Message);
             AlarmForwardFailed?.Invoke(this, request, exception);
         }
     }

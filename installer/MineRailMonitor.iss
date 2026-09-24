@@ -1,5 +1,5 @@
 #define MyAppName "MineRailMonitor"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.0"
 
 [Setup]
 AppId={{8C8B1CB5-4A4B-4B4A-9D48-6A3C93D2F0E1}

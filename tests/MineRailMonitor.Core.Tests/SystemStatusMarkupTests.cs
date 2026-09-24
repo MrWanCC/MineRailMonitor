@@ -105,6 +105,10 @@ public sealed class SystemStatusMarkupTests
         Assert.DoesNotContain("Text=\"RFID识别\"", monitorMarkup);
         Assert.DoesNotContain("x:Name=\"SelectedRfidSequenceList\"", monitorMarkup);
         Assert.Contains("Text=\"未选择基站\"", monitorMarkup);
+        var emptyStateStart = monitorMarkup.IndexOf("x:Name=\"OverviewEmptyState\"", StringComparison.Ordinal);
+        Assert.True(emptyStateStart > 0);
+        var emptyStateRegion = monitorMarkup.Substring(emptyStateStart - 900, 900);
+        Assert.Contains("Text=\"RFID基站详情\"", emptyStateRegion);
         Assert.Contains("ObservedVehicleSequence", monitorCode);
         Assert.DoesNotContain("SelectedRfidLatestText", monitorCode);
         Assert.DoesNotContain("Text=\"列车信息\"", monitorMarkup);

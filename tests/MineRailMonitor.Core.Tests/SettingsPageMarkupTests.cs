@@ -65,6 +65,56 @@ public sealed class SettingsPageMarkupTests
     }
 
     [Fact]
+    public void Settings_page_exposes_an_about_entry_available_in_all_modes()
+    {
+        var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
+        var code = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml.cs"));
+
+        Assert.Contains("x:Name=\"AboutButton\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Content=\"ⓘ  关于\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnAboutClick\"", markup, StringComparison.Ordinal);
+        var aboutButtonStart = markup.IndexOf("x:Name=\"AboutButton\"", StringComparison.Ordinal);
+        var aboutButtonEnd = markup.IndexOf("/>", aboutButtonStart, StringComparison.Ordinal);
+        Assert.True(aboutButtonEnd > aboutButtonStart);
+        var aboutButtonMarkup = markup.Substring(aboutButtonStart, aboutButtonEnd - aboutButtonStart);
+        Assert.DoesNotContain("IsEnabled=", aboutButtonMarkup, StringComparison.Ordinal);
+        Assert.Contains("new AboutDialog", code, StringComparison.Ordinal);
+        Assert.Contains("Owner = Window.GetWindow(this)", code, StringComparison.Ordinal);
+        Assert.Contains("dialog.ShowDialog()", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void About_dialog_uses_the_assembly_version_and_dark_owner_centered_window()
+    {
+        var markupPath = LocateSourceFile("src", "MineRailMonitor", "Pages", "AboutDialog.xaml");
+        var codePath = LocateSourceFile("src", "MineRailMonitor", "Pages", "AboutDialog.xaml.cs");
+
+        Assert.True(File.Exists(markupPath), "AboutDialog.xaml 应存在。");
+        Assert.True(File.Exists(codePath), "AboutDialog.xaml.cs 应存在。");
+
+        var markup = File.ReadAllText(markupPath);
+        var code = File.ReadAllText(codePath);
+
+        Assert.Contains("关于 MineRailMonitor", markup, StringComparison.Ordinal);
+        Assert.Contains("矿山轨道运输监控系统", markup, StringComparison.Ordinal);
+        Assert.Contains("MineRailMonitor", markup, StringComparison.Ordinal);
+        Assert.Contains("运行环境", markup, StringComparison.Ordinal);
+        Assert.Contains(".NET Framework 4.8", markup, StringComparison.Ordinal);
+        Assert.Contains("© 2026 MineRailMonitor", markup, StringComparison.Ordinal);
+        Assert.Contains("WindowStartupLocation=\"CenterOwner\"", markup, StringComparison.Ordinal);
+        Assert.Contains("ShowInTaskbar=\"False\"", markup, StringComparison.Ordinal);
+        Assert.Contains("<ControlTemplate TargetType=\"Button\">", markup, StringComparison.Ordinal);
+        Assert.Contains("<Trigger Property=\"IsPressed\" Value=\"True\">", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"v1.0.0\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("构建版本", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildVersion", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildVersion", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("AssemblyInformationalVersionAttribute", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReadBuildVersion", code, StringComparison.Ordinal);
+        Assert.Contains("GetName().Version", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Settings_page_exposes_independent_yard_communication_interfaces()
     {
         var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
@@ -119,6 +169,17 @@ public sealed class SettingsPageMarkupTests
         Assert.Contains("取消", markup, StringComparison.Ordinal);
         Assert.Contains("IsEditingEnabled", markup, StringComparison.Ordinal);
         Assert.Contains("EditedRows", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Yard_communication_dialog_controls_keep_dark_pressed_states()
+    {
+        var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "YardCommunicationConfigDialog.xaml"));
+
+        Assert.Contains("<ControlTemplate TargetType=\"Button\">", markup, StringComparison.Ordinal);
+        Assert.Contains("<Trigger Property=\"IsPressed\" Value=\"True\">", markup, StringComparison.Ordinal);
+        Assert.Contains("<ControlTemplate TargetType=\"CheckBox\">", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"CheckMark\"", markup, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -116,6 +116,18 @@ public sealed class WindowChromeMarkupTests
     }
 
     [Fact]
+    public void MainWindow_does_not_reserve_sidebar_space_for_a_version_footer()
+    {
+        var xaml = File.ReadAllText(LocateMainWindowXaml());
+        var code = File.ReadAllText(LocateMainWindowCode());
+
+        Assert.DoesNotContain("x:Name=\"SidebarVersionPanel\"", xaml);
+        Assert.DoesNotContain("Text=\"v1.0.0\"", xaml);
+        Assert.DoesNotContain("public string DisplayVersion", code);
+        Assert.DoesNotContain("typeof(MainWindow).Assembly.GetName().Version", code);
+    }
+
+    [Fact]
     public void Unsaved_map_changes_dialog_exposes_the_three_exit_choices()
     {
         var xaml = File.ReadAllText(LocateSourceFile("Pages", "UnsavedMapChangesDialog.xaml"));

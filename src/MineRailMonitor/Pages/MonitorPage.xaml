@@ -402,12 +402,24 @@
                             <TextBlock x:Name="OverviewDatabaseText" Text="正常" Visibility="Collapsed" />
                             <TextBlock x:Name="OverviewExternalText" Text="未配置" Visibility="Collapsed" />
                         </Grid>
-                        <StackPanel x:Name="OverviewEmptyState" Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="8,0">
-                            <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource AccentBrush}" FontSize="38" HorizontalAlignment="Center" />
-                            <TextBlock Text="未选择基站" Foreground="{StaticResource TextPrimaryBrush}" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,8,0,0" />
-                            <TextBlock Text="点击地图中的RFID基站" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,7,0,0" HorizontalAlignment="Center" />
-                            <TextBlock Text="或下方任务卡查看详情" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" HorizontalAlignment="Center" />
-                        </StackPanel>
+                        <Grid Grid.Row="2">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="42" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Height="42" Style="{StaticResource RightCardHeaderStyle}" Padding="12,0">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Margin="0,0,8,0" Foreground="#39CEFF" FontSize="20" />
+                                    <TextBlock Text="RFID基站详情" Style="{StaticResource SectionTitleStyle}" FontSize="16" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                            <StackPanel x:Name="OverviewEmptyState" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="8,0">
+                                <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource AccentBrush}" FontSize="38" HorizontalAlignment="Center" />
+                                <TextBlock Text="未选择基站" Foreground="{StaticResource TextPrimaryBrush}" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,8,0,0" />
+                                <TextBlock Text="点击地图中的RFID基站" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,7,0,0" HorizontalAlignment="Center" />
+                                <TextBlock Text="或下方任务卡查看详情" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
                         </Grid>
                     </Grid>
                 </Border>

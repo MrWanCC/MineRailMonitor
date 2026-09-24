@@ -254,6 +254,15 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         dialog.ShowDialog();
     }
 
+    private void OnAboutClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new AboutDialog
+        {
+            Owner = Window.GetWindow(this)
+        };
+        dialog.ShowDialog();
+    }
+
     private void OnRestoreDefaultsClick(object sender, RoutedEventArgs e)
     {
         if (!_adminModeService.IsAdmin)

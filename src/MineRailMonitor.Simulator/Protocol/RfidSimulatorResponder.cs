@@ -1,5 +1,6 @@
 using MineRailMonitor.Simulator.Models;
 using MineRailMonitor.Core.Communication;
+using MineRailMonitor.Core.Protocol;
 using MineRailMonitor.Simulator.Acceptance;
 
 namespace MineRailMonitor.Simulator.Protocol;
@@ -161,5 +162,13 @@ public sealed class RfidSimulatorResponder
     private static bool IsValidRequest(byte[]? request) =>
         request is { Length: RfidFrameLayout.FrameLength } &&
         request[0] == 0xB0 && request[1] == 0xB0 && request[3] == 0x04 &&
-        request[38] == 0xAA && request[39] == 0xAA;
+        request[38] == 0xAA && request[39] == 0xAA &&
+        HasValidCrc(request);
+
+    private static bool HasValidCrc(byte[] request)
+    {
+        var crc = ModbusCrc16.Compute(request, 0, 36);
+        return request[36] == ModbusCrc16.LowByte(crc) &&
+               request[37] == ModbusCrc16.HighByte(crc);
+    }
 }

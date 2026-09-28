@@ -215,10 +215,38 @@ public sealed class SimulatorProtocolTests
         Assert.Equal(0x34, frame[8]);
         Assert.Equal(0x12, frame[9]);
         Assert.Equal(0x33, frame[35]);
-        Assert.Equal(0x00, frame[36]);
-        Assert.Equal(0x00, frame[37]);
+        var expectedCrc = ModbusCrc16.Compute(frame, 0, 36);
+        Assert.Equal(ModbusCrc16.LowByte(expectedCrc), frame[36]);
+        Assert.Equal(ModbusCrc16.HighByte(expectedCrc), frame[37]);
         Assert.Equal(0xAA, frame[38]);
         Assert.Equal(0xAA, frame[39]);
+    }
+
+    [Fact]
+    public void ResponseBuilder_ExplicitCrcOverrideCanGenerateFaultFixture()
+    {
+        var input = CreateTrainInput(2);
+        input.CrcHigh = 0x12;
+        input.CrcLow = 0x34;
+
+        var frame = RfidResponseFrameBuilder.Build(input);
+        var expectedCrc = ModbusCrc16.Compute(frame, 0, 36);
+
+        Assert.NotEqual(ModbusCrc16.LowByte(expectedCrc), frame[36]);
+        Assert.NotEqual(ModbusCrc16.HighByte(expectedCrc), frame[37]);
+    }
+
+    [Fact]
+    public void Responder_RejectsRequestWithInvalidCrc()
+    {
+        var responder = new RfidSimulatorResponder(new[]
+        {
+            new SimulatorStation { Address = 0x01, Slots = CreateRfids(1001) }
+        }, emptySlotValue: 0);
+        var request = CreateRequest(0x01);
+        request[36] ^= 0x01;
+
+        Assert.Null(responder.CreateResponse(request));
     }
 
     [Fact]
@@ -359,8 +387,7 @@ public sealed class SimulatorProtocolTests
         var response = responder.CreateResponse(CreateRequest(0x01));
         Assert.Equal((byte)2, response![7]);
 
-        var clearRequest = CreateRequest(0x01);
-        clearRequest[4] = 0x01;
+        var clearRequest = CreateRequest(0x01, clear: true);
         var cleared = responder.CreateResponse(clearRequest);
 
         Assert.NotNull(cleared);
@@ -424,9 +451,7 @@ public sealed class SimulatorProtocolTests
             Address = 0x03,
             CommandBytes = new byte[] { 0x11, 0x22, 0x33, 0x44 },
             EmptySlotValue = 0x0000,
-            Slots = rfids,
-            CrcHigh = 0x12,
-            CrcLow = 0x34
+            Slots = rfids
         };
     }
 
@@ -448,16 +473,16 @@ public sealed class SimulatorProtocolTests
         return rfids;
     }
 
-    private static byte[] CreateRequest(byte address)
+    private static byte[] CreateRequest(byte address, bool clear = false)
     {
-        var request = new byte[40];
-        request[0] = 0xB0;
-        request[1] = 0xB0;
-        request[2] = address;
-        request[3] = 0x04;
-        request[38] = 0xAA;
-        request[39] = 0xAA;
-        return request;
+        return RfidRequestFrameBuilder.Build(new RfidStationConfig
+        {
+            StationId = $"RFID-{address:X2}",
+            ProtocolAddress = address,
+            Mode = 0x04,
+            CommandBytes = new byte[] { clear ? (byte)0x01 : (byte)0x00, 0x00, 0x00, 0x00 },
+            RequestPayload = new byte[28]
+        });
     }
 
     private static ushort ReadLittleEndian(byte[] buffer, int offset) =>

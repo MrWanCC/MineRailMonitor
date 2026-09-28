@@ -37,7 +37,8 @@ public sealed class RfidFrameParser : IRfidFrameParser
             buffer[1] != 0xB0 ||
             buffer[38] != 0xAA ||
             buffer[39] != 0xAA ||
-            buffer[3] != RfidMode)
+            buffer[3] != RfidMode ||
+            !HasValidCrc(buffer))
         {
             return false;
         }
@@ -48,8 +49,6 @@ public sealed class RfidFrameParser : IRfidFrameParser
             rawSlots[index] = ReadUInt16LittleEndian(buffer, 8 + index * 2);
         }
 
-        // Response CRC is intentionally preserved but not enforced yet. The repository does not
-        // contain the complete set of real 2026-09-09 response samples needed to prove Byte0~31.
         var validRfids = rawSlots.Where(value => value != _emptyRfidValue).ToArray();
         var reportedCardCount = buffer[7];
 
@@ -65,13 +64,20 @@ public sealed class RfidFrameParser : IRfidFrameParser
             ReportedCardCount = reportedCardCount,
             ActualNonZeroSlotCount = validRfids.Length,
             ProtocolDataWarning = reportedCardCount != validRfids.Length,
-            CrcHigh = buffer[36],
-            CrcLow = buffer[37],
+            CrcLow = buffer[36],
+            CrcHigh = buffer[37],
             ReceivedAt = receivedAt,
             SourceEndpoint = new IPEndPoint(sourceEndpoint.Address, sourceEndpoint.Port),
             RawData = (byte[])buffer.Clone()
         };
         return true;
+    }
+
+    private static bool HasValidCrc(byte[] buffer)
+    {
+        var crc = ModbusCrc16.Compute(buffer, 0, 36);
+        return buffer[36] == ModbusCrc16.LowByte(crc) &&
+               buffer[37] == ModbusCrc16.HighByte(crc);
     }
 
     private static ushort ReadUInt16LittleEndian(byte[] buffer, int offset) =>

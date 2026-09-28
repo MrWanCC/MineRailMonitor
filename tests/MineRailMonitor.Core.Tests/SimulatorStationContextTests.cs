@@ -436,6 +436,9 @@ public sealed class SimulatorStationContextTests
         request[2] = address;
         request[3] = 0x04;
         request[4] = clear ? (byte)0x01 : (byte)0x00;
+        var crc = ModbusCrc16.Compute(request, 0, 36);
+        request[36] = ModbusCrc16.LowByte(crc);
+        request[37] = ModbusCrc16.HighByte(crc);
         request[38] = 0xAA;
         request[39] = 0xAA;
         return request;

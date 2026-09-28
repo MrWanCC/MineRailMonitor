@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using MineRailMonitor.Core.Protocol;
 using MineRailMonitor.Simulator.Models;
 
 namespace MineRailMonitor.Core.Tests;
@@ -141,6 +142,9 @@ public sealed class SimulatorMultiStationRegressionTests
         frame[1] = 0xB0;
         frame[2] = address;
         frame[3] = 0x04;
+        var crc = ModbusCrc16.Compute(frame, 0, 36);
+        frame[36] = ModbusCrc16.LowByte(crc);
+        frame[37] = ModbusCrc16.HighByte(crc);
         frame[38] = 0xAA;
         frame[39] = 0xAA;
         return frame;

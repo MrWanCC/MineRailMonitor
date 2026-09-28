@@ -1,4 +1,5 @@
 using MineRailMonitor.Simulator.Models;
+using MineRailMonitor.Core.Protocol;
 
 namespace MineRailMonitor.Simulator.Protocol;
 
@@ -36,8 +37,18 @@ public static class RfidResponseFrameBuilder
             WriteUInt16LittleEndian(frame, 8 + index * 2, value);
         }
 
-        frame[36] = input.CrcHigh;
-        frame[37] = input.CrcLow;
+        var crc = ModbusCrc16.Compute(frame, 0, 36);
+        var crcLow = ModbusCrc16.LowByte(crc);
+        var crcHigh = ModbusCrc16.HighByte(crc);
+        if (input.CrcHigh != 0 || input.CrcLow != 0)
+        {
+            // Retain the existing non-zero CRC fields as an explicit fault-fixture override.
+            crcHigh = input.CrcHigh;
+            crcLow = input.CrcLow;
+        }
+
+        frame[36] = crcLow;
+        frame[37] = crcHigh;
         frame[38] = 0xAA;
         frame[39] = 0xAA;
         return frame;

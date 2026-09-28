@@ -13,7 +13,7 @@ public sealed class RfidFrameParserTests
     [Fact]
     public void Parse_NormalTenWagons_PreservesSlotsAndMetadata()
     {
-        var buffer = CreateFrame(10, 0x12, 0x34);
+        var buffer = CreateFrame(10);
         var parser = new RfidFrameParser(new RfidFrameParserOptions { EmptyRfidValue = 0 });
 
         var parsed = parser.TryParse(buffer, SourceEndpoint, ReceivedAt, out var frame);
@@ -29,8 +29,9 @@ public sealed class RfidFrameParserTests
         Assert.Equal((ushort)0x0001, frame.HeadRfid);
         Assert.Equal(new ushort[] { 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x0019, 0x001A }, frame.WagonRfids);
         Assert.Equal(new ushort[] { 0x0001, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x0019, 0x001A }, frame.ValidRfids);
-        Assert.Equal((byte)0x12, frame.CrcHigh);
-        Assert.Equal((byte)0x34, frame.CrcLow);
+        var expectedCrc = ModbusCrc16.Compute(buffer, 0, 36);
+        Assert.Equal(ModbusCrc16.HighByte(expectedCrc), frame.CrcHigh);
+        Assert.Equal(ModbusCrc16.LowByte(expectedCrc), frame.CrcLow);
         Assert.Equal(new ushort[] { 0x0001, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x0019, 0x001A, 0, 0, 0 }, frame.RawRfidSlots);
         Assert.Equal(ReceivedAt, frame.ReceivedAt);
         Assert.Equal(SourceEndpoint, frame.SourceEndpoint);
@@ -60,6 +61,7 @@ public sealed class RfidFrameParserTests
         buffer[7] = 0x01;
         WriteLittleEndian(buffer, 8 + 12 * 2, 0x0021);
         WriteLittleEndian(buffer, 8 + 13 * 2, 0x001D);
+        RewriteCrc(buffer);
 
         Assert.True(new RfidFrameParser().TryParse(buffer, SourceEndpoint, ReceivedAt, out var frame));
         Assert.NotNull(frame);
@@ -133,7 +135,19 @@ public sealed class RfidFrameParserTests
         Assert.Null(frame);
     }
 
-    private static byte[] CreateFrame(int wagonCount, byte crcHigh = 0, byte crcLow = 0)
+    [Fact]
+    public void Parse_ResponseDataMutationWithStaleCrc_ReturnsFalseWithoutBusinessFrame()
+    {
+        var buffer = CreateFrame(2);
+        buffer[8] ^= 0x01;
+
+        var parsed = new RfidFrameParser().TryParse(buffer, SourceEndpoint, ReceivedAt, out var frame);
+
+        Assert.False(parsed);
+        Assert.Null(frame);
+    }
+
+    private static byte[] CreateFrame(int wagonCount)
     {
         var buffer = new byte[40];
         buffer[0] = 0xB0;
@@ -150,8 +164,7 @@ public sealed class RfidFrameParserTests
             WriteLittleEndian(buffer, 8 + wagon * 2, 0x0010 + wagon);
         }
 
-        buffer[36] = crcHigh;
-        buffer[37] = crcLow;
+        RewriteCrc(buffer);
         buffer[38] = 0xAA;
         buffer[39] = 0xAA;
         return buffer;
@@ -170,6 +183,7 @@ public sealed class RfidFrameParserTests
             WriteLittleEndian(buffer, 8 + index * 2, values[index]);
         }
 
+        RewriteCrc(buffer);
         buffer[38] = 0xAA;
         buffer[39] = 0xAA;
         return buffer;
@@ -179,5 +193,12 @@ public sealed class RfidFrameParserTests
     {
         buffer[offset] = (byte)(value & 0xFF);
         buffer[offset + 1] = (byte)(value >> 8);
+    }
+
+    private static void RewriteCrc(byte[] buffer)
+    {
+        var crc = ModbusCrc16.Compute(buffer, 0, 36);
+        buffer[36] = ModbusCrc16.LowByte(crc);
+        buffer[37] = ModbusCrc16.HighByte(crc);
     }
 }

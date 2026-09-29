@@ -19,7 +19,7 @@ public sealed class YardAlarmForwardConfigurationTests
                 { "YardId": "620", "ListenIp": "127.0.0.1", "ListenPort": 62012, "Enabled": true }
               ],
               "YardAlarmForwards": [
-                { "YardId": "560", "Enabled": true, "TargetIp": "192.168.1.100", "TargetPort": 9001 },
+                { "YardId": "560", "Enabled": true, "TargetIp": "192.168.1.100", "TargetPort": 9001, "SourcePort": 58112 },
                 { "YardId": "620", "Enabled": false, "TargetIp": "", "TargetPort": 0 }
               ],
               "Stations": [
@@ -34,7 +34,9 @@ public sealed class YardAlarmForwardConfigurationTests
 
         Assert.True(loaded.Succeeded, string.Join(Environment.NewLine, loaded.Errors));
         Assert.Equal(2, loaded.Project!.YardAlarmForwards.Count);
-        Assert.Equal("192.168.1.100", loaded.Project.YardAlarmForwards.Single(item => item.YardId == "560").TargetIp);
+        var forward560 = loaded.Project.YardAlarmForwards.Single(item => item.YardId == "560");
+        Assert.Equal("192.168.1.100", forward560.TargetIp);
+        Assert.Equal(58112, forward560.SourcePort);
         Assert.False(loaded.Project.YardAlarmForwards.Single(item => item.YardId == "620").Enabled);
 
         var updated = loaded.Project.YardAlarmForwards
@@ -44,7 +46,8 @@ public sealed class YardAlarmForwardConfigurationTests
                     YardId = item.YardId,
                     Enabled = true,
                     TargetIp = "192.168.1.200",
-                    TargetPort = 9002
+                    TargetPort = 9002,
+                    SourcePort = 58113
                 }
                 : item)
             .ToArray();
@@ -56,6 +59,7 @@ public sealed class YardAlarmForwardConfigurationTests
         Assert.True(forward620.Enabled);
         Assert.Equal("192.168.1.200", forward620.TargetIp);
         Assert.Equal(9002, forward620.TargetPort);
+        Assert.Equal(58113, forward620.SourcePort);
     }
 
     [Fact]

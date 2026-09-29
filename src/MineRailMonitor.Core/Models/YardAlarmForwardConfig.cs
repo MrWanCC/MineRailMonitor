@@ -15,6 +15,11 @@ public sealed class YardAlarmForwardConfig
 
     public int TargetPort { get; set; }
 
+    /// <summary>
+    /// Optional fixed local source port for external alarm UDP. Zero keeps OS-selected behavior.
+    /// </summary>
+    public int SourcePort { get; set; }
+
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
@@ -41,6 +46,11 @@ public sealed class YardAlarmForwardConfig
             errors.Add($"站场 {YardId} 的报警转发目标端口无效：{TargetPort}。");
         }
 
+        if (SourcePort is < 0 or > 65535)
+        {
+            errors.Add($"站场 {YardId} 的报警转发本机发送端口无效：{SourcePort}。");
+        }
+
         return errors;
     }
 
@@ -54,6 +64,18 @@ public sealed class YardAlarmForwardConfig
             TargetPort is >= 1 and <= 65535)
         {
             endpoint = new IPEndPoint(address, TargetPort);
+            return true;
+        }
+
+        endpoint = new IPEndPoint(IPAddress.None, 0);
+        return false;
+    }
+
+    public bool TryResolveSourceEndpoint(IPAddress localAddress, out IPEndPoint endpoint)
+    {
+        if (SourcePort is >= 1 and <= 65535 && localAddress is not null)
+        {
+            endpoint = new IPEndPoint(localAddress, SourcePort);
             return true;
         }
 

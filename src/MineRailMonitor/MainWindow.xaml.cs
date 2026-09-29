@@ -58,6 +58,7 @@ public partial class MainWindow : Window
     private bool _closeInProgress;
     private bool _rfidListenerHealthy;
     private bool _externalInterfaceAvailable;
+    private readonly ExternalAlarmStatusChangeTracker _externalAlarmStatusChangeTracker = new();
 
     private enum StatusIndicatorState
     {
@@ -243,6 +244,7 @@ public partial class MainWindow : Window
         _alarmHistoryPage.SetYardOptions(result.Project.Stations);
         _statisticsPage.SetYardOptions(result.Project.Stations);
         _communicationPage.SetYardOptions(result.Project.Stations);
+        _communicationPage.SetExternalAlarmConfigurations(result.Project.YardCommunications, result.Project.YardAlarmForwards);
         _communicationPage.ConfigureStations(settingsStations, SendCommunicationTestAsync);
         StationButtonsPanel.Children.Clear();
         foreach (var station in result.Project.Stations)
@@ -452,6 +454,9 @@ public partial class MainWindow : Window
 
         _loadedProject.YardCommunications = configurations.ToArray();
         _loadedProject.UsesLegacySharedListener = false;
+        _communicationPage.SetExternalAlarmConfigurations(
+            _loadedProject.YardCommunications,
+            _loadedProject.YardAlarmForwards);
         if (_yardCommunicationManager is null)
         {
             await RecreateYardCommunicationManagerAsync(
@@ -461,6 +466,8 @@ public partial class MainWindow : Window
         }
         else
         {
+            var externalAlarmStatusCoordinators = CreateExternalAlarmStatusCoordinators(_loadedProject);
+            _yardCommunicationManager.ApplyExternalAlarmStatusCoordinators(externalAlarmStatusCoordinators);
             await _yardCommunicationManager.ApplyConfigurationsAsync(configurations);
             _rfidListenerHealthy = IsCommunicationHealthy();
             UpdateRfidRuntimeUi();
@@ -490,6 +497,9 @@ public partial class MainWindow : Window
         }
 
         _loadedProject.YardAlarmForwards = configurations.ToArray();
+        _communicationPage.SetExternalAlarmConfigurations(
+            _loadedProject.YardCommunications,
+            _loadedProject.YardAlarmForwards);
         var externalAlarmStatusCoordinators = CreateExternalAlarmStatusCoordinators(_loadedProject);
         _yardCommunicationManager?.ApplyExternalAlarmStatusCoordinators(externalAlarmStatusCoordinators);
         _externalInterfaceAvailable = externalAlarmStatusCoordinators.Count > 0;
@@ -659,6 +669,7 @@ public partial class MainWindow : Window
         IReadOnlyList<RfidStationConfig> stations,
         RfidSettings runtimeSettings)
     {
+        _externalAlarmStatusChangeTracker.Clear();
         if (_yardCommunicationManager is not null)
         {
             _yardCommunicationManager.Dispose();
@@ -669,6 +680,8 @@ public partial class MainWindow : Window
             _yardCommunicationManager.StationCommandSent -= OnYardStationCommandSent;
             _yardCommunicationManager.AlarmForwardFailed -= OnYardAlarmForwardFailed;
             _yardCommunicationManager.ExternalAlarmStatusSendFailed -= OnYardExternalAlarmStatusSendFailed;
+            _yardCommunicationManager.ExternalAlarmStatusSent -= OnYardExternalAlarmStatusSent;
+            _yardCommunicationManager.ExternalAlarmFrameReceived -= OnYardExternalAlarmFrameReceived;
             _yardCommunicationManager.ExternalAlarmClearProcessed -= OnYardExternalAlarmClearProcessed;
             _yardCommunicationManager.ExternalAlarmFrameRejected -= OnYardExternalAlarmFrameRejected;
             _yardCommunicationManager.ExternalAlarmReceiveError -= OnYardExternalAlarmReceiveError;
@@ -717,6 +730,8 @@ public partial class MainWindow : Window
         manager.StationCommandSent += OnYardStationCommandSent;
         manager.AlarmForwardFailed += OnYardAlarmForwardFailed;
         manager.ExternalAlarmStatusSendFailed += OnYardExternalAlarmStatusSendFailed;
+        manager.ExternalAlarmStatusSent += OnYardExternalAlarmStatusSent;
+        manager.ExternalAlarmFrameReceived += OnYardExternalAlarmFrameReceived;
         manager.ExternalAlarmClearProcessed += OnYardExternalAlarmClearProcessed;
         manager.ExternalAlarmFrameRejected += OnYardExternalAlarmFrameRejected;
         manager.ExternalAlarmReceiveError += OnYardExternalAlarmReceiveError;
@@ -914,6 +929,8 @@ public partial class MainWindow : Window
             $"VehicleCount={snapshot.AccumulatedVehicleCount} Target={targetText} " +
             $"Error={exception.Message}",
             exception);
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+            _communicationPage.AddExternalAlarmSendFailure(context.YardId, snapshot, exception)));
     }
 
     private void OnYardExternalAlarmClearProcessed(
@@ -937,18 +954,72 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnYardExternalAlarmStatusSent(
+        YardCommunicationContext context,
+        ExternalAlarmStationSnapshot snapshot,
+        byte[] payload)
+    {
+        var stationKey = $"{context.YardId}:{snapshot.StationAddress:X2}";
+        if (!_externalAlarmStatusChangeTracker.TryRecord(
+                stationKey,
+                snapshot.Status,
+                out var previousStatus))
+        {
+            return;
+        }
+
+        var previous = previousStatus.HasValue
+            ? $"0x{(byte)previousStatus.Value:X2}({previousStatus.Value})"
+            : "首次发送";
+        var current = $"0x{(byte)snapshot.Status:X2}({snapshot.Status})";
+        ((App)Application.Current).Logger.Information(
+            $"外部报警状态变化 Yard={context.YardId} " +
+            $"StationAddress=0x{snapshot.StationAddress:X2} " +
+            $"{previous}->{current} " +
+            $"车厢数={snapshot.AccumulatedVehicleCount}");
+
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+            _communicationPage.AddExternalAlarmSent(
+                context.YardId,
+                snapshot,
+                payload,
+                DateTimeOffset.Now)));
+    }
+
+    private void OnYardExternalAlarmFrameReceived(
+        YardCommunicationContext context,
+        byte[] payload,
+        IPEndPoint sourceEndpoint,
+        bool isValid,
+        DateTimeOffset receivedAt) =>
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+            _communicationPage.AddExternalAlarmReceived(
+                context.YardId,
+                payload,
+                sourceEndpoint,
+                isValid,
+                receivedAt)));
+
     private void OnYardExternalAlarmFrameRejected(
         YardCommunicationContext context,
         string reason,
-        IPEndPoint sourceEndpoint) =>
+        IPEndPoint sourceEndpoint)
+    {
         ((App)Application.Current).Logger.Warning(
             $"外部报警 UDP 清除帧已丢弃 Yard={context.YardId} Source={sourceEndpoint} Reason={reason}");
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+            _communicationPage.AddExternalAlarmFrameRejected(context.YardId, reason, sourceEndpoint)));
+    }
 
     private void OnYardExternalAlarmReceiveError(
         YardCommunicationContext context,
-        Exception exception) =>
+        Exception exception)
+    {
         ((App)Application.Current).Logger.Error(
             $"外部报警 UDP 接收异常 [{context.YardId}]。", exception);
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+            _communicationPage.AddExternalAlarmReceiveError(context.YardId, exception)));
+    }
 
     private async Task StopRuntimeThenCloseAsync()
     {
@@ -969,6 +1040,8 @@ public partial class MainWindow : Window
                 manager.StationCommandSent -= OnYardStationCommandSent;
                 manager.AlarmForwardFailed -= OnYardAlarmForwardFailed;
                 manager.ExternalAlarmStatusSendFailed -= OnYardExternalAlarmStatusSendFailed;
+                manager.ExternalAlarmStatusSent -= OnYardExternalAlarmStatusSent;
+                manager.ExternalAlarmFrameReceived -= OnYardExternalAlarmFrameReceived;
                 manager.ExternalAlarmClearProcessed -= OnYardExternalAlarmClearProcessed;
                 manager.ExternalAlarmFrameRejected -= OnYardExternalAlarmFrameRejected;
                 manager.ExternalAlarmReceiveError -= OnYardExternalAlarmReceiveError;
@@ -1618,7 +1691,17 @@ public partial class MainWindow : Window
                 continue;
             }
 
-            var sender = new ExternalAlarmUdpSender(endpoint);
+            var yardCommunication = project.YardCommunications.FirstOrDefault(item =>
+                string.Equals(item.YardId, configuration.YardId, StringComparison.OrdinalIgnoreCase));
+            if (yardCommunication is null ||
+                !yardCommunication.TryResolveExternalAlarmEndpoint(out var localEndpoint))
+            {
+                ((App)Application.Current).Logger.Warning(
+                    $"站场 {configuration.YardId} 的外部报警本机收发端点配置无效，已禁用本次运行。 ");
+                continue;
+            }
+
+            var sender = new ExternalAlarmUdpChannel(localEndpoint, endpoint);
             coordinators[configuration.YardId.Trim()] = new ExternalAlarmStatusCoordinator(
                 new ExternalAlarmFrameCodec(),
                 sender);

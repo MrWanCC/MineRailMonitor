@@ -30,12 +30,11 @@ public sealed class ExternalAlarmFrameCodec
         payload[6] = 0x00;
         payload[7] = (byte)snapshot.AccumulatedVehicleCount;
 
-        // The external CRC algorithm is not yet confirmed. The range is kept
-        // at the codec boundary so a later calculator can replace it without
-        // changing the business status or frame layout.
+        // External Alarm follows the RFID wire order: CRC low byte first,
+        // followed by the CRC high byte.
         var crc = _crcCalculator.Compute(payload, 0, CrcOffset);
-        payload[8] = (byte)(crc >> 8);
-        payload[9] = (byte)(crc & 0xFF);
+        payload[8] = (byte)(crc & 0xFF);
+        payload[9] = (byte)(crc >> 8);
         payload[10] = 0xAA;
         payload[11] = 0xAA;
 
@@ -58,8 +57,8 @@ public sealed class ExternalAlarmFrameCodec
         payload[5] = 0x00;
         payload[6] = 0x00;
         payload[7] = frame.AccumulatedVehicleCount;
-        payload[8] = (byte)(frame.Crc >> 8);
-        payload[9] = (byte)(frame.Crc & 0xFF);
+        payload[8] = (byte)(frame.Crc & 0xFF);
+        payload[9] = (byte)(frame.Crc >> 8);
         payload[10] = 0xAA;
         payload[11] = 0xAA;
         return payload;
@@ -78,8 +77,8 @@ public sealed class ExternalAlarmFrameCodec
         payload[7] = 0x00;
 
         var crc = _crcCalculator.Compute(payload, 0, CrcOffset);
-        payload[8] = (byte)(crc >> 8);
-        payload[9] = (byte)(crc & 0xFF);
+        payload[8] = (byte)(crc & 0xFF);
+        payload[9] = (byte)(crc >> 8);
         payload[10] = 0xAA;
         payload[11] = 0xAA;
         return payload;
@@ -96,7 +95,7 @@ public sealed class ExternalAlarmFrameCodec
             return false;
         }
 
-        var expectedCrc = (ushort)((payload[8] << 8) | payload[9]);
+        var expectedCrc = (ushort)(payload[8] | (payload[9] << 8));
         var actualCrc = _crcCalculator.Compute(payload, 0, CrcOffset);
         if (expectedCrc != actualCrc)
         {

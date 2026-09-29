@@ -160,15 +160,26 @@ public sealed class SettingsPageMarkupTests
     {
         var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "YardCommunicationConfigDialog.xaml"));
         var code = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "YardCommunicationConfigDialog.xaml.cs"));
+        var settingsCode = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml.cs"));
 
         Assert.Contains("独立通信配置", markup, StringComparison.Ordinal);
         Assert.Contains("每个站场使用独立监听地址和端口", markup, StringComparison.Ordinal);
         Assert.Contains("监听 IP", markup, StringComparison.Ordinal);
         Assert.Contains("监听端口", markup, StringComparison.Ordinal);
+        Assert.Contains("本机收发端口", markup, StringComparison.Ordinal);
+        Assert.Contains("本机 IP", markup, StringComparison.Ordinal);
+        Assert.Contains("本机 IP（绑定）", markup, StringComparison.Ordinal);
+        Assert.Contains("本机收发端口（固定）", markup, StringComparison.Ordinal);
+        Assert.Contains("发送和接收共用本机固定端口", markup, StringComparison.Ordinal);
+        Assert.Contains("ExternalAlarmListenIp", markup, StringComparison.Ordinal);
+        Assert.Contains("ExternalAlarmListenPort", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("本机发送端口", markup, StringComparison.Ordinal);
         Assert.Contains("保存配置", markup, StringComparison.Ordinal);
         Assert.Contains("取消", markup, StringComparison.Ordinal);
         Assert.Contains("IsEditingEnabled", markup, StringComparison.Ordinal);
         Assert.Contains("EditedRows", code, StringComparison.Ordinal);
+        Assert.Contains("AlarmForwardSourcePort", code, StringComparison.Ordinal);
+        Assert.Contains("ValidateExternalAlarm", settingsCode, StringComparison.Ordinal);
     }
 
     [Fact]

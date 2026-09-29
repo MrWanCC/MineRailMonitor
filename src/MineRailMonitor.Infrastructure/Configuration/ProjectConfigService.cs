@@ -783,6 +783,7 @@ public sealed class ProjectConfigService : IProjectConfigService
         ["YardId"] = configuration.YardId.Trim(),
         ["ListenIp"] = configuration.ListenIp.Trim(),
         ["ListenPort"] = configuration.ListenPort,
+        ["ExternalAlarmListenIp"] = configuration.ExternalAlarmListenIp?.Trim() ?? string.Empty,
         ["ExternalAlarmListenPort"] = configuration.ExternalAlarmListenPort,
         ["Enabled"] = configuration.Enabled
     };
@@ -792,7 +793,8 @@ public sealed class ProjectConfigService : IProjectConfigService
         ["YardId"] = configuration.YardId.Trim(),
         ["Enabled"] = configuration.Enabled,
         ["TargetIp"] = configuration.TargetIp?.Trim() ?? string.Empty,
-        ["TargetPort"] = configuration.TargetPort
+        ["TargetPort"] = configuration.TargetPort,
+        ["SourcePort"] = configuration.SourcePort
     };
 
     private static JArray ToByteArrayToken(IEnumerable<byte>? values) =>
@@ -884,6 +886,7 @@ public sealed class ProjectConfigService : IProjectConfigService
             public string YardId { get; set; } = string.Empty;
             public string ListenIp { get; set; } = string.Empty;
             public int ListenPort { get; set; }
+            public string ExternalAlarmListenIp { get; set; } = string.Empty;
             public int ExternalAlarmListenPort { get; set; }
             public bool Enabled { get; set; } = true;
 
@@ -892,6 +895,7 @@ public sealed class ProjectConfigService : IProjectConfigService
                 YardId = YardId,
                 ListenIp = ListenIp,
                 ListenPort = ListenPort,
+                ExternalAlarmListenIp = ExternalAlarmListenIp,
                 ExternalAlarmListenPort = ExternalAlarmListenPort,
                 Enabled = Enabled
             };
@@ -903,13 +907,15 @@ public sealed class ProjectConfigService : IProjectConfigService
             public bool Enabled { get; set; }
             public string TargetIp { get; set; } = string.Empty;
             public int TargetPort { get; set; }
+            public int SourcePort { get; set; }
 
             public YardAlarmForwardConfig ToConfig() => new()
             {
                 YardId = YardId,
                 Enabled = Enabled,
                 TargetIp = TargetIp,
-                TargetPort = TargetPort
+                TargetPort = TargetPort,
+                SourcePort = SourcePort
             };
         }
 

@@ -46,6 +46,7 @@ public sealed class YardCommunicationManager : IDisposable
         _stations = stations.Where(item => item is not null).ToArray();
 
         var diagnostics = new List<string>();
+        AddDuplicateStationAddressDiagnostics(_stations, diagnostics);
         var configurationList = configurations.Where(item => item is not null).ToArray();
         ValidateCandidateEndpointConflicts(configurationList);
         var contextEntries = new Dictionary<string, YardCommunicationContext>(StringComparer.OrdinalIgnoreCase);
@@ -116,6 +117,10 @@ public sealed class YardCommunicationManager : IDisposable
     public event Action<YardCommunicationContext, AlarmForwardRequest, Exception>? AlarmForwardFailed;
 
     public event Action<YardCommunicationContext, ExternalAlarmStationSnapshot, Exception>? ExternalAlarmStatusSendFailed;
+
+    public event Action<YardCommunicationContext, ExternalAlarmStationSnapshot, byte[]>? ExternalAlarmStatusSent;
+
+    public event Action<YardCommunicationContext, byte[], IPEndPoint, bool, DateTimeOffset>? ExternalAlarmFrameReceived;
 
     public event Action<YardCommunicationContext, ExternalAlarmClearCommand, IPEndPoint, bool>? ExternalAlarmClearProcessed;
 
@@ -264,6 +269,7 @@ public sealed class YardCommunicationManager : IDisposable
                     ? configuredCoordinator
                     : null;
             context.UpdateExternalAlarmStatusCoordinator(coordinator);
+            context.UpdateExternalAlarmUdpChannel(coordinator?.Sender as ExternalAlarmUdpChannel);
         }
         DisposeReplacedCoordinators(previousCoordinators, _externalAlarmStatusCoordinators);
     }
@@ -345,11 +351,20 @@ public sealed class YardCommunicationManager : IDisposable
                 StringComparison.OrdinalIgnoreCase)).ToArray();
 
         ExternalAlarmUdpReceiver? externalAlarmUdpReceiver = null;
-        if (!configuration.IsLegacySharedListener &&
-            configuration.Enabled &&
-            configuration.TryResolveExternalAlarmEndpoint(out var externalAlarmEndpoint))
+        ExternalAlarmUdpChannel? externalAlarmUdpChannel = null;
+        ExternalAlarmStatusCoordinator? externalAlarmStatusCoordinator = null;
+        if (!configuration.IsLegacySharedListener)
         {
-            externalAlarmUdpReceiver = new ExternalAlarmUdpReceiver(externalAlarmEndpoint);
+            _externalAlarmStatusCoordinators.TryGetValue(
+                configuration.YardId.Trim(),
+                out externalAlarmStatusCoordinator);
+            externalAlarmUdpChannel = externalAlarmStatusCoordinator?.Sender as ExternalAlarmUdpChannel;
+            if (externalAlarmUdpChannel is null &&
+                configuration.Enabled &&
+                configuration.TryResolveExternalAlarmEndpoint(out var externalAlarmEndpoint))
+            {
+                externalAlarmUdpReceiver = new ExternalAlarmUdpReceiver(externalAlarmEndpoint);
+            }
         }
 
         return new YardCommunicationContext(
@@ -363,14 +378,9 @@ public sealed class YardCommunicationManager : IDisposable
                 : _alarmForwardSenders.TryGetValue(configuration.YardId.Trim(), out var sender)
                     ? sender
                     : null,
-            configuration.IsLegacySharedListener
-                ? null
-                : _externalAlarmStatusCoordinators.TryGetValue(
-                    configuration.YardId.Trim(),
-                    out var externalAlarmStatusCoordinator)
-                    ? externalAlarmStatusCoordinator
-                    : null,
-            externalAlarmUdpReceiver);
+            externalAlarmStatusCoordinator,
+            externalAlarmUdpReceiver,
+            externalAlarmUdpChannel);
     }
 
     private async Task ReplaceContextAsync(
@@ -409,6 +419,7 @@ public sealed class YardCommunicationManager : IDisposable
         string.Equals(left.YardId?.Trim(), right.YardId?.Trim(), StringComparison.OrdinalIgnoreCase) &&
         string.Equals(left.ListenIp?.Trim(), right.ListenIp?.Trim(), StringComparison.OrdinalIgnoreCase) &&
         left.ListenPort == right.ListenPort &&
+        string.Equals(left.ExternalAlarmListenIp?.Trim(), right.ExternalAlarmListenIp?.Trim(), StringComparison.OrdinalIgnoreCase) &&
         left.ExternalAlarmListenPort == right.ExternalAlarmListenPort &&
         left.Enabled == right.Enabled &&
         left.IsLegacySharedListener == right.IsLegacySharedListener;
@@ -443,6 +454,30 @@ public sealed class YardCommunicationManager : IDisposable
         }
     }
 
+    private static void AddDuplicateStationAddressDiagnostics(
+        IEnumerable<RfidStationConfig> stations,
+        ICollection<string> diagnostics)
+    {
+        var duplicateGroups = stations
+            .Where(station => station.Enabled && !string.IsNullOrWhiteSpace(station.YardId))
+            .GroupBy(
+                station => new
+                {
+                    YardId = station.YardId!.Trim().ToUpperInvariant(),
+                    station.ProtocolAddress
+                })
+            .Where(group => group.Count() > 1);
+
+        foreach (var group in duplicateGroups)
+        {
+            var stationIds = string.Join(", ", group.Select(station => station.StationId));
+            var yardId = group.First().YardId!.Trim();
+            diagnostics.Add(
+                $"站场 {yardId} 存在重复 RFID 基站地址 0x{group.Key.ProtocolAddress:X2}：{stationIds}。" +
+                "同一站场的外部报警清除命令无法唯一定位。 ");
+        }
+    }
+
     private void AttachContext(YardCommunicationContext context)
     {
         context.DatagramReceived += OnContextDatagramReceived;
@@ -452,6 +487,8 @@ public sealed class YardCommunicationManager : IDisposable
         context.StationCommandSent += OnContextStationCommandSent;
         context.AlarmForwardFailed += OnContextAlarmForwardFailed;
         context.ExternalAlarmStatusSendFailed += OnContextExternalAlarmStatusSendFailed;
+        context.ExternalAlarmStatusSent += OnContextExternalAlarmStatusSent;
+        context.ExternalAlarmFrameReceived += OnContextExternalAlarmFrameReceived;
         context.ExternalAlarmClearProcessed += OnContextExternalAlarmClearProcessed;
         context.ExternalAlarmFrameRejected += OnContextExternalAlarmFrameRejected;
         context.ExternalAlarmReceiveError += OnContextExternalAlarmReceiveError;
@@ -470,6 +507,8 @@ public sealed class YardCommunicationManager : IDisposable
         context.StationCommandSent -= OnContextStationCommandSent;
         context.AlarmForwardFailed -= OnContextAlarmForwardFailed;
         context.ExternalAlarmStatusSendFailed -= OnContextExternalAlarmStatusSendFailed;
+        context.ExternalAlarmStatusSent -= OnContextExternalAlarmStatusSent;
+        context.ExternalAlarmFrameReceived -= OnContextExternalAlarmFrameReceived;
         context.ExternalAlarmClearProcessed -= OnContextExternalAlarmClearProcessed;
         context.ExternalAlarmFrameRejected -= OnContextExternalAlarmFrameRejected;
         context.ExternalAlarmReceiveError -= OnContextExternalAlarmReceiveError;
@@ -549,6 +588,20 @@ public sealed class YardCommunicationManager : IDisposable
         ExternalAlarmStationSnapshot snapshot,
         Exception exception) =>
         ExternalAlarmStatusSendFailed?.Invoke(context, snapshot, exception);
+
+    private void OnContextExternalAlarmStatusSent(
+        YardCommunicationContext context,
+        ExternalAlarmStationSnapshot snapshot,
+        byte[] payload) =>
+        ExternalAlarmStatusSent?.Invoke(context, snapshot, payload);
+
+    private void OnContextExternalAlarmFrameReceived(
+        YardCommunicationContext context,
+        byte[] payload,
+        IPEndPoint sourceEndpoint,
+        bool isValid,
+        DateTimeOffset receivedAt) =>
+        ExternalAlarmFrameReceived?.Invoke(context, payload, sourceEndpoint, isValid, receivedAt);
 
     private void OnContextExternalAlarmClearProcessed(
         YardCommunicationContext context,

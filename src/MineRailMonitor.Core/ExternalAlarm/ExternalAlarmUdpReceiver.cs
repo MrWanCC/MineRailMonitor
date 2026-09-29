@@ -42,6 +42,8 @@ public sealed class ExternalAlarmUdpReceiver : IDisposable
 
     public event Action<ExternalAlarmClearCommand, IPEndPoint>? ClearReceived;
 
+    public event Action<byte[], IPEndPoint, bool, DateTimeOffset>? FrameReceived;
+
     public event Action<string, IPEndPoint>? FrameRejected;
 
     public event Action<Exception>? ReceiveError;
@@ -139,7 +141,10 @@ public sealed class ExternalAlarmUdpReceiver : IDisposable
                 }
 
                 var source = result.RemoteEndPoint;
-                if (_codec.TryDecodeClear(result.Buffer, out var command))
+                var receivedAt = DateTimeOffset.Now;
+                var isValid = _codec.TryDecodeClear(result.Buffer, out var command);
+                FrameReceived?.Invoke((byte[])result.Buffer.Clone(), source, isValid, receivedAt);
+                if (isValid)
                 {
                     ClearReceived?.Invoke(command, source);
                 }

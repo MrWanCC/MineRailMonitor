@@ -15,6 +15,10 @@ public sealed class ExternalAlarmClearTests
         var codec = new ExternalAlarmFrameCodec();
         var frame = codec.EncodeClear(0x01);
 
+        Assert.Equal(
+            new byte[] { 0xB0, 0xB0, 0x01, 0x04, 0x01, 0x00, 0x00, 0x00, 0x0B, 0x59, 0xAA, 0xAA },
+            frame);
+
         var parsed = codec.TryDecodeClear(frame, out var command);
 
         Assert.True(parsed);

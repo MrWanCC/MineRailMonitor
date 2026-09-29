@@ -56,6 +56,32 @@ public sealed class OperationalPagesMarkupTests
     }
 
     [Fact]
+    public void Communication_page_exposes_external_alarm_send_and_receive_log_tab()
+    {
+        var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "CommunicationPage.xaml"));
+        var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "CommunicationPage.xaml.cs"));
+        var mainWindowCode = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));
+
+        Assert.Contains("x:Name=\"CommunicationTabs\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"TabHeaderPanel\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"SelectedIndicator\"", markup, StringComparison.Ordinal);
+        Assert.Contains("FocusVisualStyle", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"下位机通信\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"外部接口\"", markup, StringComparison.Ordinal);
+        Assert.Contains("SelectionChanged=\"OnCommunicationTabChanged\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RfidTestControls\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ExternalAlarmTab\"", markup, StringComparison.Ordinal);
+        Assert.Contains("本机收发端点", markup, StringComparison.Ordinal);
+        Assert.Contains("固定 UDP Socket（发送/接收共用）", code, StringComparison.Ordinal);
+        Assert.Contains("RfidTestControls.Visibility", code, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ExternalAlarmLogList\"", markup, StringComparison.Ordinal);
+        Assert.Contains("AddExternalAlarmSent", code, StringComparison.Ordinal);
+        Assert.Contains("AddExternalAlarmReceived", code, StringComparison.Ordinal);
+        Assert.Contains("ExternalAlarmStatusSendFailed", mainWindowCode, StringComparison.Ordinal);
+        Assert.Contains("ExternalAlarmFrameReceived", mainWindowCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Communication_page_uses_engineering_test_layout()
     {
         var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "CommunicationPage.xaml"));

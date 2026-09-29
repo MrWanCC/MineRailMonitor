@@ -55,10 +55,12 @@ public partial class YardCommunicationConfigDialog : Window
         DisplayName = NormalizeDisplayName(row.DisplayName),
         ListenIp = row.ListenIp,
         ListenPort = row.ListenPort,
+        ExternalAlarmListenIp = row.ExternalAlarmListenIp,
         ExternalAlarmListenPort = row.ExternalAlarmListenPort,
         Enabled = row.Enabled,
         AlarmForwardIp = row.AlarmForwardIp,
         AlarmForwardPort = row.AlarmForwardPort,
+        AlarmForwardSourcePort = row.AlarmForwardSourcePort,
         AlarmForwardEnabled = row.AlarmForwardEnabled
     };
 

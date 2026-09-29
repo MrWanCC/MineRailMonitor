@@ -72,15 +72,94 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="CommunicationTabItemStyle" TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="MinWidth" Value="112" />
+            <Setter Property="Padding" Value="18,0" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="0,0,0,2"
+                                CornerRadius="4,4,0,0"
+                                Padding="{TemplateBinding Padding}">
+                            <Grid>
+                                <ContentPresenter ContentSource="Header"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}" />
+                                <Border x:Name="SelectedIndicator"
+                                        Height="2"
+                                        Background="{StaticResource PrimaryBlueBrush}"
+                                        CornerRadius="1"
+                                        VerticalAlignment="Bottom"
+                                        Opacity="0" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#0B314C" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}" />
+                                <Setter TargetName="SelectedIndicator" Property="Opacity" Value="1" />
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#09263D" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource CommunicationTabItemStyle}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid KeyboardNavigation.TabNavigation="Local"
+                              KeyboardNavigation.DirectionalNavigation="Contained">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="42" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border x:Name="TabHeaderPanel"
+                                    Grid.Row="0"
+                                    Background="#041B2E"
+                                    BorderBrush="{StaticResource GridLineBrush}"
+                                    BorderThickness="0,0,0,1"
+                                    CornerRadius="4,4,0,0"
+                                    Padding="4,2">
+                                <TabPanel IsItemsHost="True" />
+                            </Border>
+                            <Border Grid.Row="1"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter ContentSource="SelectedContent" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <Grid Margin="12,10">
         <Grid.RowDefinitions>
             <RowDefinition Height="52" />
-            <RowDefinition Height="90" />
-            <RowDefinition Height="284" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="70" />
         </Grid.RowDefinitions>
 
         <Border x:Name="CommunicationHeaderBar" Grid.Row="0" Style="{StaticResource CommunicationHeaderStyle}" Margin="0,0,0,6">
@@ -110,13 +189,15 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <TextBlock Text="测试基站" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                    <ComboBox x:Name="TestStationSelector" Width="210" Height="30" Margin="0,0,8,0" SelectionChanged="OnTestStationSelectionChanged" />
-                    <Button x:Name="ReadTestButton" Content="发送读取" Width="88" Style="{StaticResource CommunicationActionButtonStyle}"
-                            Background="#087DDD" BorderBrush="#16B8FF" Click="OnReadTestClick" />
-                    <Button x:Name="ClearTestButton" Content="发送清空" Width="88" Style="{StaticResource CommunicationActionButtonStyle}"
-                            Margin="8,0,0,0" Background="#744B2A" BorderBrush="#D58D3B"
-                            IsEnabled="False" ToolTip="进入管理员模式后可发送清空命令" Click="OnClearTestClick" />
+                    <StackPanel x:Name="RfidTestControls" Orientation="Horizontal">
+                        <TextBlock Text="测试基站" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <ComboBox x:Name="TestStationSelector" Width="210" Height="30" Margin="0,0,8,0" SelectionChanged="OnTestStationSelectionChanged" />
+                        <Button x:Name="ReadTestButton" Content="发送读取" Width="88" Style="{StaticResource CommunicationActionButtonStyle}"
+                                Background="#087DDD" BorderBrush="#16B8FF" Click="OnReadTestClick" />
+                        <Button x:Name="ClearTestButton" Content="发送清空" Width="88" Style="{StaticResource CommunicationActionButtonStyle}"
+                                Margin="8,0,0,0" Background="#744B2A" BorderBrush="#D58D3B"
+                                IsEnabled="False" ToolTip="进入管理员模式后可发送清空命令" Click="OnClearTestClick" />
+                    </StackPanel>
                     <Button Content="清空日志" Width="78" Style="{StaticResource CommunicationActionButtonStyle}"
                             Margin="8,0,0,0" Click="OnClearLogClick" />
                 </StackPanel>
@@ -154,7 +235,17 @@
             </Grid>
         </Border>
 
-        <Border x:Name="CommunicationOverviewBar" Grid.Row="1" Style="{StaticResource CommunicationSectionStyle}" Padding="7" Margin="0,0,0,6">
+        <TabControl x:Name="CommunicationTabs" Grid.Row="1" SelectionChanged="OnCommunicationTabChanged">
+            <TabItem x:Name="RfidCommunicationTab" Header="下位机通信">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="90" />
+                        <RowDefinition Height="284" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="70" />
+                    </Grid.RowDefinitions>
+
+        <Border x:Name="CommunicationOverviewBar" Grid.Row="0" Style="{StaticResource CommunicationSectionStyle}" Padding="7" Margin="0,0,0,6">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -202,7 +293,7 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="2" Style="{StaticResource CommunicationSectionStyle}" Padding="8" Margin="0,0,0,6">
+        <Border Grid.Row="1" Style="{StaticResource CommunicationSectionStyle}" Padding="8" Margin="0,0,0,6">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="32" />
@@ -262,7 +353,7 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="3" Margin="0,0,0,6">
+        <Grid Grid.Row="2" Margin="0,0,0,6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="1.55*" />
                 <ColumnDefinition Width="1*" />
@@ -561,7 +652,7 @@
             </Border>
         </Grid>
 
-        <Border x:Name="CommunicationStatsBar" Grid.Row="4" Style="{StaticResource CommunicationSectionStyle}" Padding="10,0" Margin="0,0,0,0">
+        <Border x:Name="CommunicationStatsBar" Grid.Row="3" Style="{StaticResource CommunicationSectionStyle}" Padding="10,0" Margin="0,0,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -642,6 +733,110 @@
                 </StackPanel>
             </Grid>
         </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem x:Name="ExternalAlarmTab" Header="外部接口">
+                <Grid Margin="0,0,0,6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="54" />
+                        <RowDefinition Height="76" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource CommunicationSectionStyle}" Padding="12,0" Margin="0,0,0,6">
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Width="4" Height="22" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                                <TextBlock Text="External Alarm UDP" Style="{StaticResource SectionTitleStyle}" FontSize="15" />
+                                <TextBlock Text="  ·  运行时收发记录" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock x:Name="ExternalAlarmStatusText" Text="等待外部接口收发记录"
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
+                                       HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="1" Style="{StaticResource CommunicationSectionStyle}" Padding="10,7" Margin="0,0,0,6">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="发送目标" Style="{StaticResource CommunicationMetricLabelStyle}" VerticalAlignment="Center" />
+                            <TextBlock x:Name="ExternalAlarmTargetText" Grid.Column="1" Text="未配置" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="10,0,18,0" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="本机收发端点" Grid.Column="2" Style="{StaticResource CommunicationMetricLabelStyle}" VerticalAlignment="Center" />
+                            <TextBlock x:Name="ExternalAlarmSourceText" Grid.Column="3" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="10,0,18,0" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="通道模式" Grid.Column="4" Style="{StaticResource CommunicationMetricLabelStyle}" VerticalAlignment="Center" />
+                            <TextBlock x:Name="ExternalAlarmListenText" Grid.Column="5" Text="-" Style="{StaticResource CommunicationMetricValueStyle}" FontSize="12" Margin="10,0,0,0" TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="2" Style="{StaticResource CommunicationSectionStyle}" Padding="8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="34" />
+                                <RowDefinition Height="28" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <DockPanel VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="4" Height="21" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                                    <TextBlock Text="外部接口收发日志" Style="{StaticResource SectionTitleStyle}" FontSize="15" />
+                                    <TextBlock Text="  ·  最近 100 条" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </DockPanel>
+                            <Grid Grid.Row="1" Background="{StaticResource DataGridHeaderBrush}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="94" />
+                                    <ColumnDefinition Width="50" />
+                                    <ColumnDefinition Width="42" />
+                                    <ColumnDefinition Width="150" />
+                                    <ColumnDefinition Width="54" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="190" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="时间" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
+                                <TextBlock Grid.Column="1" Text="站场" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2" Text="方向" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="3" Text="端点" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="4" Text="长度" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="5" Text="HEX" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="6" Text="结果" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                            </Grid>
+                            <ListView x:Name="ExternalAlarmLogList" Grid.Row="2" Style="{StaticResource CommunicationLogListStyle}">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="94" />
+                                                <ColumnDefinition Width="50" />
+                                                <ColumnDefinition Width="42" />
+                                                <ColumnDefinition Width="150" />
+                                                <ColumnDefinition Width="54" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="190" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
+                                            <TextBlock Grid.Column="1" Text="{Binding YardText}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="{Binding DirectionText}" Foreground="{StaticResource AccentBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="3" Text="{Binding EndpointText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="4" Text="{Binding LengthText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="5" Text="{Binding DataText}" Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                            <TextBlock Grid.Column="6" Text="{Binding DescriptionText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </TabItem>
+        </TabControl>
         <StackPanel Visibility="Collapsed">
             <TextBlock x:Name="ConfiguredStationCountText" />
             <TextBlock x:Name="SelectedDiagnosticCountsText" />

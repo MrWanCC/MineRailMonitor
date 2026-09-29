@@ -306,10 +306,12 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
             row.ListenIp = editedRow.ListenIp;
             row.ListenPort = editedRow.ListenPort;
+            row.ExternalAlarmListenIp = editedRow.ExternalAlarmListenIp;
             row.ExternalAlarmListenPort = editedRow.ExternalAlarmListenPort;
             row.Enabled = editedRow.Enabled;
             row.AlarmForwardIp = editedRow.AlarmForwardIp;
             row.AlarmForwardPort = editedRow.AlarmForwardPort;
+            row.AlarmForwardSourcePort = editedRow.AlarmForwardSourcePort;
             row.AlarmForwardEnabled = editedRow.AlarmForwardEnabled;
         }
 
@@ -981,6 +983,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
                 YardId = row.YardId.Trim(),
                 ListenIp = row.ListenIp.Trim(),
                 ListenPort = listenPort,
+                ExternalAlarmListenIp = row.ExternalAlarmListenIp.Trim(),
                 ExternalAlarmListenPort = row.ExternalAlarmListenPort,
                 Enabled = row.Enabled
             });
@@ -991,6 +994,16 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             foreach (var validationError in configuration.Validate())
             {
                 errors.Add(validationError);
+            }
+
+            var row = _yardCommunicationRows.FirstOrDefault(item =>
+                string.Equals(item.YardId, configuration.YardId, StringComparison.OrdinalIgnoreCase));
+            if (row is not null)
+            {
+                foreach (var validationError in configuration.ValidateExternalAlarm(row.AlarmForwardEnabled))
+                {
+                    errors.Add(validationError);
+                }
             }
         }
 
@@ -1015,10 +1028,18 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         foreach (var row in _yardCommunicationRows)
         {
             var targetPort = 0;
+            var sourcePort = 0;
             if (!string.IsNullOrWhiteSpace(row.AlarmForwardPort) &&
                 !int.TryParse(row.AlarmForwardPort, NumberStyles.Integer, CultureInfo.InvariantCulture, out targetPort))
             {
                 errors.Add($"站场 {row.YardId} 的报警转发目标端口无效：{row.AlarmForwardPort}。");
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(row.AlarmForwardSourcePort) &&
+                !int.TryParse(row.AlarmForwardSourcePort, NumberStyles.Integer, CultureInfo.InvariantCulture, out sourcePort))
+            {
+                errors.Add($"站场 {row.YardId} 的报警转发本机发送端口无效：{row.AlarmForwardSourcePort}。");
                 continue;
             }
 
@@ -1027,7 +1048,8 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
                 YardId = row.YardId.Trim(),
                 Enabled = row.AlarmForwardEnabled,
                 TargetIp = row.AlarmForwardIp.Trim(),
-                TargetPort = targetPort
+                TargetPort = targetPort,
+                SourcePort = sourcePort
             });
         }
 
@@ -1199,6 +1221,9 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             {
                 configured.TryGetValue(yard.Id.Trim(), out var configuration);
                 configuredAlarmForwards.TryGetValue(yard.Id.Trim(), out var alarmForward);
+                var externalAlarmListenIp = string.IsNullOrWhiteSpace(configuration?.ExternalAlarmListenIp)
+                    ? configuration?.ListenIp ?? string.Empty
+                    : configuration?.ExternalAlarmListenIp ?? string.Empty;
                 return new YardCommunicationEditorRow
                 {
                     YardId = yard.Id.Trim(),
@@ -1207,12 +1232,16 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
                     ListenPort = configuration is not null && configuration.ListenPort > 0
                         ? configuration.ListenPort.ToString(CultureInfo.InvariantCulture)
                         : string.Empty,
+                    ExternalAlarmListenIp = externalAlarmListenIp,
                     ExternalAlarmListenPort = configuration?.ExternalAlarmListenPort ?? 0,
                     Enabled = configuration?.Enabled ?? true,
                     AlarmForwardEnabled = alarmForward?.Enabled ?? false,
                     AlarmForwardIp = alarmForward?.TargetIp ?? string.Empty,
                     AlarmForwardPort = alarmForward is not null && alarmForward.TargetPort > 0
                         ? alarmForward.TargetPort.ToString(CultureInfo.InvariantCulture)
+                        : string.Empty,
+                    AlarmForwardSourcePort = alarmForward is not null && alarmForward.SourcePort > 0
+                        ? alarmForward.SourcePort.ToString(CultureInfo.InvariantCulture)
                         : string.Empty
                 };
             })
@@ -1257,19 +1286,23 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             string yardId,
             string listenIp,
             string listenPort,
+            string externalAlarmListenIp,
             int externalAlarmListenPort,
             bool enabled,
             string alarmForwardIp,
             string alarmForwardPort,
+            string alarmForwardSourcePort,
             bool alarmForwardEnabled)
         {
             YardId = yardId;
             ListenIp = listenIp;
             ListenPort = listenPort;
+            ExternalAlarmListenIp = externalAlarmListenIp;
             ExternalAlarmListenPort = externalAlarmListenPort;
             Enabled = enabled;
             AlarmForwardIp = alarmForwardIp;
             AlarmForwardPort = alarmForwardPort;
+            AlarmForwardSourcePort = alarmForwardSourcePort;
             AlarmForwardEnabled = alarmForwardEnabled;
         }
 
@@ -1279,6 +1312,8 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
         public string ListenPort { get; }
 
+        public string ExternalAlarmListenIp { get; }
+
         public int ExternalAlarmListenPort { get; }
 
         public bool Enabled { get; }
@@ -1287,16 +1322,20 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
         public string AlarmForwardPort { get; }
 
+        public string AlarmForwardSourcePort { get; }
+
         public bool AlarmForwardEnabled { get; }
 
         public static YardCommunicationDraft FromRow(YardCommunicationEditorRow row) => new(
             row.YardId,
             row.ListenIp,
             row.ListenPort,
+            row.ExternalAlarmListenIp,
             row.ExternalAlarmListenPort,
             row.Enabled,
             row.AlarmForwardIp,
             row.AlarmForwardPort,
+            row.AlarmForwardSourcePort,
             row.AlarmForwardEnabled);
 
         public YardCommunicationEditorRow ToRow(IReadOnlyList<RfidStationYardOption> yardOptions) => new()
@@ -1307,10 +1346,12 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
                 ?? YardId,
             ListenIp = ListenIp,
             ListenPort = ListenPort,
+            ExternalAlarmListenIp = ExternalAlarmListenIp,
             ExternalAlarmListenPort = ExternalAlarmListenPort,
             Enabled = Enabled,
             AlarmForwardIp = AlarmForwardIp,
             AlarmForwardPort = AlarmForwardPort,
+            AlarmForwardSourcePort = AlarmForwardSourcePort,
             AlarmForwardEnabled = AlarmForwardEnabled
         };
 
@@ -1318,10 +1359,12 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             string.Equals(YardId, other.YardId, StringComparison.Ordinal) &&
             string.Equals(ListenIp, other.ListenIp, StringComparison.Ordinal) &&
             string.Equals(ListenPort, other.ListenPort, StringComparison.Ordinal) &&
+            string.Equals(ExternalAlarmListenIp, other.ExternalAlarmListenIp, StringComparison.Ordinal) &&
             ExternalAlarmListenPort == other.ExternalAlarmListenPort &&
             Enabled == other.Enabled &&
             string.Equals(AlarmForwardIp, other.AlarmForwardIp, StringComparison.Ordinal) &&
             string.Equals(AlarmForwardPort, other.AlarmForwardPort, StringComparison.Ordinal) &&
+            string.Equals(AlarmForwardSourcePort, other.AlarmForwardSourcePort, StringComparison.Ordinal) &&
             AlarmForwardEnabled == other.AlarmForwardEnabled;
     }
 
@@ -1406,6 +1449,8 @@ public sealed class YardCommunicationEditorRow
 
     public string ListenPort { get; set; } = string.Empty;
 
+    public string ExternalAlarmListenIp { get; set; } = string.Empty;
+
     public int ExternalAlarmListenPort { get; set; }
 
     public bool Enabled { get; set; }
@@ -1413,6 +1458,8 @@ public sealed class YardCommunicationEditorRow
     public string AlarmForwardIp { get; set; } = string.Empty;
 
     public string AlarmForwardPort { get; set; } = string.Empty;
+
+    public string AlarmForwardSourcePort { get; set; } = string.Empty;
 
     public bool AlarmForwardEnabled { get; set; }
 }

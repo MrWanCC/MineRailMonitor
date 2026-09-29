@@ -7,11 +7,14 @@ public static class ExternalAlarmStatusMapper
     public static ExternalAlarmStatus FromLifecycleState(PassageLifecycleState lifecycleState) =>
         lifecycleState switch
         {
+            PassageLifecycleState.Idle => ExternalAlarmStatus.NoVehicle,
             PassageLifecycleState.Recognizing => ExternalAlarmStatus.Recognizing,
+            PassageLifecycleState.Completed => ExternalAlarmStatus.Normal,
             PassageLifecycleState.Alarm => ExternalAlarmStatus.UncouplingAlarm,
             PassageLifecycleState.Clearing => ExternalAlarmStatus.UncouplingAlarm,
             PassageLifecycleState.WaitForEmpty => ExternalAlarmStatus.UncouplingAlarm,
-            _ => ExternalAlarmStatus.Normal
+            PassageLifecycleState.Finalizing => ExternalAlarmStatus.Normal,
+            _ => ExternalAlarmStatus.NoVehicle
         };
 
     public static ExternalAlarmStationSnapshot FromRuntimeState(StationRuntimeState state)

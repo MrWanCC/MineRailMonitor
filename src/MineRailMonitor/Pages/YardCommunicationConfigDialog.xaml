@@ -233,29 +233,47 @@
                                                 </StackPanel>
 
                                                 <StackPanel Grid.Row="2" Margin="0,12,0,0">
-                                                    <TextBlock Text="报警 UDP 转发" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                                    <TextBlock Text="外部 Alarm UDP" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,8" />
                                                     <Grid>
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="*" />
                                                             <ColumnDefinition Width="150" />
+                                                            <ColumnDefinition Width="150" />
+                                                            <ColumnDefinition Width="120" />
                                                             <ColumnDefinition Width="120" />
                                                         </Grid.ColumnDefinitions>
                                                         <StackPanel>
-                                                            <TextBlock Text="目标 IP" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                            <TextBlock Text="外部服务器 IP" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
                                                             <TextBox Text="{Binding AlarmForwardIp, UpdateSourceTrigger=PropertyChanged}"
                                                                      Style="{StaticResource ConfigTextBoxStyle}"
                                                                      IsEnabled="{Binding AlarmForwardEnabled}" />
                                                         </StackPanel>
                                                         <StackPanel Grid.Column="1" Margin="14,0,0,0">
-                                                            <TextBlock Text="目标端口" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                            <TextBlock Text="外部服务器端口" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
                                                             <TextBox Text="{Binding AlarmForwardPort, UpdateSourceTrigger=PropertyChanged}"
                                                                      Style="{StaticResource ConfigTextBoxStyle}"
                                                                      IsEnabled="{Binding AlarmForwardEnabled}" />
                                                         </StackPanel>
-                                                        <CheckBox Grid.Column="2" Content="启用报警转发"
+                                                        <StackPanel Grid.Column="2" Margin="14,0,0,0">
+                                                            <TextBlock Text="本机 IP（绑定）" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                            <TextBox Text="{Binding ExternalAlarmListenIp, UpdateSourceTrigger=PropertyChanged}"
+                                                                     Style="{StaticResource ConfigTextBoxStyle}"
+                                                                     IsEnabled="{Binding AlarmForwardEnabled}" />
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="3" Margin="14,0,0,0">
+                                                            <TextBlock Text="本机收发端口（固定）" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                            <TextBox Text="{Binding ExternalAlarmListenPort, UpdateSourceTrigger=PropertyChanged}"
+                                                                     Style="{StaticResource ConfigTextBoxStyle}"
+                                                                     IsEnabled="{Binding AlarmForwardEnabled}" />
+                                                        </StackPanel>
+                                                        <CheckBox Grid.Column="4" Content="启用报警转发"
                                                                   Style="{StaticResource ConfigCheckBoxStyle}"
                                                                   IsChecked="{Binding AlarmForwardEnabled, UpdateSourceTrigger=PropertyChanged}" />
                                                     </Grid>
+                                                         <TextBlock Text="发送和接收共用本机固定端口；启用外部接口时端口必须填写。"
+                                                                    Foreground="{StaticResource SubtleTextBrush}"
+                                                                    FontSize="10"
+                                                                    Margin="0,6,0,0" />
                                                 </StackPanel>
                                             </Grid>
                                         </Border>

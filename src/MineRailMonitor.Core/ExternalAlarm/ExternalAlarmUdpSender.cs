@@ -5,14 +5,17 @@ namespace MineRailMonitor.Core.ExternalAlarm;
 
 public sealed class ExternalAlarmUdpSender : IExternalAlarmStatusSender, IDisposable
 {
-    private readonly UdpClient _client = new();
+    private readonly UdpClient _client;
     private readonly IPEndPoint _target;
     private bool _disposed;
 
-    public ExternalAlarmUdpSender(IPEndPoint target)
+    public ExternalAlarmUdpSender(IPEndPoint target, IPEndPoint? localEndpoint = null)
     {
         if (target is null) throw new ArgumentNullException(nameof(target));
         _target = new IPEndPoint(target.Address, target.Port);
+        _client = localEndpoint is null
+            ? new UdpClient()
+            : new UdpClient(new IPEndPoint(localEndpoint.Address, localEndpoint.Port));
     }
 
     public IPEndPoint Target => new(_target.Address, _target.Port);

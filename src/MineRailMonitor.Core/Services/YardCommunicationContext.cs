@@ -21,6 +21,7 @@ public sealed class YardCommunicationContext : IDisposable
     private readonly IRfidTimeProvider _timeProvider;
     private ExternalAlarmStatusCoordinator? _externalAlarmStatusCoordinator;
     private readonly ExternalAlarmUdpReceiver? _externalAlarmUdpReceiver;
+    private ExternalAlarmUdpChannel? _externalAlarmUdpChannel;
     private RfidUdpTransport? _transport;
     private RfidStationPoller? _poller;
     private RfidRuntimeCoordinator? _runtimeCoordinator;
@@ -45,7 +46,8 @@ public sealed class YardCommunicationContext : IDisposable
         IRfidTimeProvider? timeProvider = null,
         IExternalDataInterface? alarmForwardSender = null,
         ExternalAlarmStatusCoordinator? externalAlarmStatusCoordinator = null,
-        ExternalAlarmUdpReceiver? externalAlarmUdpReceiver = null)
+        ExternalAlarmUdpReceiver? externalAlarmUdpReceiver = null,
+        ExternalAlarmUdpChannel? externalAlarmUdpChannel = null)
     {
         Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         if (stations is null) throw new ArgumentNullException(nameof(stations));
@@ -55,15 +57,26 @@ public sealed class YardCommunicationContext : IDisposable
         _timeProvider = timeProvider ?? new SystemRfidTimeProvider();
         _externalAlarmStatusCoordinator = externalAlarmStatusCoordinator;
         _externalAlarmUdpReceiver = externalAlarmUdpReceiver;
+        _externalAlarmUdpChannel = externalAlarmUdpChannel;
+        if (_externalAlarmUdpChannel is not null)
+        {
+            _externalAlarmUdpChannel.ClearReceived += OnExternalAlarmClearReceived;
+            _externalAlarmUdpChannel.FrameReceived += OnExternalAlarmFrameReceived;
+            _externalAlarmUdpChannel.FrameRejected += OnExternalAlarmFrameRejected;
+            _externalAlarmUdpChannel.ReceiveError += OnExternalAlarmReceiveError;
+        }
         if (_externalAlarmUdpReceiver is not null)
         {
             _externalAlarmUdpReceiver.ClearReceived += OnExternalAlarmClearReceived;
+            _externalAlarmUdpReceiver.FrameReceived += OnExternalAlarmFrameReceived;
             _externalAlarmUdpReceiver.FrameRejected += OnExternalAlarmFrameRejected;
             _externalAlarmUdpReceiver.ReceiveError += OnExternalAlarmReceiveError;
         }
         if (_externalAlarmStatusCoordinator is not null)
         {
             _externalAlarmStatusCoordinator.SendFailed += OnExternalAlarmStatusSendFailed;
+            _externalAlarmStatusCoordinator.Sent += OnExternalAlarmStatusSent;
+            _externalAlarmStatusCoordinator.ConfigureStations(_stations);
         }
         try
         {
@@ -112,7 +125,8 @@ public sealed class YardCommunicationContext : IDisposable
 
     public IPEndPoint? ListenerEndPoint => _transport?.LocalEndPoint;
 
-    public IPEndPoint? ExternalAlarmListenEndPoint => _externalAlarmUdpReceiver?.ListenEndPoint;
+    public IPEndPoint? ExternalAlarmListenEndPoint =>
+        _externalAlarmUdpChannel?.ListenEndPoint ?? _externalAlarmUdpReceiver?.ListenEndPoint;
 
     public RfidStationPoller? Poller => _poller;
 
@@ -175,6 +189,10 @@ public sealed class YardCommunicationContext : IDisposable
 
     public event Action<YardCommunicationContext, ExternalAlarmStationSnapshot, Exception>? ExternalAlarmStatusSendFailed;
 
+    public event Action<YardCommunicationContext, ExternalAlarmStationSnapshot, byte[]>? ExternalAlarmStatusSent;
+
+    public event Action<YardCommunicationContext, byte[], IPEndPoint, bool, DateTimeOffset>? ExternalAlarmFrameReceived;
+
     public event Action<YardCommunicationContext, ExternalAlarmClearCommand, IPEndPoint, bool>? ExternalAlarmClearProcessed;
 
     public event Action<YardCommunicationContext, string, IPEndPoint>? ExternalAlarmFrameRejected;
@@ -220,6 +238,38 @@ public sealed class YardCommunicationContext : IDisposable
                 _lastError = null;
             }
 
+            if (_externalAlarmUdpChannel is not null)
+            {
+                try
+                {
+                    await _externalAlarmUdpChannel.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    // External alarm input is an optional notification channel;
+                    // binding failure must not mark the RFID communication unhealthy.
+                    ExternalAlarmReceiveError?.Invoke(this, exception);
+                }
+            }
+            else if (_externalAlarmUdpReceiver is not null)
+            {
+                try
+                {
+                    await _externalAlarmUdpReceiver.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    // External alarm input is an optional notification channel;
+                    // binding failure must not mark the RFID communication unhealthy.
+                    ExternalAlarmReceiveError?.Invoke(this, exception);
+                }
+            }
+
+            if (_externalAlarmStatusCoordinator is not null)
+            {
+                await _externalAlarmStatusCoordinator.StartAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
             if (_stations.Any(station => station.Enabled))
             {
                 var poller = new RfidStationPoller(
@@ -239,19 +289,6 @@ public sealed class YardCommunicationContext : IDisposable
                 }
             }
 
-            if (_externalAlarmUdpReceiver is not null)
-            {
-                try
-                {
-                    await _externalAlarmUdpReceiver.StartAsync(CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    // External alarm input is an optional notification channel;
-                    // binding failure must not mark the RFID communication unhealthy.
-                    ExternalAlarmReceiveError?.Invoke(this, exception);
-                }
-            }
         }
         catch (Exception exception)
         {
@@ -301,7 +338,18 @@ public sealed class YardCommunicationContext : IDisposable
             }
         }
         pollerCts?.Dispose();
-        if (_externalAlarmUdpReceiver is not null)
+        if (_externalAlarmUdpChannel is not null)
+        {
+            try
+            {
+                await _externalAlarmUdpChannel.StopAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                ExternalAlarmReceiveError?.Invoke(this, exception);
+            }
+        }
+        else if (_externalAlarmUdpReceiver is not null)
         {
             try
             {
@@ -315,6 +363,10 @@ public sealed class YardCommunicationContext : IDisposable
         if (poller is not null)
         {
             poller.CommandSent -= OnPollerCommandSent;
+        }
+        if (_externalAlarmStatusCoordinator is not null)
+        {
+            await _externalAlarmStatusCoordinator.StopAsync().ConfigureAwait(false);
         }
         if (transport is not null)
         {
@@ -389,6 +441,7 @@ public sealed class YardCommunicationContext : IDisposable
     {
         ThrowIfDisposed();
         ExternalAlarmStatusCoordinator? previous;
+        bool shouldRun;
         lock (_syncRoot)
         {
             if (ReferenceEquals(_externalAlarmStatusCoordinator, coordinator))
@@ -397,15 +450,109 @@ public sealed class YardCommunicationContext : IDisposable
             }
 
             previous = _externalAlarmStatusCoordinator;
+            shouldRun = _isRunning;
             if (previous is not null)
             {
                 previous.SendFailed -= OnExternalAlarmStatusSendFailed;
+                previous.Sent -= OnExternalAlarmStatusSent;
             }
 
             _externalAlarmStatusCoordinator = coordinator;
             if (_externalAlarmStatusCoordinator is not null)
             {
                 _externalAlarmStatusCoordinator.SendFailed += OnExternalAlarmStatusSendFailed;
+                _externalAlarmStatusCoordinator.Sent += OnExternalAlarmStatusSent;
+                _externalAlarmStatusCoordinator.ConfigureStations(_stations);
+            }
+        }
+
+        if (previous is not null)
+        {
+            previous.StopAsync().GetAwaiter().GetResult();
+        }
+
+        if (shouldRun && coordinator is not null && coordinator.Sender is not ExternalAlarmUdpChannel)
+        {
+            coordinator.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+        }
+    }
+
+    public void UpdateExternalAlarmUdpChannel(ExternalAlarmUdpChannel? channel)
+    {
+        ThrowIfDisposed();
+        ExternalAlarmUdpChannel? previous;
+        bool shouldRun;
+        lock (_syncRoot)
+        {
+            if (ReferenceEquals(_externalAlarmUdpChannel, channel))
+            {
+                return;
+            }
+
+            previous = _externalAlarmUdpChannel;
+            _externalAlarmUdpChannel = channel;
+            shouldRun = _isRunning;
+        }
+
+        if (previous is not null)
+        {
+            previous.ClearReceived -= OnExternalAlarmClearReceived;
+            previous.FrameReceived -= OnExternalAlarmFrameReceived;
+            previous.FrameRejected -= OnExternalAlarmFrameRejected;
+            previous.ReceiveError -= OnExternalAlarmReceiveError;
+            try
+            {
+                previous.StopAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception exception)
+            {
+                ExternalAlarmReceiveError?.Invoke(this, exception);
+            }
+        }
+
+        if (channel is not null && _externalAlarmUdpReceiver is not null)
+        {
+            try
+            {
+                _externalAlarmUdpReceiver.StopAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception exception)
+            {
+                ExternalAlarmReceiveError?.Invoke(this, exception);
+            }
+        }
+
+        if (channel is null)
+        {
+            if (shouldRun && _externalAlarmUdpReceiver is not null)
+            {
+                try
+                {
+                    _externalAlarmUdpReceiver.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+                }
+                catch (Exception exception)
+                {
+                    ExternalAlarmReceiveError?.Invoke(this, exception);
+                }
+            }
+
+            return;
+        }
+
+        channel.ClearReceived += OnExternalAlarmClearReceived;
+        channel.FrameReceived += OnExternalAlarmFrameReceived;
+        channel.FrameRejected += OnExternalAlarmFrameRejected;
+        channel.ReceiveError += OnExternalAlarmReceiveError;
+        if (shouldRun)
+        {
+            try
+            {
+                channel.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+                _externalAlarmStatusCoordinator?.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+            catch (Exception exception)
+            {
+                ExternalAlarmReceiveError?.Invoke(this, exception);
             }
         }
     }
@@ -417,10 +564,29 @@ public sealed class YardCommunicationContext : IDisposable
     {
         if (frame is null) throw new ArgumentNullException(nameof(frame));
 
+        var hadPreviousState = TryGetRuntimeState(frame, out var previousState);
+        var previousLifecycle = hadPreviousState
+            ? previousState.LifecycleState
+            : PassageLifecycleState.Idle;
+        var previousDetectedVehicleCount = hadPreviousState
+            ? previousState.DetectedVehicleCount
+            : 0;
         var result = _runtimeCoordinator?.ProcessFrame(frame);
         if (TryGetRuntimeState(frame, out var state))
         {
-            PublishExternalAlarmStatus(state);
+            if (hadPreviousState &&
+                previousLifecycle is PassageLifecycleState.Clearing or PassageLifecycleState.WaitForEmpty &&
+                state.LifecycleState == PassageLifecycleState.Idle)
+            {
+                PublishExternalAlarmRecovery(
+                    state,
+                    previousDetectedVehicleCount,
+                    frame.ReceivedAt);
+            }
+            else
+            {
+                PublishExternalAlarmStatus(state);
+            }
         }
 
         return result;
@@ -500,10 +666,23 @@ public sealed class YardCommunicationContext : IDisposable
         if (_externalAlarmStatusCoordinator is not null)
         {
             _externalAlarmStatusCoordinator.SendFailed -= OnExternalAlarmStatusSendFailed;
+            _externalAlarmStatusCoordinator.Sent -= OnExternalAlarmStatusSent;
+        }
+        if (_externalAlarmUdpChannel is not null)
+        {
+            _externalAlarmUdpChannel.ClearReceived -= OnExternalAlarmClearReceived;
+            _externalAlarmUdpChannel.FrameReceived -= OnExternalAlarmFrameReceived;
+            _externalAlarmUdpChannel.FrameRejected -= OnExternalAlarmFrameRejected;
+            _externalAlarmUdpChannel.ReceiveError -= OnExternalAlarmReceiveError;
+            if (!ReferenceEquals(_externalAlarmStatusCoordinator?.Sender, _externalAlarmUdpChannel))
+            {
+                _externalAlarmUdpChannel.Dispose();
+            }
         }
         if (_externalAlarmUdpReceiver is not null)
         {
             _externalAlarmUdpReceiver.ClearReceived -= OnExternalAlarmClearReceived;
+            _externalAlarmUdpReceiver.FrameReceived -= OnExternalAlarmFrameReceived;
             _externalAlarmUdpReceiver.FrameRejected -= OnExternalAlarmFrameRejected;
             _externalAlarmUdpReceiver.ReceiveError -= OnExternalAlarmReceiveError;
             _externalAlarmUdpReceiver.Dispose();
@@ -593,6 +772,11 @@ public sealed class YardCommunicationContext : IDisposable
         Exception exception) =>
         ExternalAlarmStatusSendFailed?.Invoke(this, snapshot, exception);
 
+    private void OnExternalAlarmStatusSent(
+        ExternalAlarmStationSnapshot snapshot,
+        byte[] payload) =>
+        ExternalAlarmStatusSent?.Invoke(this, snapshot, payload);
+
     private void PreserveLegacyAlarmForwardEventShape(
         AlarmForwardRequest request,
         Exception exception) =>
@@ -612,6 +796,26 @@ public sealed class YardCommunicationContext : IDisposable
         }
     }
 
+    private void PublishExternalAlarmRecovery(
+        StationRuntimeState state,
+        int detectedVehicleCount,
+        DateTimeOffset updatedAt)
+    {
+        ExternalAlarmStatusCoordinator? coordinator;
+        lock (_syncRoot)
+        {
+            coordinator = _externalAlarmStatusCoordinator;
+        }
+
+        coordinator?.UpdateSnapshot(
+            state.StationId,
+            new ExternalAlarmStationSnapshot(
+                state.StationAddress,
+                ExternalAlarmStatus.Normal,
+                detectedVehicleCount),
+            updatedAt);
+    }
+
     private void OnExternalAlarmClearReceived(
         ExternalAlarmClearCommand command,
         IPEndPoint sourceEndpoint)
@@ -629,6 +833,13 @@ public sealed class YardCommunicationContext : IDisposable
 
     private void OnExternalAlarmFrameRejected(string reason, IPEndPoint sourceEndpoint) =>
         ExternalAlarmFrameRejected?.Invoke(this, reason, sourceEndpoint);
+
+    private void OnExternalAlarmFrameReceived(
+        byte[] payload,
+        IPEndPoint sourceEndpoint,
+        bool isValid,
+        DateTimeOffset receivedAt) =>
+        ExternalAlarmFrameReceived?.Invoke(this, payload, sourceEndpoint, isValid, receivedAt);
 
     private void OnExternalAlarmReceiveError(Exception exception) =>
         ExternalAlarmReceiveError?.Invoke(this, exception);

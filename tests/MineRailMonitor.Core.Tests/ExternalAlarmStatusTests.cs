@@ -18,6 +18,8 @@ public sealed class ExternalAlarmStatusTests
         var station620Address01 = CreateStation("RFID-620-01", "620", 0x01, 62103);
         var sender560 = new RecordingStatusSender();
         var sender620 = new RecordingStatusSender();
+        var coordinator560 = CreateCoordinator(sender560);
+        var coordinator620 = CreateCoordinator(sender620);
         using var manager = new YardCommunicationManager(
             new[] { CreateCommunication("560"), CreateCommunication("620") },
             new[] { station560Address01, station560Address02, station620Address01 },
@@ -25,9 +27,12 @@ public sealed class ExternalAlarmStatusTests
             new InMemoryPassageRecordStore(),
             externalAlarmStatusCoordinators: new Dictionary<string, ExternalAlarmStatusCoordinator>(StringComparer.OrdinalIgnoreCase)
             {
-                ["560"] = CreateCoordinator(sender560),
-                ["620"] = CreateCoordinator(sender620)
+                ["560"] = coordinator560,
+                ["620"] = coordinator620
             });
+
+        await coordinator560.StartAsync();
+        await coordinator620.StartAsync();
 
         manager.GetContext("560")!.ProcessFrame(CreateFrame(station560Address01, 5));
         manager.GetContext("560")!.ProcessFrame(CreateFrame(station560Address02, 6));
@@ -38,8 +43,8 @@ public sealed class ExternalAlarmStatusTests
 
         Assert.Equal(new byte[] { 0x01, 0x02 }, payloads560.Select(payload => payload[2]).ToArray());
         Assert.Equal(new byte[] { 0x01 }, payloads620.Select(payload => payload[2]).ToArray());
-        Assert.Equal(2, sender560.SendCount);
-        Assert.Equal(1, sender620.SendCount);
+        Assert.True(sender560.SendCount >= 2);
+        Assert.True(sender620.SendCount >= 1);
     }
 
     [Fact]
@@ -47,6 +52,7 @@ public sealed class ExternalAlarmStatusTests
     {
         var station = CreateStation("RFID-560-01", "560", 0x01, 62104);
         var sender = new FailingStatusSender();
+        var coordinator = CreateCoordinator(sender);
         using var manager = new YardCommunicationManager(
             new[] { CreateCommunication("560") },
             new[] { station },
@@ -54,7 +60,7 @@ public sealed class ExternalAlarmStatusTests
             new InMemoryPassageRecordStore(),
             externalAlarmStatusCoordinators: new Dictionary<string, ExternalAlarmStatusCoordinator>
             {
-                ["560"] = CreateCoordinator(sender)
+                ["560"] = coordinator
             });
         var failure = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
         manager.ExternalAlarmStatusSendFailed += (_, _, exception) => failure.TrySetResult(exception);
@@ -62,6 +68,7 @@ public sealed class ExternalAlarmStatusTests
         var context = manager.GetContext("560")!;
         var beforeErrorCount = context.ErrorCount;
         context.ProcessFrame(CreateFrame(station, 5));
+        await coordinator.StartAsync();
 
         var completed = await Task.WhenAny(failure.Task, Task.Delay(TimeSpan.FromSeconds(3)));
 
@@ -78,6 +85,8 @@ public sealed class ExternalAlarmStatusTests
         var station = CreateStation("RFID-560-01", "560", 0x01, 62105);
         var sender1 = new RecordingStatusSender();
         var sender2 = new RecordingStatusSender();
+        var coordinator1 = CreateCoordinator(sender1);
+        var coordinator2 = CreateCoordinator(sender2);
         using var manager = new YardCommunicationManager(
             new[] { CreateCommunication("560") },
             new[] { station },
@@ -85,19 +94,21 @@ public sealed class ExternalAlarmStatusTests
             new InMemoryPassageRecordStore(),
             externalAlarmStatusCoordinators: new Dictionary<string, ExternalAlarmStatusCoordinator>
             {
-                ["560"] = CreateCoordinator(sender1)
+                ["560"] = coordinator1
             });
 
         var context = manager.GetContext("560")!;
         context.ProcessFrame(CreateFrame(station, 5));
+        await coordinator1.StartAsync();
         await sender1.WaitForCountAsync(1);
 
         manager.ApplyExternalAlarmStatusCoordinators(
             new Dictionary<string, ExternalAlarmStatusCoordinator>
             {
-                ["560"] = CreateCoordinator(sender2)
+                ["560"] = coordinator2
             });
         context.ProcessFrame(CreateFrame(station, 6));
+        await coordinator2.StartAsync();
 
         await sender2.WaitForCountAsync(1);
         Assert.Equal(1, sender1.SendCount);
@@ -116,7 +127,7 @@ public sealed class ExternalAlarmStatusTests
     }
 
     [Fact]
-    public void Default_codec_writes_confirmed_modbus_crc_high_then_low()
+    public void Default_codec_writes_confirmed_modbus_crc_low_then_high()
     {
         var codec = new ExternalAlarmFrameCodec();
         var snapshot = new ExternalAlarmStationSnapshot(
@@ -127,8 +138,41 @@ public sealed class ExternalAlarmStatusTests
         var payload = codec.Encode(snapshot);
 
         Assert.Equal(
-            new byte[] { 0xB0, 0xB0, 0x01, 0x04, 0x02, 0x00, 0x00, 0x05, 0x1E, 0xCB, 0xAA, 0xAA },
+            new byte[] { 0xB0, 0xB0, 0x01, 0x04, 0x02, 0x00, 0x00, 0x05, 0xCB, 0x1E, 0xAA, 0xAA },
             payload);
+    }
+
+    [Fact]
+    public void No_vehicle_snapshot_encodes_status_00()
+    {
+        var codec = new ExternalAlarmFrameCodec(new FixedCrcCalculator(0x1234));
+        var snapshot = new ExternalAlarmStationSnapshot(
+            stationAddress: 0x01,
+            status: ExternalAlarmStatus.NoVehicle,
+            accumulatedVehicleCount: 0);
+
+        var payload = codec.Encode(snapshot);
+
+        Assert.Equal((byte)0x00, payload[4]);
+        Assert.Equal((byte)0x00, payload[7]);
+    }
+
+    [Fact]
+    public void Status_cache_keeps_the_latest_snapshot_per_station()
+    {
+        var cache = new ExternalAlarmStatusCache();
+
+        cache.Update(
+            "RFID-560-01",
+            new ExternalAlarmStationSnapshot(0x01, ExternalAlarmStatus.NoVehicle, 0));
+        cache.Update(
+            "RFID-560-01",
+            new ExternalAlarmStationSnapshot(0x01, ExternalAlarmStatus.Recognizing, 2));
+
+        Assert.True(cache.TryGet("RFID-560-01", out var snapshot));
+        Assert.Equal(ExternalAlarmStatus.Recognizing, snapshot.Status);
+        Assert.Equal(2, snapshot.AccumulatedVehicleCount);
+        Assert.Single(cache.GetAll());
     }
 
     [Fact]
@@ -143,13 +187,14 @@ public sealed class ExternalAlarmStatusTests
         var payload = codec.Encode(snapshot);
 
         Assert.Equal(
-            new byte[] { 0xB0, 0xB0, 0x01, 0x04, 0x02, 0x00, 0x00, 0x05, 0x12, 0x34, 0xAA, 0xAA },
+            new byte[] { 0xB0, 0xB0, 0x01, 0x04, 0x02, 0x00, 0x00, 0x05, 0x34, 0x12, 0xAA, 0xAA },
             payload);
     }
 
     [Theory]
-    [InlineData(PassageLifecycleState.Idle, ExternalAlarmStatus.Normal)]
+    [InlineData(PassageLifecycleState.Idle, ExternalAlarmStatus.NoVehicle)]
     [InlineData(PassageLifecycleState.Recognizing, ExternalAlarmStatus.Recognizing)]
+    [InlineData(PassageLifecycleState.Completed, ExternalAlarmStatus.Normal)]
     [InlineData(PassageLifecycleState.Alarm, ExternalAlarmStatus.UncouplingAlarm)]
     public void Runtime_lifecycle_maps_to_external_status(
         PassageLifecycleState lifecycleState,
@@ -198,6 +243,7 @@ public sealed class ExternalAlarmStatusTests
             ReceivedAt = DateTimeOffset.UtcNow,
             RawRfidSlots = new ushort[14]
         });
+        await publisher.StartAsync();
 
         var completed = await Task.WhenAny(sender.Failure.Task, Task.Delay(TimeSpan.FromSeconds(3)));
         Assert.Same(sender.Failure.Task, completed);
@@ -227,6 +273,7 @@ public sealed class ExternalAlarmStatusTests
             Enabled = true
         };
         var station = CreateStation("RFID-560-01", "560", 0x01, simulator.Config.ListenPort);
+        var coordinator = CreateCoordinator(statusSender);
         using var manager = new YardCommunicationManager(
             new[] { configuration },
             new[] { station },
@@ -234,7 +281,7 @@ public sealed class ExternalAlarmStatusTests
             new InMemoryPassageRecordStore(),
             externalAlarmStatusCoordinators: new Dictionary<string, ExternalAlarmStatusCoordinator>
             {
-                ["560"] = CreateCoordinator(statusSender)
+                ["560"] = coordinator
             });
         var parser = new RfidFrameParser(new RfidFrameParserOptions { EmptyRfidValue = 0 });
         manager.DatagramReceived += (context, args) =>
@@ -255,20 +302,24 @@ public sealed class ExternalAlarmStatusTests
         try
         {
             var context = manager.GetContext("560")!;
-            await statusSender.WaitForStatusAsync((byte)ExternalAlarmStatus.Normal);
+            await statusSender.WaitForStatusAsync((byte)ExternalAlarmStatus.NoVehicle);
 
             simulator.SetSlots(CreateSlots(5));
             await statusSender.WaitForStatusAsync(
                 (byte)ExternalAlarmStatus.Recognizing,
                 payload => payload[7] == 5);
 
+            simulator.Stop();
             manager.Evaluate(DateTimeOffset.UtcNow.AddSeconds(2));
+            Assert.True(coordinator.SnapshotCache.TryGet("RFID-560-01", out var alarmSnapshot));
+            Assert.Equal(ExternalAlarmStatus.UncouplingAlarm, alarmSnapshot.Status);
             await statusSender.WaitForStatusAsync((byte)ExternalAlarmStatus.UncouplingAlarm);
-            Assert.Equal(PassageLifecycleState.Alarm, context.RuntimeStates.Single().LifecycleState);
 
             var sendCountBeforeClear = statusSender.SendCount;
             using var clearSender = new UdpClient();
             var clearFrame = new ExternalAlarmFrameCodec().EncodeClear(0x01);
+            Assert.Equal((byte)0x0B, clearFrame[8]);
+            Assert.Equal((byte)0x59, clearFrame[9]);
             await clearSender.SendAsync(
                 clearFrame,
                 clearFrame.Length,
@@ -278,6 +329,7 @@ public sealed class ExternalAlarmStatusTests
                     PassageLifecycleState.Clearing or PassageLifecycleState.WaitForEmpty);
 
             simulator.ClearSlots();
+            await simulator.StartAsync();
             await WaitForAsync(() => context.RuntimeStates.Single().LifecycleState == PassageLifecycleState.Idle);
             await statusSender.WaitForNewStatusAsync(
                 (byte)ExternalAlarmStatus.Normal,

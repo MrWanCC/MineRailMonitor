@@ -15,8 +15,8 @@ public sealed class YardCommunicationConfigurationTests
               "Name": "Temporary Project",
               "DefaultStationId": "560",
               "YardCommunications": [
-                { "YardId": "560", "ListenIp": "127.0.0.1", "ListenPort": 62002, "ExternalAlarmListenPort": 62102, "Enabled": true },
-                { "YardId": "620", "ListenIp": "127.0.0.1", "ListenPort": 62012, "ExternalAlarmListenPort": 62112, "Enabled": true }
+                { "YardId": "560", "ListenIp": "127.0.0.1", "ListenPort": 62002, "ExternalAlarmListenIp": "192.168.16.117", "ExternalAlarmListenPort": 62102, "Enabled": true },
+                { "YardId": "620", "ListenIp": "127.0.0.1", "ListenPort": 62012, "ExternalAlarmListenIp": "192.168.16.118", "ExternalAlarmListenPort": 62112, "Enabled": true }
               ],
               "Stations": [
                 { "Id": "560", "ConfigFile": "stations/560.json" },
@@ -31,12 +31,14 @@ public sealed class YardCommunicationConfigurationTests
         Assert.False(loaded.Project!.UsesLegacySharedListener);
         Assert.Equal(2, loaded.Project.YardCommunications.Count);
         Assert.Equal(62012, loaded.Project.YardCommunications.Single(item => item.YardId == "620").ListenPort);
+        Assert.Equal("192.168.16.118", loaded.Project.YardCommunications.Single(item => item.YardId == "620").ExternalAlarmListenIp);
         Assert.Equal(62112, loaded.Project.YardCommunications.Single(item => item.YardId == "620").ExternalAlarmListenPort);
 
         var updated = loaded.Project.YardCommunications
             .Select(item =>
             {
                 item.ListenPort = item.YardId == "620" ? 62022 : item.ListenPort;
+                item.ExternalAlarmListenIp = item.YardId == "620" ? "192.168.16.119" : item.ExternalAlarmListenIp;
                 item.ExternalAlarmListenPort = item.YardId == "620" ? 62122 : item.ExternalAlarmListenPort;
                 return item;
             })
@@ -46,6 +48,7 @@ public sealed class YardCommunicationConfigurationTests
         Assert.True(save.Succeeded, string.Join(Environment.NewLine, save.Errors));
         var reloaded = await service.LoadAsync(project.Path);
         Assert.Equal(62022, reloaded.Project!.YardCommunications.Single(item => item.YardId == "620").ListenPort);
+        Assert.Equal("192.168.16.119", reloaded.Project.YardCommunications.Single(item => item.YardId == "620").ExternalAlarmListenIp);
         Assert.Equal(62122, reloaded.Project.YardCommunications.Single(item => item.YardId == "620").ExternalAlarmListenPort);
     }
 

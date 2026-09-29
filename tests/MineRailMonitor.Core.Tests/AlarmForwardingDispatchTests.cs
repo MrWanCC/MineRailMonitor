@@ -1,5 +1,6 @@
 using System.Net;
 using MineRailMonitor.Core.Communication;
+using MineRailMonitor.Core.ExternalAlarm;
 using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
 using MineRailMonitor.Core.Services;
@@ -11,12 +12,14 @@ public sealed class AlarmForwardingDispatchTests
     private static readonly DateTimeOffset Start = new(2026, 9, 23, 9, 0, 0, TimeSpan.FromHours(8));
 
     [Fact]
-    public async Task Dispatches_each_yard_alarm_to_its_independent_sender()
+    public async Task Dispatches_each_yard_alarm_as_external_status_without_legacy_raw_sender()
     {
         var station560 = CreateStation("RFID-560", "560", 0x01, 63101);
         var station620 = CreateStation("RFID-620", "620", 0x01, 63102);
-        var sender560 = new RecordingExternalDataInterface();
-        var sender620 = new RecordingExternalDataInterface();
+        var legacySender560 = new RecordingExternalDataInterface();
+        var legacySender620 = new RecordingExternalDataInterface();
+        var statusSender560 = new RecordingExternalAlarmStatusSender();
+        var statusSender620 = new RecordingExternalAlarmStatusSender();
         using var manager = new YardCommunicationManager(
             new[] { CreateCommunication("560"), CreateCommunication("620") },
             new[] { station560, station620 },
@@ -24,27 +27,39 @@ public sealed class AlarmForwardingDispatchTests
             new InMemoryPassageRecordStore(),
             alarmForwardSenders: new Dictionary<string, IExternalDataInterface>(StringComparer.OrdinalIgnoreCase)
             {
-                ["560"] = sender560,
-                ["620"] = sender620
+                ["560"] = legacySender560,
+                ["620"] = legacySender620
+            },
+            externalAlarmStatusCoordinators: new Dictionary<string, ExternalAlarmStatusCoordinator>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["560"] = CreateStatusCoordinator(statusSender560),
+                ["620"] = CreateStatusCoordinator(statusSender620)
             });
 
         TriggerAlarm(manager.GetContext("560")!, station560, new byte[] { 0x56, 0x01 });
         TriggerAlarm(manager.GetContext("620")!, station620, new byte[] { 0x62, 0x01 });
 
-        var payload560 = await sender560.WaitForPayloadAsync();
-        var payload620 = await sender620.WaitForPayloadAsync();
+        var payload560 = await statusSender560.WaitForStatusAsync((byte)ExternalAlarmStatus.UncouplingAlarm);
+        var payload620 = await statusSender620.WaitForStatusAsync((byte)ExternalAlarmStatus.UncouplingAlarm);
 
-        Assert.Equal(new byte[] { 0x56, 0x01 }, payload560);
-        Assert.Equal(new byte[] { 0x62, 0x01 }, payload620);
-        Assert.Equal(1, sender560.SendCount);
-        Assert.Equal(1, sender620.SendCount);
+        Assert.Equal(12, payload560.Length);
+        Assert.Equal(12, payload620.Length);
+        Assert.Equal((byte)0x01, payload560[2]);
+        Assert.Equal((byte)0x03, payload560[4]);
+        Assert.Equal((byte)0x02, payload560[7]);
+        Assert.Equal((byte)0x01, payload620[2]);
+        Assert.Equal((byte)0x03, payload620[4]);
+        Assert.Equal((byte)0x02, payload620[7]);
+        Assert.Equal(0, legacySender560.SendCount);
+        Assert.Equal(0, legacySender620.SendCount);
     }
 
     [Fact]
     public async Task Sender_failure_does_not_affect_rfid_communication_health()
     {
         var station = CreateStation("RFID-560", "560", 0x01, 63103);
-        var sender = new RecordingExternalDataInterface(new InvalidOperationException("loopback unavailable"));
+        var legacySender = new RecordingExternalDataInterface();
+        var statusSender = new FailingExternalAlarmStatusSender(new InvalidOperationException("loopback unavailable"));
         using var manager = new YardCommunicationManager(
             new[] { CreateCommunication("560") },
             new[] { station },
@@ -52,10 +67,14 @@ public sealed class AlarmForwardingDispatchTests
             new InMemoryPassageRecordStore(),
             alarmForwardSenders: new Dictionary<string, IExternalDataInterface>
             {
-                ["560"] = sender
+                ["560"] = legacySender
+            },
+            externalAlarmStatusCoordinators: new Dictionary<string, ExternalAlarmStatusCoordinator>
+            {
+                ["560"] = CreateStatusCoordinator(statusSender)
             });
         var failure = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
-        manager.AlarmForwardFailed += (_, _, exception) => failure.TrySetResult(exception);
+        manager.ExternalAlarmStatusSendFailed += (_, _, exception) => failure.TrySetResult(exception);
 
         var context = manager.GetContext("560")!;
         var beforeErrorCount = context.ErrorCount;
@@ -64,7 +83,7 @@ public sealed class AlarmForwardingDispatchTests
         var completed = await Task.WhenAny(failure.Task, Task.Delay(TimeSpan.FromSeconds(3)));
         Assert.Same(failure.Task, completed);
         Assert.Contains("loopback unavailable", (await failure.Task).Message, StringComparison.Ordinal);
-        Assert.Equal(1, sender.SendCount);
+        Assert.Equal(0, legacySender.SendCount);
         var passage = context.RuntimeStates.Single().LastPassageRecord;
         Assert.NotNull(passage);
         Assert.Equal(PassageOutcome.UncouplingAlarm, passage!.Outcome);
@@ -81,7 +100,8 @@ public sealed class AlarmForwardingDispatchTests
     public async Task Missing_raw_does_not_affect_rfid_communication_health()
     {
         var station = CreateStation("RFID-560", "560", 0x01, 63104);
-        var sender = new RecordingExternalDataInterface();
+        var legacySender = new RecordingExternalDataInterface();
+        var statusSender = new RecordingExternalAlarmStatusSender();
         using var manager = new YardCommunicationManager(
             new[] { CreateCommunication("560") },
             new[] { station },
@@ -89,19 +109,20 @@ public sealed class AlarmForwardingDispatchTests
             new InMemoryPassageRecordStore(),
             alarmForwardSenders: new Dictionary<string, IExternalDataInterface>
             {
-                ["560"] = sender
+                ["560"] = legacySender
+            },
+            externalAlarmStatusCoordinators: new Dictionary<string, ExternalAlarmStatusCoordinator>
+            {
+                ["560"] = CreateStatusCoordinator(statusSender)
             });
-        var failure = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
-        manager.AlarmForwardFailed += (_, _, exception) => failure.TrySetResult(exception);
 
         var context = manager.GetContext("560")!;
         var beforeErrorCount = context.ErrorCount;
         TriggerAlarm(context, station, Array.Empty<byte>());
 
-        var completed = await Task.WhenAny(failure.Task, Task.Delay(TimeSpan.FromSeconds(3)));
-        Assert.Same(failure.Task, completed);
-        Assert.Contains("缺少原始 UDP 报文", (await failure.Task).Message, StringComparison.Ordinal);
-        Assert.Equal(0, sender.SendCount);
+        var payload = await statusSender.WaitForStatusAsync((byte)ExternalAlarmStatus.UncouplingAlarm);
+        Assert.Equal((byte)0x03, payload[4]);
+        Assert.Equal(0, legacySender.SendCount);
         var passage = context.RuntimeStates.Single().LastPassageRecord;
         Assert.NotNull(passage);
         Assert.Equal(PassageOutcome.UncouplingAlarm, passage!.Outcome);
@@ -189,5 +210,65 @@ public sealed class AlarmForwardingDispatchTests
             _payload.TrySetResult((byte[])payload.Clone());
             return Task.CompletedTask;
         }
+    }
+
+    private static ExternalAlarmStatusCoordinator CreateStatusCoordinator(IExternalAlarmStatusSender sender) =>
+        new(new ExternalAlarmFrameCodec(), sender);
+
+    private sealed class RecordingExternalAlarmStatusSender : IExternalAlarmStatusSender
+    {
+        private readonly object _syncRoot = new();
+        private readonly List<byte[]> _payloads = new();
+
+        public int SendCount
+        {
+            get
+            {
+                lock (_syncRoot)
+                {
+                    return _payloads.Count;
+                }
+            }
+        }
+
+        public Task SendAsync(byte[] payload, CancellationToken cancellationToken)
+        {
+            lock (_syncRoot)
+            {
+                _payloads.Add((byte[])payload.Clone());
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public async Task<byte[]> WaitForStatusAsync(byte status)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (DateTime.UtcNow < deadline)
+            {
+                lock (_syncRoot)
+                {
+                    var match = _payloads.LastOrDefault(payload => payload.Length > 4 && payload[4] == status);
+                    if (match is not null)
+                    {
+                        return (byte[])match.Clone();
+                    }
+                }
+
+                await Task.Delay(10).ConfigureAwait(false);
+            }
+
+            throw new TimeoutException($"Expected external alarm status 0x{status:X2}; got {SendCount} sends.");
+        }
+    }
+
+    private sealed class FailingExternalAlarmStatusSender : IExternalAlarmStatusSender
+    {
+        private readonly Exception _exception;
+
+        public FailingExternalAlarmStatusSender(Exception exception) => _exception = exception;
+
+        public Task SendAsync(byte[] payload, CancellationToken cancellationToken) =>
+            Task.FromException(_exception);
     }
 }

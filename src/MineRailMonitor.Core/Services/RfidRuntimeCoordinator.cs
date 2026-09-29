@@ -473,6 +473,34 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         }
     }
 
+    public bool TryAcknowledgeAlarm(byte stationAddress, DateTimeOffset acknowledgedAt)
+    {
+        lock (_syncRoot)
+        {
+            var matches = _statesByEndpoint.Values
+                .Where(state => state.StationAddress == stationAddress)
+                .Where(state => state.LifecycleState is
+                    PassageLifecycleState.Alarm or
+                    PassageLifecycleState.Clearing or
+                    PassageLifecycleState.WaitForEmpty)
+                .Where(state => state.LastPassageRecord is not null &&
+                                state.LastPassageRecord.RequiresAlarmAcknowledgement &&
+                                state.ContainsUnacknowledgedAlarm(state.LastPassageRecord.PassageId))
+                .ToArray();
+            if (matches.Length != 1)
+            {
+                return false;
+            }
+
+            var state = matches[0];
+            var passageId = state.LastPassageRecord!.PassageId;
+            _recordStore.MarkAlarmAcknowledged(passageId, acknowledgedAt);
+            state.RemoveUnacknowledgedAlarm(passageId);
+            UpdateVisualState(state);
+            return true;
+        }
+    }
+
     public void MarkCommandSent(byte stationAddress, RfidPollCommand command, DateTimeOffset sentAt)
     {
         var marked = false;

@@ -13,6 +13,12 @@ public sealed class YardCommunicationConfig
 
     public int ListenPort { get; set; }
 
+    /// <summary>
+    /// Independent UDP port used by the external system to send alarm clear commands.
+    /// Zero disables the receiver for backward-compatible project manifests.
+    /// </summary>
+    public int ExternalAlarmListenPort { get; set; }
+
     public bool Enabled { get; set; } = true;
 
     /// <summary>
@@ -39,6 +45,15 @@ public sealed class YardCommunicationConfig
             errors.Add($"站场 {YardId} 的监听端口无效：{ListenPort}。");
         }
 
+        if (ExternalAlarmListenPort is < 0 or > 65535)
+        {
+            errors.Add($"站场 {YardId} 的外部报警监听端口无效：{ExternalAlarmListenPort}。");
+        }
+        else if (ExternalAlarmListenPort > 0 && ExternalAlarmListenPort == ListenPort)
+        {
+            errors.Add($"站场 {YardId} 的外部报警监听端口不能复用 RFID 监听端口：{ExternalAlarmListenPort}。");
+        }
+
         return errors;
     }
 
@@ -49,6 +64,20 @@ public sealed class YardCommunicationConfig
             ListenPort is >= 1 and <= 65535)
         {
             endpoint = new IPEndPoint(address, ListenPort);
+            return true;
+        }
+
+        endpoint = new IPEndPoint(IPAddress.None, 0);
+        return false;
+    }
+
+    public bool TryResolveExternalAlarmEndpoint(out IPEndPoint endpoint)
+    {
+        if (IPAddress.TryParse(ListenIp, out var address) &&
+            !IPAddress.None.Equals(address) &&
+            ExternalAlarmListenPort is >= 1 and <= 65535)
+        {
+            endpoint = new IPEndPoint(address, ExternalAlarmListenPort);
             return true;
         }
 

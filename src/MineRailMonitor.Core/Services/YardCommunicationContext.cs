@@ -1,5 +1,6 @@
 using System.Net;
 using MineRailMonitor.Core.Communication;
+using MineRailMonitor.Core.ExternalAlarm;
 using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
 using MineRailMonitor.Core.Protocol;
@@ -18,7 +19,8 @@ public sealed class YardCommunicationContext : IDisposable
     private RfidSettings _settings;
     private readonly IPassageRecordStore _recordStore;
     private readonly IRfidTimeProvider _timeProvider;
-    private IExternalDataInterface? _alarmForwardSender;
+    private ExternalAlarmStatusCoordinator? _externalAlarmStatusCoordinator;
+    private readonly ExternalAlarmUdpReceiver? _externalAlarmUdpReceiver;
     private RfidUdpTransport? _transport;
     private RfidStationPoller? _poller;
     private RfidRuntimeCoordinator? _runtimeCoordinator;
@@ -41,7 +43,9 @@ public sealed class YardCommunicationContext : IDisposable
         RfidSettings settings,
         IPassageRecordStore recordStore,
         IRfidTimeProvider? timeProvider = null,
-        IExternalDataInterface? alarmForwardSender = null)
+        IExternalDataInterface? alarmForwardSender = null,
+        ExternalAlarmStatusCoordinator? externalAlarmStatusCoordinator = null,
+        ExternalAlarmUdpReceiver? externalAlarmUdpReceiver = null)
     {
         Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         if (stations is null) throw new ArgumentNullException(nameof(stations));
@@ -49,7 +53,18 @@ public sealed class YardCommunicationContext : IDisposable
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _recordStore = recordStore ?? throw new ArgumentNullException(nameof(recordStore));
         _timeProvider = timeProvider ?? new SystemRfidTimeProvider();
-        _alarmForwardSender = alarmForwardSender;
+        _externalAlarmStatusCoordinator = externalAlarmStatusCoordinator;
+        _externalAlarmUdpReceiver = externalAlarmUdpReceiver;
+        if (_externalAlarmUdpReceiver is not null)
+        {
+            _externalAlarmUdpReceiver.ClearReceived += OnExternalAlarmClearReceived;
+            _externalAlarmUdpReceiver.FrameRejected += OnExternalAlarmFrameRejected;
+            _externalAlarmUdpReceiver.ReceiveError += OnExternalAlarmReceiveError;
+        }
+        if (_externalAlarmStatusCoordinator is not null)
+        {
+            _externalAlarmStatusCoordinator.SendFailed += OnExternalAlarmStatusSendFailed;
+        }
         try
         {
             _runtimeCoordinator = CreateRuntimeCoordinator();
@@ -57,7 +72,6 @@ public sealed class YardCommunicationContext : IDisposable
             {
                 _runtimeCoordinator.CommandSent += OnRuntimeCommandSent;
                 _runtimeCoordinator.StationCommandSent += OnRuntimeStationCommandSent;
-                _runtimeCoordinator.AlarmForwardRequested += OnRuntimeAlarmForwardRequested;
             }
         }
         catch (Exception exception)
@@ -97,6 +111,8 @@ public sealed class YardCommunicationContext : IDisposable
     }
 
     public IPEndPoint? ListenerEndPoint => _transport?.LocalEndPoint;
+
+    public IPEndPoint? ExternalAlarmListenEndPoint => _externalAlarmUdpReceiver?.ListenEndPoint;
 
     public RfidStationPoller? Poller => _poller;
 
@@ -157,6 +173,14 @@ public sealed class YardCommunicationContext : IDisposable
 
     public event Action<YardCommunicationContext, AlarmForwardRequest, Exception>? AlarmForwardFailed;
 
+    public event Action<YardCommunicationContext, ExternalAlarmStationSnapshot, Exception>? ExternalAlarmStatusSendFailed;
+
+    public event Action<YardCommunicationContext, ExternalAlarmClearCommand, IPEndPoint, bool>? ExternalAlarmClearProcessed;
+
+    public event Action<YardCommunicationContext, string, IPEndPoint>? ExternalAlarmFrameRejected;
+
+    public event Action<YardCommunicationContext, Exception>? ExternalAlarmReceiveError;
+
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -214,6 +238,20 @@ public sealed class YardCommunicationContext : IDisposable
                     _pollerTask = RunPollerAsync(poller, pollerCts.Token);
                 }
             }
+
+            if (_externalAlarmUdpReceiver is not null)
+            {
+                try
+                {
+                    await _externalAlarmUdpReceiver.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    // External alarm input is an optional notification channel;
+                    // binding failure must not mark the RFID communication unhealthy.
+                    ExternalAlarmReceiveError?.Invoke(this, exception);
+                }
+            }
         }
         catch (Exception exception)
         {
@@ -263,6 +301,17 @@ public sealed class YardCommunicationContext : IDisposable
             }
         }
         pollerCts?.Dispose();
+        if (_externalAlarmUdpReceiver is not null)
+        {
+            try
+            {
+                await _externalAlarmUdpReceiver.StopAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                ExternalAlarmReceiveError?.Invoke(this, exception);
+            }
+        }
         if (poller is not null)
         {
             poller.CommandSent -= OnPollerCommandSent;
@@ -283,14 +332,33 @@ public sealed class YardCommunicationContext : IDisposable
 
     public void Evaluate(DateTimeOffset now)
     {
-        _runtimeCoordinator?.Evaluate(now);
-        if (_poller is null || _runtimeCoordinator is null)
+        var runtimeCoordinator = _runtimeCoordinator;
+        if (runtimeCoordinator is null)
         {
             return;
         }
 
-        _poller.EvaluateTimeouts(now, _runtimeCoordinator.OfflineTimeout);
-        _poller.SynchronizeOnlineStates(_runtimeCoordinator.EndpointStates);
+        var previousStates = runtimeCoordinator.EndpointStates.ToDictionary(
+            pair => pair.Key,
+            pair => (pair.Value.LifecycleState, pair.Value.DetectedVehicleCount));
+
+        runtimeCoordinator.Evaluate(now);
+        if (_poller is not null)
+        {
+            _poller.EvaluateTimeouts(now, runtimeCoordinator.OfflineTimeout);
+            _poller.SynchronizeOnlineStates(runtimeCoordinator.EndpointStates);
+        }
+
+        foreach (var pair in runtimeCoordinator.EndpointStates)
+        {
+            var state = pair.Value;
+            if (!previousStates.TryGetValue(pair.Key, out var previous) ||
+                previous.LifecycleState != state.LifecycleState ||
+                previous.DetectedVehicleCount != state.DetectedVehicleCount)
+            {
+                PublishExternalAlarmStatus(state);
+            }
+        }
     }
 
     public void UpdateSettings(RfidSettings settings)
@@ -312,17 +380,51 @@ public sealed class YardCommunicationContext : IDisposable
     public void UpdateAlarmForwardSender(IExternalDataInterface? sender)
     {
         ThrowIfDisposed();
+        // Kept as a compatibility API for callers that still provide the
+        // legacy raw-payload sender. Runtime dispatch is intentionally owned
+        // by ExternalAlarmStatusCoordinator now.
+    }
+
+    public void UpdateExternalAlarmStatusCoordinator(ExternalAlarmStatusCoordinator? coordinator)
+    {
+        ThrowIfDisposed();
+        ExternalAlarmStatusCoordinator? previous;
         lock (_syncRoot)
         {
-            _alarmForwardSender = sender;
+            if (ReferenceEquals(_externalAlarmStatusCoordinator, coordinator))
+            {
+                return;
+            }
+
+            previous = _externalAlarmStatusCoordinator;
+            if (previous is not null)
+            {
+                previous.SendFailed -= OnExternalAlarmStatusSendFailed;
+            }
+
+            _externalAlarmStatusCoordinator = coordinator;
+            if (_externalAlarmStatusCoordinator is not null)
+            {
+                _externalAlarmStatusCoordinator.SendFailed += OnExternalAlarmStatusSendFailed;
+            }
         }
     }
 
     public bool RecordResponse(IPEndPoint sourceEndpoint, byte protocolAddress, DateTimeOffset receivedAt) =>
         _poller?.RecordResponse(sourceEndpoint, protocolAddress, receivedAt) == true;
 
-    public StationRecognitionSession? ProcessFrame(RfidStationFrame frame) =>
-        _runtimeCoordinator?.ProcessFrame(frame);
+    public StationRecognitionSession? ProcessFrame(RfidStationFrame frame)
+    {
+        if (frame is null) throw new ArgumentNullException(nameof(frame));
+
+        var result = _runtimeCoordinator?.ProcessFrame(frame);
+        if (TryGetRuntimeState(frame, out var state))
+        {
+            PublishExternalAlarmStatus(state);
+        }
+
+        return result;
+    }
 
     public void RestorePendingClear(IEnumerable<PassageRecord> records) =>
         _runtimeCoordinator?.RestorePendingClear(FilterRecordsForContext(records));
@@ -341,6 +443,12 @@ public sealed class YardCommunicationContext : IDisposable
         }
 
         _runtimeCoordinator.AcknowledgeAlarm(passageId, acknowledgedAt);
+    }
+
+    public bool TryProcessExternalAlarmClear(ExternalAlarmClearCommand command, DateTimeOffset acknowledgedAt)
+    {
+        if (command is null) throw new ArgumentNullException(nameof(command));
+        return _runtimeCoordinator?.TryAcknowledgeAlarm(command.StationAddress, acknowledgedAt) == true;
     }
 
     public async Task SendAsync(
@@ -388,7 +496,17 @@ public sealed class YardCommunicationContext : IDisposable
         {
             _runtimeCoordinator.CommandSent -= OnRuntimeCommandSent;
             _runtimeCoordinator.StationCommandSent -= OnRuntimeStationCommandSent;
-            _runtimeCoordinator.AlarmForwardRequested -= OnRuntimeAlarmForwardRequested;
+        }
+        if (_externalAlarmStatusCoordinator is not null)
+        {
+            _externalAlarmStatusCoordinator.SendFailed -= OnExternalAlarmStatusSendFailed;
+        }
+        if (_externalAlarmUdpReceiver is not null)
+        {
+            _externalAlarmUdpReceiver.ClearReceived -= OnExternalAlarmClearReceived;
+            _externalAlarmUdpReceiver.FrameRejected -= OnExternalAlarmFrameRejected;
+            _externalAlarmUdpReceiver.ReceiveError -= OnExternalAlarmReceiveError;
+            _externalAlarmUdpReceiver.Dispose();
         }
         StopAsync().GetAwaiter().GetResult();
     }
@@ -470,42 +588,84 @@ public sealed class YardCommunicationContext : IDisposable
         DateTimeOffset sentAt) =>
         PublishStationCommandSent(station, command, sentAt);
 
-    private void OnRuntimeAlarmForwardRequested(AlarmForwardRequest request)
+    private void OnExternalAlarmStatusSendFailed(
+        ExternalAlarmStationSnapshot snapshot,
+        Exception exception) =>
+        ExternalAlarmStatusSendFailed?.Invoke(this, snapshot, exception);
+
+    private void PreserveLegacyAlarmForwardEventShape(
+        AlarmForwardRequest request,
+        Exception exception) =>
+        AlarmForwardFailed?.Invoke(this, request, exception);
+
+    private void PublishExternalAlarmStatus(StationRuntimeState state)
     {
-        IExternalDataInterface? sender;
+        ExternalAlarmStatusCoordinator? coordinator;
         lock (_syncRoot)
         {
-            sender = _alarmForwardSender;
+            coordinator = _externalAlarmStatusCoordinator;
         }
 
-        if (sender is null)
+        if (coordinator is not null)
         {
-            return;
+            _ = coordinator.PublishAsync(state);
         }
-
-        if (!request.HasPayload)
-        {
-            var exception = new InvalidOperationException(
-                $"脱节报警 Passage 缺少原始 UDP 报文，未执行外部转发：{request.PassageId}。");
-            AlarmForwardFailed?.Invoke(this, request, exception);
-            return;
-        }
-
-        _ = SendAlarmForwardAsync(sender, request);
     }
 
-    private async Task SendAlarmForwardAsync(
-        IExternalDataInterface sender,
-        AlarmForwardRequest request)
+    private void OnExternalAlarmClearReceived(
+        ExternalAlarmClearCommand command,
+        IPEndPoint sourceEndpoint)
     {
         try
         {
-            await sender.SendAsync(request.Payload, CancellationToken.None).ConfigureAwait(false);
+            var processed = TryProcessExternalAlarmClear(command, _timeProvider.UtcNow);
+            ExternalAlarmClearProcessed?.Invoke(this, command, sourceEndpoint, processed);
         }
         catch (Exception exception)
         {
-            AlarmForwardFailed?.Invoke(this, request, exception);
+            ExternalAlarmReceiveError?.Invoke(this, exception);
         }
+    }
+
+    private void OnExternalAlarmFrameRejected(string reason, IPEndPoint sourceEndpoint) =>
+        ExternalAlarmFrameRejected?.Invoke(this, reason, sourceEndpoint);
+
+    private void OnExternalAlarmReceiveError(Exception exception) =>
+        ExternalAlarmReceiveError?.Invoke(this, exception);
+
+    private bool TryGetRuntimeState(RfidStationFrame frame, out StationRuntimeState state)
+    {
+        if (_runtimeCoordinator is not null)
+        {
+            if (frame.SourceEndpoint is not null &&
+                _runtimeCoordinator.EndpointStates.TryGetValue(
+                    new RfidStationEndpointKey(frame.SourceEndpoint, frame.StationAddress),
+                    out state!))
+            {
+                return true;
+            }
+
+            var protocolMatches = _runtimeCoordinator.EndpointStates
+                .Where(pair => pair.Key.ProtocolAddress == frame.StationAddress)
+                .Select(pair => pair.Value)
+                .ToArray();
+            var hasUsableSourceEndpoint = frame.SourceEndpoint is not null &&
+                frame.SourceEndpoint.Port is >= 1 and <= 65535 &&
+                !IPAddress.None.Equals(frame.SourceEndpoint.Address) &&
+                !IPAddress.Any.Equals(frame.SourceEndpoint.Address) &&
+                !IPAddress.IPv6Any.Equals(frame.SourceEndpoint.Address);
+            var canUseProtocolFallback = _stations
+                .Where(station => station.ProtocolAddress == frame.StationAddress)
+                .All(station => !station.TryResolveEndpoint(out _));
+            if ((!hasUsableSourceEndpoint || canUseProtocolFallback) && protocolMatches.Length == 1)
+            {
+                state = protocolMatches[0];
+                return true;
+            }
+        }
+
+        state = null!;
+        return false;
     }
 
     private void PublishCommandSent(byte stationAddress, RfidPollCommand command, DateTimeOffset sentAt)

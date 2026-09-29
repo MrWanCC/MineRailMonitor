@@ -17,6 +17,7 @@ using MineRailMonitor.Core.Acceptance;
 using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
 using MineRailMonitor.Core.Communication;
+using MineRailMonitor.Core.ExternalAlarm;
 using MineRailMonitor.Core.Protocol;
 using MineRailMonitor.Core.Recognition;
 using MineRailMonitor.Core.Services;
@@ -489,8 +490,11 @@ public partial class MainWindow : Window
         }
 
         _loadedProject.YardAlarmForwards = configurations.ToArray();
-        var senders = CreateAlarmForwardSenders(_loadedProject);
-        _yardCommunicationManager?.ApplyAlarmForwardSenders(senders);
+        var externalAlarmStatusCoordinators = CreateExternalAlarmStatusCoordinators(_loadedProject);
+        _yardCommunicationManager?.ApplyExternalAlarmStatusCoordinators(externalAlarmStatusCoordinators);
+        _externalInterfaceAvailable = externalAlarmStatusCoordinators.Count > 0;
+        UpdateHeaderStatusIndicators();
+        _monitorPage?.SetExternalInterfaceStatus(_externalInterfaceAvailable);
         _settingsPage.SetSaveResult("报警 UDP 转发配置已保存。", false);
         return true;
     }
@@ -664,13 +668,18 @@ public partial class MainWindow : Window
             _yardCommunicationManager.CommandSent -= OnYardCommandSent;
             _yardCommunicationManager.StationCommandSent -= OnYardStationCommandSent;
             _yardCommunicationManager.AlarmForwardFailed -= OnYardAlarmForwardFailed;
+            _yardCommunicationManager.ExternalAlarmStatusSendFailed -= OnYardExternalAlarmStatusSendFailed;
+            _yardCommunicationManager.ExternalAlarmClearProcessed -= OnYardExternalAlarmClearProcessed;
+            _yardCommunicationManager.ExternalAlarmFrameRejected -= OnYardExternalAlarmFrameRejected;
+            _yardCommunicationManager.ExternalAlarmReceiveError -= OnYardExternalAlarmReceiveError;
         }
         _yardCommunicationManager = null;
         _acceptanceRuntimeStateWriter?.Dispose();
         _acceptanceRuntimeStateWriter = null;
 
         YardCommunicationManager manager;
-        var alarmForwardSenders = CreateAlarmForwardSenders(project);
+        var externalAlarmStatusCoordinators = CreateExternalAlarmStatusCoordinators(project);
+        _externalInterfaceAvailable = externalAlarmStatusCoordinators.Count > 0;
         if (_acceptanceOptions.Enabled)
         {
             manager = new YardCommunicationManager(
@@ -678,7 +687,7 @@ public partial class MainWindow : Window
                 stations,
                 runtimeSettings,
                 _passageRecordStore,
-                alarmForwardSenders: new Dictionary<string, IExternalDataInterface>());
+                externalAlarmStatusCoordinators: externalAlarmStatusCoordinators);
         }
         else if (project.UsesLegacySharedListener || project.YardCommunications.Count == 0)
         {
@@ -688,7 +697,8 @@ public partial class MainWindow : Window
                 runtimeSettings,
                 _passageRecordStore,
                 listenAddress,
-                listenPort);
+                listenPort,
+                externalAlarmStatusCoordinators: externalAlarmStatusCoordinators);
         }
         else
         {
@@ -697,7 +707,7 @@ public partial class MainWindow : Window
                 stations,
                 runtimeSettings,
                 _passageRecordStore,
-                alarmForwardSenders: alarmForwardSenders);
+                externalAlarmStatusCoordinators: externalAlarmStatusCoordinators);
         }
 
         manager.DatagramReceived += OnYardDatagramReceived;
@@ -706,6 +716,10 @@ public partial class MainWindow : Window
         manager.CommandSent += OnYardCommandSent;
         manager.StationCommandSent += OnYardStationCommandSent;
         manager.AlarmForwardFailed += OnYardAlarmForwardFailed;
+        manager.ExternalAlarmStatusSendFailed += OnYardExternalAlarmStatusSendFailed;
+        manager.ExternalAlarmClearProcessed += OnYardExternalAlarmClearProcessed;
+        manager.ExternalAlarmFrameRejected += OnYardExternalAlarmFrameRejected;
+        manager.ExternalAlarmReceiveError += OnYardExternalAlarmReceiveError;
         _yardCommunicationManager = manager;
 
         var pendingClearRecords = _passageRecordStore.GetPendingClear();
@@ -886,6 +900,56 @@ public partial class MainWindow : Window
             exception);
     }
 
+    private void OnYardExternalAlarmStatusSendFailed(
+        YardCommunicationContext context,
+        ExternalAlarmStationSnapshot snapshot,
+        Exception exception)
+    {
+        var target = _loadedProject?.YardAlarmForwards
+            .FirstOrDefault(item => string.Equals(item.YardId, context.YardId, StringComparison.OrdinalIgnoreCase));
+        var targetText = target is null ? "未配置" : $"{target.TargetIp}:{target.TargetPort}";
+        ((App)Application.Current).Logger.Error(
+            $"外部报警状态 UDP 发送失败 Yard={context.YardId} " +
+            $"StationAddress=0x{snapshot.StationAddress:X2} Status={snapshot.Status} " +
+            $"VehicleCount={snapshot.AccumulatedVehicleCount} Target={targetText} " +
+            $"Error={exception.Message}",
+            exception);
+    }
+
+    private void OnYardExternalAlarmClearProcessed(
+        YardCommunicationContext context,
+        ExternalAlarmClearCommand command,
+        IPEndPoint sourceEndpoint,
+        bool processed)
+    {
+        var message =
+            $"外部报警清除命令 Yard={context.YardId} " +
+            $"StationAddress=0x{command.StationAddress:X2} " +
+            $"Source={sourceEndpoint} " +
+            (processed ? "已进入现有清除流程。" : "未找到对应待处理报警，已忽略。");
+        if (processed)
+        {
+            ((App)Application.Current).Logger.Information(message);
+        }
+        else
+        {
+            ((App)Application.Current).Logger.Warning(message);
+        }
+    }
+
+    private void OnYardExternalAlarmFrameRejected(
+        YardCommunicationContext context,
+        string reason,
+        IPEndPoint sourceEndpoint) =>
+        ((App)Application.Current).Logger.Warning(
+            $"外部报警 UDP 清除帧已丢弃 Yard={context.YardId} Source={sourceEndpoint} Reason={reason}");
+
+    private void OnYardExternalAlarmReceiveError(
+        YardCommunicationContext context,
+        Exception exception) =>
+        ((App)Application.Current).Logger.Error(
+            $"外部报警 UDP 接收异常 [{context.YardId}]。", exception);
+
     private async Task StopRuntimeThenCloseAsync()
     {
         try
@@ -904,6 +968,10 @@ public partial class MainWindow : Window
                 manager.CommandSent -= OnYardCommandSent;
                 manager.StationCommandSent -= OnYardStationCommandSent;
                 manager.AlarmForwardFailed -= OnYardAlarmForwardFailed;
+                manager.ExternalAlarmStatusSendFailed -= OnYardExternalAlarmStatusSendFailed;
+                manager.ExternalAlarmClearProcessed -= OnYardExternalAlarmClearProcessed;
+                manager.ExternalAlarmFrameRejected -= OnYardExternalAlarmFrameRejected;
+                manager.ExternalAlarmReceiveError -= OnYardExternalAlarmReceiveError;
                 _yardCommunicationManager = null;
             }
 
@@ -1529,6 +1597,36 @@ public partial class MainWindow : Window
         return senders;
     }
 
+    private IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator> CreateExternalAlarmStatusCoordinators(
+        ProjectConfig project)
+    {
+        if (_acceptanceOptions.Enabled)
+        {
+            return new Dictionary<string, ExternalAlarmStatusCoordinator>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (project.UsesLegacySharedListener)
+        {
+            return new Dictionary<string, ExternalAlarmStatusCoordinator>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var coordinators = new Dictionary<string, ExternalAlarmStatusCoordinator>(StringComparer.OrdinalIgnoreCase);
+        foreach (var configuration in project.YardAlarmForwards.Where(item => item is not null && item.Enabled))
+        {
+            if (!configuration.TryResolveEndpoint(out var endpoint))
+            {
+                continue;
+            }
+
+            var sender = new ExternalAlarmUdpSender(endpoint);
+            coordinators[configuration.YardId.Trim()] = new ExternalAlarmStatusCoordinator(
+                new ExternalAlarmFrameCodec(),
+                sender);
+        }
+
+        return coordinators;
+    }
+
     private bool IsCommunicationHealthy()
     {
         if (_yardCommunicationManager is null || _yardCommunicationManager.Contexts.Count == 0)
@@ -1614,7 +1712,7 @@ public partial class MainWindow : Window
         ApplyStatusIndicator(
             HeaderExternalStatusDot,
             HeaderExternalStatusText,
-            _externalInterfaceAvailable ? "外部接口正常" : "外部接口未配置",
+            _externalInterfaceAvailable ? "报警 UDP 已配置" : "报警 UDP 未配置",
             _externalInterfaceAvailable ? StatusIndicatorState.Healthy : StatusIndicatorState.Unavailable);
     }
 

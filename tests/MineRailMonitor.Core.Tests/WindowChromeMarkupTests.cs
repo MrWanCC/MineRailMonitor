@@ -34,13 +34,29 @@ public sealed class WindowChromeMarkupTests
         Assert.Contains("x:Name=\"HeaderSystemStatusDot\"", xaml);
         Assert.Contains("x:Name=\"HeaderRfidStatusDot\"", xaml);
         Assert.Contains("x:Name=\"HeaderExternalStatusDot\"", xaml);
-        Assert.Contains("Text=\"外部接口未配置\"", xaml);
+        Assert.Contains("Text=\"报警 UDP 未配置\"", xaml);
         Assert.DoesNotContain("系统正常 · 演示模式", xaml);
         Assert.DoesNotContain("读卡分站 · 未接入", xaml);
 
         var code = File.ReadAllText(LocateMainWindowCode());
         Assert.DoesNotContain("读卡分站 ·", code);
         Assert.Contains("UpdateHeaderStatusIndicators", code);
+        Assert.Contains("_externalInterfaceAvailable = externalAlarmStatusCoordinators.Count > 0", code);
+        var saveStart = code.IndexOf(
+            "private async Task<bool> SaveYardAlarmForwardsAsync",
+            StringComparison.Ordinal);
+        var nextMethodStart = code.IndexOf(
+            "private async Task<bool> SaveRfidStationsAsync",
+            saveStart,
+            StringComparison.Ordinal);
+        Assert.True(saveStart >= 0 && nextMethodStart > saveStart, "应能定位报警 UDP 配置保存方法。");
+        var saveMethod = code.Substring(saveStart, nextMethodStart - saveStart);
+        Assert.Contains("SetExternalInterfaceStatus(_externalInterfaceAvailable)", saveMethod);
+        Assert.DoesNotContain(
+            "SetSystemHealth(databaseHealthy: true, externalInterfaceAvailable: _externalInterfaceAvailable)",
+            saveMethod);
+        Assert.Contains("报警 UDP 已配置", code);
+        Assert.Contains("报警 UDP 未配置", code);
     }
 
     [Fact]

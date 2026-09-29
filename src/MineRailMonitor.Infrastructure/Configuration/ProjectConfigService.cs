@@ -694,15 +694,27 @@ public sealed class ProjectConfigService : IProjectConfigService
                 errors.Add($"站场通信接口所属站场不存在：{yardId}。");
             }
 
-            if (!configuration.Enabled || !configuration.TryResolveEndpoint(out var endpoint))
+            if (!configuration.Enabled)
             {
                 continue;
             }
 
-            var endpointKey = $"{endpoint.Address}|{endpoint.Port}";
-            if (!seenEndpoints.Add(endpointKey))
+            if (configuration.TryResolveEndpoint(out var endpoint))
             {
-                errors.Add($"启用的站场监听端点重复：{endpoint}，监听端点重复。");
+                var endpointKey = $"{endpoint.Address}|{endpoint.Port}";
+                if (!seenEndpoints.Add(endpointKey))
+                {
+                    errors.Add($"启用的站场监听端点重复：{endpoint}，监听端点重复。");
+                }
+            }
+
+            if (configuration.TryResolveExternalAlarmEndpoint(out var externalEndpoint))
+            {
+                var externalEndpointKey = $"{externalEndpoint.Address}|{externalEndpoint.Port}";
+                if (!seenEndpoints.Add(externalEndpointKey))
+                {
+                    errors.Add($"启用的外部报警监听端点重复：{externalEndpoint}，监听端点重复。");
+                }
             }
         }
     }
@@ -771,6 +783,7 @@ public sealed class ProjectConfigService : IProjectConfigService
         ["YardId"] = configuration.YardId.Trim(),
         ["ListenIp"] = configuration.ListenIp.Trim(),
         ["ListenPort"] = configuration.ListenPort,
+        ["ExternalAlarmListenPort"] = configuration.ExternalAlarmListenPort,
         ["Enabled"] = configuration.Enabled
     };
 
@@ -871,6 +884,7 @@ public sealed class ProjectConfigService : IProjectConfigService
             public string YardId { get; set; } = string.Empty;
             public string ListenIp { get; set; } = string.Empty;
             public int ListenPort { get; set; }
+            public int ExternalAlarmListenPort { get; set; }
             public bool Enabled { get; set; } = true;
 
             public YardCommunicationConfig ToConfig() => new()
@@ -878,6 +892,7 @@ public sealed class ProjectConfigService : IProjectConfigService
                 YardId = YardId,
                 ListenIp = ListenIp,
                 ListenPort = ListenPort,
+                ExternalAlarmListenPort = ExternalAlarmListenPort,
                 Enabled = Enabled
             };
         }

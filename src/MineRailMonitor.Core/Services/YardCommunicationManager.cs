@@ -1,5 +1,6 @@
 using System.Net;
 using MineRailMonitor.Core.Communication;
+using MineRailMonitor.Core.ExternalAlarm;
 using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
 
@@ -17,6 +18,7 @@ public sealed class YardCommunicationManager : IDisposable
     private readonly IPassageRecordStore _recordStore;
     private readonly IRfidTimeProvider? _timeProvider;
     private IReadOnlyDictionary<string, IExternalDataInterface> _alarmForwardSenders;
+    private IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator> _externalAlarmStatusCoordinators;
     private RfidSettings _settings;
     private readonly IReadOnlyList<string> _diagnostics;
     private bool _isStarted;
@@ -28,7 +30,8 @@ public sealed class YardCommunicationManager : IDisposable
         RfidSettings settings,
         IPassageRecordStore recordStore,
         IRfidTimeProvider? timeProvider = null,
-        IReadOnlyDictionary<string, IExternalDataInterface>? alarmForwardSenders = null)
+        IReadOnlyDictionary<string, IExternalDataInterface>? alarmForwardSenders = null,
+        IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator>? externalAlarmStatusCoordinators = null)
     {
         if (configurations is null) throw new ArgumentNullException(nameof(configurations));
         if (stations is null) throw new ArgumentNullException(nameof(stations));
@@ -39,6 +42,7 @@ public sealed class YardCommunicationManager : IDisposable
         _recordStore = recordStore;
         _timeProvider = timeProvider;
         _alarmForwardSenders = CopyAlarmForwardSenders(alarmForwardSenders);
+        _externalAlarmStatusCoordinators = CopyExternalAlarmStatusCoordinators(externalAlarmStatusCoordinators);
         _stations = stations.Where(item => item is not null).ToArray();
 
         var diagnostics = new List<string>();
@@ -110,6 +114,14 @@ public sealed class YardCommunicationManager : IDisposable
     public event Action<YardCommunicationContext, RfidStationConfig, RfidPollCommand, DateTimeOffset>? StationCommandSent;
 
     public event Action<YardCommunicationContext, AlarmForwardRequest, Exception>? AlarmForwardFailed;
+
+    public event Action<YardCommunicationContext, ExternalAlarmStationSnapshot, Exception>? ExternalAlarmStatusSendFailed;
+
+    public event Action<YardCommunicationContext, ExternalAlarmClearCommand, IPEndPoint, bool>? ExternalAlarmClearProcessed;
+
+    public event Action<YardCommunicationContext, string, IPEndPoint>? ExternalAlarmFrameRejected;
+
+    public event Action<YardCommunicationContext, Exception>? ExternalAlarmReceiveError;
 
     public YardCommunicationContext? GetContext(string yardId)
     {
@@ -233,6 +245,29 @@ public sealed class YardCommunicationManager : IDisposable
         DisposeReplacedSenders(previousSenders, _alarmForwardSenders);
     }
 
+    public void ApplyExternalAlarmStatusCoordinators(
+        IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator> externalAlarmStatusCoordinators)
+    {
+        if (externalAlarmStatusCoordinators is null)
+        {
+            throw new ArgumentNullException(nameof(externalAlarmStatusCoordinators));
+        }
+
+        ThrowIfDisposed();
+        var previousCoordinators = _externalAlarmStatusCoordinators;
+        _externalAlarmStatusCoordinators = CopyExternalAlarmStatusCoordinators(externalAlarmStatusCoordinators);
+        foreach (var context in _contexts.Values)
+        {
+            var coordinator = context.IsLegacySharedListener
+                ? null
+                : _externalAlarmStatusCoordinators.TryGetValue(context.YardId, out var configuredCoordinator)
+                    ? configuredCoordinator
+                    : null;
+            context.UpdateExternalAlarmStatusCoordinator(coordinator);
+        }
+        DisposeReplacedCoordinators(previousCoordinators, _externalAlarmStatusCoordinators);
+    }
+
     public Task StartYardAsync(string yardId, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -295,6 +330,9 @@ public sealed class YardCommunicationManager : IDisposable
         }
         _contexts.Clear();
         DisposeSenders(_alarmForwardSenders.Values);
+        DisposeReplacedCoordinators(
+            _externalAlarmStatusCoordinators,
+            new Dictionary<string, ExternalAlarmStatusCoordinator>());
     }
 
     private YardCommunicationContext CreateContext(YardCommunicationConfig configuration)
@@ -305,6 +343,15 @@ public sealed class YardCommunicationManager : IDisposable
                 station.YardId?.Trim(),
                 configuration.YardId?.Trim(),
                 StringComparison.OrdinalIgnoreCase)).ToArray();
+
+        ExternalAlarmUdpReceiver? externalAlarmUdpReceiver = null;
+        if (!configuration.IsLegacySharedListener &&
+            configuration.Enabled &&
+            configuration.TryResolveExternalAlarmEndpoint(out var externalAlarmEndpoint))
+        {
+            externalAlarmUdpReceiver = new ExternalAlarmUdpReceiver(externalAlarmEndpoint);
+        }
+
         return new YardCommunicationContext(
             configuration,
             contextStations,
@@ -315,7 +362,15 @@ public sealed class YardCommunicationManager : IDisposable
                 ? null
                 : _alarmForwardSenders.TryGetValue(configuration.YardId.Trim(), out var sender)
                     ? sender
-                    : null);
+                    : null,
+            configuration.IsLegacySharedListener
+                ? null
+                : _externalAlarmStatusCoordinators.TryGetValue(
+                    configuration.YardId.Trim(),
+                    out var externalAlarmStatusCoordinator)
+                    ? externalAlarmStatusCoordinator
+                    : null,
+            externalAlarmUdpReceiver);
     }
 
     private async Task ReplaceContextAsync(
@@ -354,6 +409,7 @@ public sealed class YardCommunicationManager : IDisposable
         string.Equals(left.YardId?.Trim(), right.YardId?.Trim(), StringComparison.OrdinalIgnoreCase) &&
         string.Equals(left.ListenIp?.Trim(), right.ListenIp?.Trim(), StringComparison.OrdinalIgnoreCase) &&
         left.ListenPort == right.ListenPort &&
+        left.ExternalAlarmListenPort == right.ExternalAlarmListenPort &&
         left.Enabled == right.Enabled &&
         left.IsLegacySharedListener == right.IsLegacySharedListener;
 
@@ -363,17 +419,26 @@ public sealed class YardCommunicationManager : IDisposable
         var seenEndpoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var configuration in configurations.Where(item => item.Enabled))
         {
-            if (!configuration.TryResolveEndpoint(out var endpoint))
+            if (configuration.TryResolveEndpoint(out var endpoint))
             {
-                continue;
+                var endpointKey = $"{endpoint.Address}|{endpoint.Port}";
+                if (!seenEndpoints.Add(endpointKey))
+                {
+                    throw new ArgumentException(
+                        $"启用的站场监听端点重复：{endpoint}，监听端点重复。",
+                        nameof(configurations));
+                }
             }
 
-            var endpointKey = $"{endpoint.Address}|{endpoint.Port}";
-            if (!seenEndpoints.Add(endpointKey))
+            if (configuration.TryResolveExternalAlarmEndpoint(out var externalEndpoint))
             {
-                throw new ArgumentException(
-                    $"启用的站场监听端点重复：{endpoint}，监听端点重复。",
-                    nameof(configurations));
+                var endpointKey = $"{externalEndpoint.Address}|{externalEndpoint.Port}";
+                if (!seenEndpoints.Add(endpointKey))
+                {
+                    throw new ArgumentException(
+                        $"启用的外部报警监听端点重复：{externalEndpoint}，监听端点重复。",
+                        nameof(configurations));
+                }
             }
         }
     }
@@ -386,6 +451,10 @@ public sealed class YardCommunicationManager : IDisposable
         context.CommandSent += OnContextCommandSent;
         context.StationCommandSent += OnContextStationCommandSent;
         context.AlarmForwardFailed += OnContextAlarmForwardFailed;
+        context.ExternalAlarmStatusSendFailed += OnContextExternalAlarmStatusSendFailed;
+        context.ExternalAlarmClearProcessed += OnContextExternalAlarmClearProcessed;
+        context.ExternalAlarmFrameRejected += OnContextExternalAlarmFrameRejected;
+        context.ExternalAlarmReceiveError += OnContextExternalAlarmReceiveError;
     }
 
     private void DetachContext(YardCommunicationContext context)
@@ -400,6 +469,10 @@ public sealed class YardCommunicationManager : IDisposable
         context.CommandSent -= OnContextCommandSent;
         context.StationCommandSent -= OnContextStationCommandSent;
         context.AlarmForwardFailed -= OnContextAlarmForwardFailed;
+        context.ExternalAlarmStatusSendFailed -= OnContextExternalAlarmStatusSendFailed;
+        context.ExternalAlarmClearProcessed -= OnContextExternalAlarmClearProcessed;
+        context.ExternalAlarmFrameRejected -= OnContextExternalAlarmFrameRejected;
+        context.ExternalAlarmReceiveError -= OnContextExternalAlarmReceiveError;
     }
 
     private void DetachDatagramEvents(YardCommunicationContext context)
@@ -414,7 +487,8 @@ public sealed class YardCommunicationManager : IDisposable
         IPassageRecordStore recordStore,
         IPAddress listenAddress,
         int listenPort,
-        IRfidTimeProvider? timeProvider = null)
+        IRfidTimeProvider? timeProvider = null,
+        IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator>? externalAlarmStatusCoordinators = null)
     {
         return new YardCommunicationManager(
             new[]
@@ -431,7 +505,8 @@ public sealed class YardCommunicationManager : IDisposable
             stations,
             settings,
             recordStore,
-            timeProvider);
+            timeProvider,
+            externalAlarmStatusCoordinators: externalAlarmStatusCoordinators);
     }
 
     private YardCommunicationContext GetRequiredContext(string yardId)
@@ -469,6 +544,30 @@ public sealed class YardCommunicationManager : IDisposable
         Exception exception) =>
         AlarmForwardFailed?.Invoke(context, request, exception);
 
+    private void OnContextExternalAlarmStatusSendFailed(
+        YardCommunicationContext context,
+        ExternalAlarmStationSnapshot snapshot,
+        Exception exception) =>
+        ExternalAlarmStatusSendFailed?.Invoke(context, snapshot, exception);
+
+    private void OnContextExternalAlarmClearProcessed(
+        YardCommunicationContext context,
+        ExternalAlarmClearCommand command,
+        IPEndPoint sourceEndpoint,
+        bool processed) =>
+        ExternalAlarmClearProcessed?.Invoke(context, command, sourceEndpoint, processed);
+
+    private void OnContextExternalAlarmFrameRejected(
+        YardCommunicationContext context,
+        string reason,
+        IPEndPoint sourceEndpoint) =>
+        ExternalAlarmFrameRejected?.Invoke(context, reason, sourceEndpoint);
+
+    private void OnContextExternalAlarmReceiveError(
+        YardCommunicationContext context,
+        Exception exception) =>
+        ExternalAlarmReceiveError?.Invoke(context, exception);
+
     private static IReadOnlyDictionary<string, IExternalDataInterface> CopyAlarmForwardSenders(
         IReadOnlyDictionary<string, IExternalDataInterface>? senders)
     {
@@ -479,6 +578,28 @@ public sealed class YardCommunicationManager : IDisposable
         }
 
         foreach (var pair in senders)
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
+            {
+                continue;
+            }
+
+            result[pair.Key.Trim()] = pair.Value;
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator> CopyExternalAlarmStatusCoordinators(
+        IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator>? coordinators)
+    {
+        var result = new Dictionary<string, ExternalAlarmStatusCoordinator>(StringComparer.OrdinalIgnoreCase);
+        if (coordinators is null)
+        {
+            return result;
+        }
+
+        foreach (var pair in coordinators)
         {
             if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
             {
@@ -510,6 +631,24 @@ public sealed class YardCommunicationManager : IDisposable
                 disposable.Dispose();
                 disposed.Add(sender);
             }
+        }
+    }
+
+    private static void DisposeReplacedCoordinators(
+        IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator> previous,
+        IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator> current)
+    {
+        var disposed = new List<ExternalAlarmStatusCoordinator>();
+        foreach (var previousCoordinator in previous.Values)
+        {
+            if (current.Values.Any(currentCoordinator => ReferenceEquals(previousCoordinator, currentCoordinator)) ||
+                disposed.Any(item => ReferenceEquals(item, previousCoordinator)))
+            {
+                continue;
+            }
+
+            previousCoordinator.Dispose();
+            disposed.Add(previousCoordinator);
         }
     }
 

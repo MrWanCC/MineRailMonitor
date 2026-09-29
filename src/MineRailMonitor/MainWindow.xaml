@@ -64,7 +64,7 @@
                         </StackPanel>
                         <StackPanel Orientation="Horizontal">
                             <Ellipse x:Name="HeaderExternalStatusDot" Style="{StaticResource HeaderStatusDotStyle}" />
-                            <TextBlock x:Name="HeaderExternalStatusText" Text="外部接口未配置" Style="{StaticResource HeaderStatusTextStyle}" />
+                            <TextBlock x:Name="HeaderExternalStatusText" Text="报警 UDP 未配置" Style="{StaticResource HeaderStatusTextStyle}" />
                         </StackPanel>
                     </StackPanel>
                     <StackPanel x:Name="AdminModeBanner" Orientation="Horizontal" Visibility="Collapsed"

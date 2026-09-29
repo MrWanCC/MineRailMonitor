@@ -55,6 +55,7 @@ public partial class YardCommunicationConfigDialog : Window
         DisplayName = NormalizeDisplayName(row.DisplayName),
         ListenIp = row.ListenIp,
         ListenPort = row.ListenPort,
+        ExternalAlarmListenPort = row.ExternalAlarmListenPort,
         Enabled = row.Enabled,
         AlarmForwardIp = row.AlarmForwardIp,
         AlarmForwardPort = row.AlarmForwardPort,

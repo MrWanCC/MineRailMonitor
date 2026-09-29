@@ -101,6 +101,13 @@ public partial class MonitorPage : UserControl
         RefreshRfidOverviewMetrics();
     }
 
+    public void SetExternalInterfaceStatus(bool externalInterfaceAvailable)
+    {
+        _externalInterfaceAvailable = externalInterfaceAvailable;
+        UpdateSystemStatusIndicators();
+        RefreshRfidOverviewMetrics();
+    }
+
     public void SetSystemRfidStatus(bool listenerHealthy)
     {
         _rfidListenerHealthy = listenerHealthy;
@@ -388,7 +395,7 @@ public partial class MonitorPage : UserControl
         ApplySystemIndicator(
             SystemExternalStatusDot,
             SystemExternalStatusText,
-            _externalInterfaceAvailable ? "外部接口 正常" : "外部接口 未配置",
+            _externalInterfaceAvailable ? "报警 UDP 已配置" : "报警 UDP 未配置",
             _externalInterfaceAvailable ? SystemHealthState.Healthy : SystemHealthState.Unavailable);
     }
 
@@ -465,7 +472,7 @@ public partial class MonitorPage : UserControl
         OverviewDatabaseDisplayText.Text = _databaseHealthy ? "正常" : "异常";
         OverviewDatabaseDisplayText.Foreground = GetSystemStatusBrush(
             _databaseHealthy ? SystemHealthState.Healthy : SystemHealthState.Error);
-        OverviewExternalDisplayText.Text = _externalInterfaceAvailable ? "正常" : "未配置";
+        OverviewExternalDisplayText.Text = _externalInterfaceAvailable ? "已配置" : "未配置";
         OverviewExternalDisplayText.Foreground = GetSystemStatusBrush(
             _externalInterfaceAvailable ? SystemHealthState.Healthy : SystemHealthState.Unavailable);
     }

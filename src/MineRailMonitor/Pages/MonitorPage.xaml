@@ -396,7 +396,7 @@
                             </Grid>
                             <Grid Grid.Row="2" Grid.Column="1" Margin="6,0,0,0">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                <TextBlock Text="外部接口" Style="{StaticResource InfoRowLabelStyle}" />
+                                <TextBlock Text="报警 UDP" Style="{StaticResource InfoRowLabelStyle}" />
                                 <TextBlock x:Name="OverviewExternalDisplayText" Grid.Column="1" Text="未配置" Style="{StaticResource InfoRowValueStyle}" Foreground="{StaticResource OfflineBrush}" HorizontalAlignment="Right" />
                             </Grid>
                             <TextBlock x:Name="OverviewDatabaseText" Text="正常" Visibility="Collapsed" />
@@ -651,7 +651,7 @@
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="4,1,4,1">
                                     <Ellipse x:Name="SystemExternalStatusDot" Width="10" Height="10" Fill="{StaticResource OfflineBrush}" Margin="0,0,6,0" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="SystemExternalStatusText" Text="外部接口 未配置" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" />
+                                    <TextBlock x:Name="SystemExternalStatusText" Text="报警 UDP 未配置" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" />
                                 </StackPanel>
                             </UniformGrid>
                             <TextBlock x:Name="RecognitionSnapshotText" Text="当前列车：-" Foreground="{StaticResource TextSecondaryBrush}"

@@ -16,8 +16,13 @@ public sealed class YardAlarmForwardConfig
     public int TargetPort { get; set; }
 
     /// <summary>
-    /// Optional fixed local source port for external alarm UDP. Zero keeps OS-selected behavior.
+    /// Legacy source-port value retained for old project files.
     /// </summary>
+    /// <remarks>
+    /// Obsolete: runtime External Alarm communication does not use this property. The active
+    /// local endpoint comes from <see cref="YardCommunicationConfig.ExternalAlarmListenIp" />
+    /// and <see cref="YardCommunicationConfig.ExternalAlarmListenPort" />.
+    /// </remarks>
     public int SourcePort { get; set; }
 
     public IReadOnlyList<string> Validate()
@@ -71,6 +76,11 @@ public sealed class YardAlarmForwardConfig
         return false;
     }
 
+    /// <summary>
+    /// Resolves the legacy source endpoint for compatibility tooling only.
+    /// </summary>
+    /// <remarks>Obsolete: the application runtime must not call this method.</remarks>
+    [Obsolete("仅为旧配置兼容保留；运行时 External Alarm 不使用 SourcePort。", false)]
     public bool TryResolveSourceEndpoint(IPAddress localAddress, out IPEndPoint endpoint)
     {
         if (SourcePort is >= 1 and <= 65535 && localAddress is not null)

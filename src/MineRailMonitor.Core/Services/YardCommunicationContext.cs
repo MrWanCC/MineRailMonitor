@@ -197,6 +197,8 @@ public sealed class YardCommunicationContext : IDisposable
 
     public event Action<YardCommunicationContext, ExternalAlarmStationSnapshot, byte[]>? ExternalAlarmStatusSent;
 
+    public event Action<YardCommunicationContext, ExternalAlarmStationSnapshot>? ExternalAlarmStatusUpdated;
+
     public event Action<YardCommunicationContext, byte[], IPEndPoint, bool, DateTimeOffset>? ExternalAlarmFrameReceived;
 
     public event Action<YardCommunicationContext, ExternalAlarmClearCommand, IPEndPoint, bool>? ExternalAlarmClearProcessed;
@@ -817,6 +819,9 @@ public sealed class YardCommunicationContext : IDisposable
         if (coordinator is not null)
         {
             _ = coordinator.PublishAsync(state);
+            ExternalAlarmStatusUpdated?.Invoke(
+                this,
+                ExternalAlarmStatusMapper.FromRuntimeState(state));
         }
     }
 
@@ -831,13 +836,19 @@ public sealed class YardCommunicationContext : IDisposable
             coordinator = _externalAlarmStatusCoordinator;
         }
 
+        var recoverySnapshot = new ExternalAlarmStationSnapshot(
+            stationAddress: state.StationAddress,
+            status: ExternalAlarmStatus.Normal,
+            accumulatedVehicleCount: detectedVehicleCount,
+            stationId: state.StationId);
         coordinator?.UpdateSnapshot(
-            state.StationId,
-            new ExternalAlarmStationSnapshot(
-                state.StationAddress,
-                ExternalAlarmStatus.Normal,
-                detectedVehicleCount),
-            updatedAt);
+            stationId: state.StationId,
+            snapshot: recoverySnapshot,
+            updatedAt: updatedAt);
+        if (coordinator is not null)
+        {
+            ExternalAlarmStatusUpdated?.Invoke(this, recoverySnapshot);
+        }
     }
 
     private void OnExternalAlarmClearReceived(
@@ -846,7 +857,27 @@ public sealed class YardCommunicationContext : IDisposable
     {
         try
         {
-            var processed = TryProcessExternalAlarmClear(command, _timeProvider.UtcNow);
+            var acknowledgedAt = _timeProvider.UtcNow;
+            ExternalAlarmStatusCoordinator? coordinator;
+            lock (_syncRoot)
+            {
+                coordinator = _externalAlarmStatusCoordinator;
+            }
+
+            var externalAlarmReleased = false;
+            if (coordinator is not null)
+            {
+                externalAlarmReleased = coordinator.TryReleaseAlarm(
+                    command.StationAddress,
+                    acknowledgedAt,
+                    out var releasedSnapshot);
+                if (externalAlarmReleased)
+                {
+                    ExternalAlarmStatusUpdated?.Invoke(this, releasedSnapshot);
+                }
+            }
+            var runtimeAcknowledged = TryProcessExternalAlarmClear(command, acknowledgedAt);
+            var processed = externalAlarmReleased || runtimeAcknowledged;
             ExternalAlarmClearProcessed?.Invoke(this, command, sourceEndpoint, processed);
         }
         catch (Exception exception)

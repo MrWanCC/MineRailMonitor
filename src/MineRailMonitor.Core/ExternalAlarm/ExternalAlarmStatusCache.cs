@@ -31,7 +31,8 @@ public sealed class ExternalAlarmStatusCache
                     new ExternalAlarmStationSnapshot(
                         stationAddress,
                         ExternalAlarmStatus.NoVehicle,
-                        0),
+                        0,
+                        key),
                     updatedAt ?? DateTimeOffset.UtcNow);
             }
         }
@@ -53,10 +54,60 @@ public sealed class ExternalAlarmStatusCache
         {
             var key = stationId.Trim();
             var effectiveUpdatedAt = updatedAt ?? DateTimeOffset.UtcNow;
+            var stationSnapshot = string.Equals(
+                snapshot.StationId,
+                key,
+                StringComparison.OrdinalIgnoreCase)
+                ? snapshot
+                : new ExternalAlarmStationSnapshot(
+                    snapshot.StationAddress,
+                    snapshot.Status,
+                    snapshot.AccumulatedVehicleCount,
+                    key,
+                    snapshot.AlarmLatched,
+                    snapshot.AlarmTime);
+            var incoming = NormalizeIncomingSnapshot(stationSnapshot, effectiveUpdatedAt);
+            if (_snapshots.TryGetValue(key, out var existing) &&
+                existing.Snapshot.AlarmLatched &&
+                incoming.Status == ExternalAlarmStatus.UncouplingAlarm &&
+                existing.Snapshot.AlarmTime.HasValue)
+            {
+                incoming = new ExternalAlarmStationSnapshot(
+                    incoming.StationAddress,
+                    incoming.Status,
+                    incoming.AccumulatedVehicleCount,
+                    incoming.StationId,
+                    alarmLatched: true,
+                    alarmTime: existing.Snapshot.AlarmTime);
+            }
+
             if (_snapshots.TryGetValue(key, out var previous) &&
-                previous.Snapshot.StationAddress == snapshot.StationAddress &&
-                previous.Snapshot.Status == snapshot.Status &&
-                previous.Snapshot.AccumulatedVehicleCount == snapshot.AccumulatedVehicleCount)
+                previous.IgnoreAlarmUntilNonAlarm &&
+                incoming.Status == ExternalAlarmStatus.UncouplingAlarm)
+            {
+                return;
+            }
+
+            var clearAlarmTransition = _snapshots.TryGetValue(key, out previous) &&
+                previous.IgnoreAlarmUntilNonAlarm &&
+                incoming.Status != ExternalAlarmStatus.UncouplingAlarm;
+            if (_snapshots.TryGetValue(key, out previous) &&
+                previous.Snapshot.StationAddress == incoming.StationAddress &&
+                previous.Snapshot.Status == incoming.Status &&
+                previous.Snapshot.AccumulatedVehicleCount == incoming.AccumulatedVehicleCount &&
+                previous.Snapshot.AlarmLatched == incoming.AlarmLatched)
+            {
+                if (clearAlarmTransition)
+                {
+                    _snapshots[key] = new SnapshotEntry(incoming, previous.UpdatedAt);
+                }
+
+                return;
+            }
+
+            if (_snapshots.TryGetValue(key, out previous) &&
+                previous.Snapshot.AlarmLatched &&
+                incoming.Status != ExternalAlarmStatus.UncouplingAlarm)
             {
                 return;
             }
@@ -66,13 +117,51 @@ public sealed class ExternalAlarmStatusCache
             // two-minute retention window expires.
             if (_snapshots.TryGetValue(key, out previous) &&
                 previous.Snapshot.Status == ExternalAlarmStatus.Normal &&
-                snapshot.Status == ExternalAlarmStatus.NoVehicle &&
+                incoming.Status == ExternalAlarmStatus.NoVehicle &&
                 effectiveUpdatedAt - previous.UpdatedAt < DefaultNormalRetention)
             {
+                if (clearAlarmTransition)
+                {
+                    _snapshots[key] = new SnapshotEntry(
+                        previous.Snapshot,
+                        previous.UpdatedAt);
+                }
+
                 return;
             }
 
-            _snapshots[key] = new SnapshotEntry(snapshot, effectiveUpdatedAt);
+            _snapshots[key] = new SnapshotEntry(incoming, effectiveUpdatedAt);
+        }
+    }
+
+    public bool TryReleaseAlarm(
+        byte stationAddress,
+        DateTimeOffset releasedAt,
+        out ExternalAlarmStationSnapshot snapshot)
+    {
+        lock (_syncRoot)
+        {
+            var matches = _snapshots
+                .Where(pair => pair.Value.Snapshot.StationAddress == stationAddress)
+                .Where(pair => pair.Value.Snapshot.AlarmLatched)
+                .ToArray();
+            if (matches.Length != 1)
+            {
+                snapshot = null!;
+                return false;
+            }
+
+            var current = matches[0].Value.Snapshot;
+            snapshot = new ExternalAlarmStationSnapshot(
+                current.StationAddress,
+                ExternalAlarmStatus.Normal,
+                current.AccumulatedVehicleCount,
+                current.StationId);
+            _snapshots[matches[0].Key] = new SnapshotEntry(
+                snapshot,
+                releasedAt,
+                ignoreAlarmUntilNonAlarm: true);
+            return true;
         }
     }
 
@@ -147,13 +236,15 @@ public sealed class ExternalAlarmStatusCache
             }
 
             if (entry.Snapshot.Status == ExternalAlarmStatus.Normal &&
+                !entry.Snapshot.AlarmLatched &&
                 now - entry.UpdatedAt >= normalRetention)
             {
                 entry = new SnapshotEntry(
                     new ExternalAlarmStationSnapshot(
                         entry.Snapshot.StationAddress,
                         ExternalAlarmStatus.NoVehicle,
-                        0),
+                        0,
+                        entry.Snapshot.StationId),
                     now);
                 _snapshots[stationId.Trim()] = entry;
             }
@@ -172,14 +263,39 @@ public sealed class ExternalAlarmStatusCache
 
     private sealed class SnapshotEntry
     {
-        public SnapshotEntry(ExternalAlarmStationSnapshot snapshot, DateTimeOffset updatedAt)
+        public SnapshotEntry(
+            ExternalAlarmStationSnapshot snapshot,
+            DateTimeOffset updatedAt,
+            bool ignoreAlarmUntilNonAlarm = false)
         {
             Snapshot = snapshot;
             UpdatedAt = updatedAt;
+            IgnoreAlarmUntilNonAlarm = ignoreAlarmUntilNonAlarm;
         }
 
         public ExternalAlarmStationSnapshot Snapshot { get; }
 
         public DateTimeOffset UpdatedAt { get; }
+
+        public bool IgnoreAlarmUntilNonAlarm { get; }
+    }
+
+    private static ExternalAlarmStationSnapshot NormalizeIncomingSnapshot(
+        ExternalAlarmStationSnapshot snapshot,
+        DateTimeOffset updatedAt)
+    {
+        if (snapshot.Status != ExternalAlarmStatus.UncouplingAlarm ||
+            (snapshot.AlarmLatched && snapshot.AlarmTime.HasValue))
+        {
+            return snapshot;
+        }
+
+        return new ExternalAlarmStationSnapshot(
+            snapshot.StationAddress,
+            snapshot.Status,
+            snapshot.AccumulatedVehicleCount,
+            snapshot.StationId,
+            alarmLatched: true,
+            alarmTime: updatedAt);
     }
 }

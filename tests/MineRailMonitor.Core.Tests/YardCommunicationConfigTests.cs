@@ -57,4 +57,22 @@ public sealed class YardCommunicationConfigTests
 
         Assert.Contains(errors, error => error.IndexOf("本机固定收发端口", StringComparison.Ordinal) >= 0);
     }
+
+    [Fact]
+    public void Rejects_external_alarm_port_equal_to_rfid_listener_port()
+    {
+        var config = new YardCommunicationConfig
+        {
+            YardId = "560",
+            ListenIp = IPAddress.Loopback.ToString(),
+            ListenPort = 58112,
+            ExternalAlarmListenIp = IPAddress.Loopback.ToString(),
+            ExternalAlarmListenPort = 58112,
+            Enabled = true
+        };
+
+        var errors = config.Validate();
+
+        Assert.Contains(errors, error => error.IndexOf("不能复用 RFID 监听端口", StringComparison.Ordinal) >= 0);
+    }
 }

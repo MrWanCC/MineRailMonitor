@@ -3,7 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:MineRailMonitor.Pages"
         Title="独立通信配置"
-        Width="720"
+        Width="740"
+        MinWidth="740"
+        MinHeight="560"
         SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
@@ -13,18 +15,28 @@
         Foreground="{StaticResource TextPrimaryBrush}"
         ShowInTaskbar="False">
     <Window.Resources>
+        <SolidColorBrush x:Key="DialogBackgroundBrush" Color="#021A30" />
+        <LinearGradientBrush x:Key="DialogHeaderBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#063456" Offset="0" />
+            <GradientStop Color="#021A31" Offset="1" />
+        </LinearGradientBrush>
+        <LinearGradientBrush x:Key="DialogSectionBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#063052" Offset="0" />
+            <GradientStop Color="#03233F" Offset="1" />
+        </LinearGradientBrush>
+
         <Style x:Key="ConfigTextBoxStyle" TargetType="TextBox">
             <Setter Property="Height" Value="34" />
-            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="Padding" Value="12,0" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="Background" Value="#061F35" />
-            <Setter Property="BorderBrush" Value="#15516E" />
+            <Setter Property="Background" Value="#031F3B" />
+            <Setter Property="BorderBrush" Value="#0C78B4" />
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
             <Setter Property="FontSize" Value="13" />
         </Style>
 
         <Style x:Key="ConfigButtonStyle" TargetType="Button">
-            <Setter Property="Height" Value="34" />
+            <Setter Property="Height" Value="36" />
             <Setter Property="MinWidth" Value="88" />
             <Setter Property="Padding" Value="16,0" />
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
@@ -69,64 +81,57 @@
         </Style>
 
         <Style x:Key="ConfigPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource ConfigButtonStyle}">
-            <Setter Property="Background" Value="#087FBA" />
-            <Setter Property="BorderBrush" Value="#15B9F0" />
+            <Setter Property="Background" Value="#078BCD" />
+            <Setter Property="BorderBrush" Value="#18B9EF" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
-        <Style x:Key="ConfigCheckBoxStyle" TargetType="CheckBox">
-            <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="HorizontalContentAlignment" Value="Left" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="VerticalAlignment" Value="Bottom" />
-            <Setter Property="Margin" Value="18,0,0,7" />
+        <Style x:Key="ConfigToggleStyle" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
-                        <Grid VerticalAlignment="{TemplateBinding VerticalContentAlignment}">
+                        <Grid VerticalAlignment="Center">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="14" />
-                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="36" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <Border x:Name="CheckBoxBorder"
-                                    Width="14"
-                                    Height="14"
-                                    Background="#0B3555"
-                                    BorderBrush="{TemplateBinding Foreground}"
-                                    BorderThickness="1"
-                                    CornerRadius="2"
+                            <Border x:Name="ToggleTrack"
+                                    Width="34"
+                                    Height="18"
+                                    Background="#29465B"
+                                    CornerRadius="9"
                                     VerticalAlignment="Center">
-                                <Path x:Name="CheckMark"
-                                      Data="M 2,7 L 5.5,10.5 L 12,3"
-                                      Stroke="{TemplateBinding Foreground}"
-                                      StrokeThickness="1.6"
-                                      StrokeStartLineCap="Round"
-                                      StrokeEndLineCap="Round"
-                                      StrokeLineJoin="Round"
-                                      Visibility="Collapsed" />
+                                <Ellipse x:Name="ToggleThumb"
+                                         Width="12"
+                                         Height="12"
+                                         Fill="#D8E8F2"
+                                         HorizontalAlignment="Left"
+                                         VerticalAlignment="Center"
+                                         Margin="3,0,0,0" />
                             </Border>
                             <ContentPresenter Grid.Column="1"
                                               Margin="7,0,0,0"
-                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              VerticalAlignment="Center"
                                               Content="{TemplateBinding Content}"
                                               ContentTemplate="{TemplateBinding ContentTemplate}"
                                               TextElement.Foreground="{TemplateBinding Foreground}" />
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="ToggleTrack" Property="Background" Value="#078FE5" />
+                                <Setter TargetName="ToggleThumb" Property="HorizontalAlignment" Value="Right" />
+                                <Setter TargetName="ToggleThumb" Property="Margin" Value="0,0,3,0" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="CheckBoxBorder" Property="Background" Value="#0A3A61" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="CheckBoxBorder" Property="Opacity" Value="0.78" />
+                                <Setter TargetName="ToggleTrack" Property="Opacity" Value="0.88" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="CheckBoxBorder" Property="Opacity" Value="0.45" />
-                                <Setter Property="Foreground" Value="{StaticResource SubtleTextBrush}" />
+                                <Setter TargetName="ToggleTrack" Property="Opacity" Value="1" />
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -135,161 +140,287 @@
         </Style>
     </Window.Resources>
 
-    <Border Background="{StaticResource CardBackgroundBrush}"
-            BorderBrush="{StaticResource PrimaryBlueBrush}"
+    <Border Background="{StaticResource DialogBackgroundBrush}"
+            BorderBrush="#0B91C4"
             BorderThickness="1"
             CornerRadius="7">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="54" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="58" />
+                <RowDefinition Height="72" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="62" />
             </Grid.RowDefinitions>
 
             <Border Grid.Row="0"
-                    Background="#06233D"
+                    Background="{StaticResource DialogHeaderBackgroundBrush}"
                     BorderBrush="{StaticResource GridLineBrush}"
                     BorderThickness="0,0,0,1"
                     CornerRadius="7,7,0,0"
                     MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
-                <Grid Margin="18,0,8,0">
+                <Grid Margin="20,0,10,0">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="4" Height="26" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="2" Margin="0,0,11,0" />
-                        <StackPanel>
+                        <Border Width="4" Height="38" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="2" Margin="0,0,12,0" />
+                        <Border Width="36" Height="36" Background="#073254" CornerRadius="5" Margin="0,0,11,0">
+                            <Path Data="{StaticResource CommunicationIconGeometry}"
+                                  Width="22" Height="22" Stretch="Uniform"
+                                  Stroke="{StaticResource AccentBrush}" StrokeThickness="1.7" />
+                        </Border>
+                        <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="独立通信配置" FontSize="16" FontWeight="SemiBold" />
-                            <TextBlock Text="分别配置 560 / 620 站场的本机监听通道" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,2,0,0" />
+                            <TextBlock Text="分别配置 560 / 620 站场的本机监听通道"
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,3,0,0" />
                         </StackPanel>
                     </StackPanel>
-                    <Button Content="×" Width="36" Height="30" HorizontalAlignment="Right" VerticalAlignment="Center"
+                    <Button Content="×" Width="36" Height="36" HorizontalAlignment="Right" VerticalAlignment="Center"
                             Style="{StaticResource ConfigButtonStyle}"
-                            Padding="0" Background="Transparent" BorderBrush="Transparent" FontSize="20" Click="OnCloseClick" />
+                            Padding="0" Background="Transparent" BorderBrush="Transparent" FontSize="19" Click="OnCloseClick" />
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1" Padding="20,16,20,14">
+            <Border Grid.Row="1" Padding="22,13,22,12">
                 <StackPanel>
-                    <Grid Margin="0,0,0,12">
+                    <Grid Margin="2,0,2,13">
                         <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="配置范围" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
-                        <TextBlock x:Name="ScopeText" Grid.Column="1" Margin="14,0,0,0" FontSize="13" FontWeight="SemiBold" />
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="配置范围" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                            <TextBlock x:Name="ScopeText" Margin="11,0,0,0" FontSize="13" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="每个站场使用独立监听地址和端口"
+                                   Foreground="{StaticResource SubtleTextBrush}" FontSize="11"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
                     </Grid>
 
-                    <Border Background="#061F35" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" CornerRadius="5" Padding="12,12,12,2">
-                        <StackPanel>
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="站场通信" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
-                                <TextBlock Text="每个站场使用独立监听地址和端口" Grid.Column="1" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
-                            </Grid>
-
-                            <ItemsControl x:Name="YardCommunicationItemsControl"
-                                          IsEnabled="{Binding IsEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border Background="#0B3555" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" CornerRadius="4" Padding="14,11" Margin="0,0,0,10">
+                    <ItemsControl x:Name="YardCommunicationItemsControl">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel>
+                                    <Border Background="{StaticResource DialogSectionBackgroundBrush}" BorderBrush="#0A6C9D"
+                                            BorderThickness="1" CornerRadius="6" Padding="14,12,14,13" Margin="0,0,0,12">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
                                             <Grid>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                </Grid.RowDefinitions>
-                                                <Grid>
-                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                        <Ellipse Width="8" Height="8" Fill="{StaticResource SuccessBrush}" Margin="0,0,8,0" />
-                                                        <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold" />
-                                                        <TextBlock Text="  ·  独立通道" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Border Width="34" Height="34" Background="#082A45" CornerRadius="5" Margin="0,0,10,0">
+                                                        <Path Data="{StaticResource CommunicationIconGeometry}"
+                                                              Width="21" Height="21" Stretch="Uniform"
+                                                              Stroke="{StaticResource SuccessBrush}" StrokeThickness="1.7" />
+                                                    </Border>
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="TCP 通信" FontSize="15" FontWeight="SemiBold" />
+                                                        <TextBlock Text="本机监听通道，接收现场设备数据"
+                                                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,2,0,0" />
                                                     </StackPanel>
-                                                    <TextBlock Text="{Binding YardId}" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                                </Grid>
-
-                                                <StackPanel Grid.Row="1" Margin="0,12,0,0">
-                                                    <TextBlock Text="本机监听" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,8" />
-                                                    <Grid>
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="150" />
-                                                            <ColumnDefinition Width="120" />
-                                                        </Grid.ColumnDefinitions>
-                                                        <StackPanel>
-                                                            <TextBlock Text="监听 IP" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
-                                                            <TextBox Text="{Binding ListenIp, UpdateSourceTrigger=PropertyChanged}"
-                                                                     Style="{StaticResource ConfigTextBoxStyle}" />
-                                                        </StackPanel>
-                                                        <StackPanel Grid.Column="1" Margin="14,0,0,0">
-                                                            <TextBlock Text="监听端口" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
-                                                            <TextBox Text="{Binding ListenPort, UpdateSourceTrigger=PropertyChanged}"
-                                                                     Style="{StaticResource ConfigTextBoxStyle}" />
-                                                        </StackPanel>
-                                                        <CheckBox Grid.Column="2" Content="启用通信"
-                                                                  Style="{StaticResource ConfigCheckBoxStyle}"
-                                                                  IsChecked="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}" />
-                                                    </Grid>
                                                 </StackPanel>
+                                                <Border HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                        Background="#092F43" BorderBrush="#17654F" BorderThickness="1"
+                                                        CornerRadius="11" Padding="9,4">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
+                                                            <Ellipse.Style>
+                                                                <Style TargetType="Ellipse">
+                                                                    <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Enabled}" Value="False">
+                                                                            <Setter Property="Fill" Value="{StaticResource SubtleTextBrush}" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Ellipse.Style>
+                                                        </Ellipse>
+                                                        <TextBlock Text="已启用" Foreground="{StaticResource SuccessBrush}" FontSize="11">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Enabled}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                        <TextBlock Text="已停用" Foreground="{StaticResource SubtleTextBrush}" FontSize="11">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Enabled}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Visible" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                </Border>
+                                            </Grid>
+                                            <Border Grid.Row="1" Height="1" Background="{StaticResource GridLineBrush}" Margin="0,10,0,11" />
+                                            <Grid Grid.Row="2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="150" />
+                                                    <ColumnDefinition Width="120" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,10,0">
+                                                    <TextBlock Text="监听 IP" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                    <TextBox Text="{Binding ListenIp, UpdateSourceTrigger=PropertyChanged}"
+                                                             IsReadOnly="{Binding IsReadOnly, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}"
+                                                             Style="{StaticResource ConfigTextBoxStyle}" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1" Margin="0,0,10,0">
+                                                    <TextBlock Text="监听端口" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                    <TextBox Text="{Binding ListenPort, UpdateSourceTrigger=PropertyChanged}"
+                                                             IsReadOnly="{Binding IsReadOnly, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}"
+                                                             Style="{StaticResource ConfigTextBoxStyle}" />
+                                                </StackPanel>
+                                                <CheckBox Grid.Column="2" Content="启用通信" VerticalAlignment="Bottom" Margin="0,0,0,8"
+                                                          Style="{StaticResource ConfigToggleStyle}"
+                                                          IsEnabled="{Binding IsEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}"
+                                                          IsChecked="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}" />
+                                            </Grid>
+                                        </Grid>
+                                    </Border>
 
-                                                <StackPanel Grid.Row="2" Margin="0,12,0,0">
-                                                    <TextBlock Text="外部 Alarm UDP" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,8" />
-                                                    <Grid>
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="150" />
-                                                            <ColumnDefinition Width="150" />
-                                                            <ColumnDefinition Width="120" />
-                                                            <ColumnDefinition Width="120" />
-                                                        </Grid.ColumnDefinitions>
-                                                        <StackPanel>
-                                                            <TextBlock Text="外部服务器 IP" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
-                                                            <TextBox Text="{Binding AlarmForwardIp, UpdateSourceTrigger=PropertyChanged}"
-                                                                     Style="{StaticResource ConfigTextBoxStyle}"
-                                                                     IsEnabled="{Binding AlarmForwardEnabled}" />
+                                    <Border Background="{StaticResource DialogSectionBackgroundBrush}" BorderBrush="#0A6C9D"
+                                            BorderThickness="1" CornerRadius="6" Padding="14,12,14,13" Margin="0,0,0,0">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid>
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Border Width="34" Height="34" Background="#082A45" CornerRadius="5" Margin="0,0,10,0">
+                                                        <Path Data="{StaticResource AlarmIconGeometry}"
+                                                              Width="21" Height="21" Stretch="Uniform"
+                                                              Stroke="{StaticResource AccentBrush}" StrokeThickness="1.7" />
+                                                    </Border>
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="报警转发" FontSize="15" FontWeight="SemiBold" />
+                                                        <TextBlock Text="转发报警信息到外部服务器"
+                                                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,2,0,0" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                    <Border Background="#092F43" BorderBrush="#17654F" BorderThickness="1"
+                                                            CornerRadius="11" Padding="9,4" Margin="0,0,10,0">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
+                                                                <Ellipse.Style>
+                                                                    <Style TargetType="Ellipse">
+                                                                        <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding AlarmForwardEnabled}" Value="False">
+                                                                                <Setter Property="Fill" Value="{StaticResource SubtleTextBrush}" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </Ellipse.Style>
+                                                            </Ellipse>
+                                                            <TextBlock Text="已启用" Foreground="{StaticResource SuccessBrush}" FontSize="11">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding AlarmForwardEnabled}" Value="False">
+                                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                            <TextBlock Text="已停用" Foreground="{StaticResource SubtleTextBrush}" FontSize="11">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding AlarmForwardEnabled}" Value="False">
+                                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
                                                         </StackPanel>
-                                                        <StackPanel Grid.Column="1" Margin="14,0,0,0">
-                                                            <TextBlock Text="外部服务器端口" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
-                                                            <TextBox Text="{Binding AlarmForwardPort, UpdateSourceTrigger=PropertyChanged}"
-                                                                     Style="{StaticResource ConfigTextBoxStyle}"
-                                                                     IsEnabled="{Binding AlarmForwardEnabled}" />
-                                                        </StackPanel>
-                                                        <StackPanel Grid.Column="2" Margin="14,0,0,0">
-                                                            <TextBlock Text="本机 IP（绑定）" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
-                                                            <TextBox Text="{Binding ExternalAlarmListenIp, UpdateSourceTrigger=PropertyChanged}"
-                                                                     Style="{StaticResource ConfigTextBoxStyle}"
-                                                                     IsEnabled="{Binding AlarmForwardEnabled}" />
-                                                        </StackPanel>
-                                                        <StackPanel Grid.Column="3" Margin="14,0,0,0">
-                                                            <TextBlock Text="本机收发端口（固定）" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
-                                                            <TextBox Text="{Binding ExternalAlarmListenPort, UpdateSourceTrigger=PropertyChanged}"
-                                                                     Style="{StaticResource ConfigTextBoxStyle}"
-                                                                     IsEnabled="{Binding AlarmForwardEnabled}" />
-                                                        </StackPanel>
-                                                        <CheckBox Grid.Column="4" Content="启用报警转发"
-                                                                  Style="{StaticResource ConfigCheckBoxStyle}"
-                                                                  IsChecked="{Binding AlarmForwardEnabled, UpdateSourceTrigger=PropertyChanged}" />
-                                                    </Grid>
-                                                         <TextBlock Text="发送和接收共用本机固定端口；启用外部接口时端口必须填写。"
-                                                                    Foreground="{StaticResource SubtleTextBrush}"
-                                                                    FontSize="10"
-                                                                    Margin="0,6,0,0" />
+                                                    </Border>
+                                                    <CheckBox Content="启用报警转发" Style="{StaticResource ConfigToggleStyle}"
+                                                              IsEnabled="{Binding IsEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}"
+                                                              IsChecked="{Binding AlarmForwardEnabled, UpdateSourceTrigger=PropertyChanged}" />
                                                 </StackPanel>
                                             </Grid>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
-                    </Border>
+                                            <Border Grid.Row="1" Height="1" Background="{StaticResource GridLineBrush}" Margin="0,10,0,11" />
+                                            <Grid Grid.Row="2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="12" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="12" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <StackPanel Grid.Column="0" Grid.Row="0" Margin="0,0,0,0">
+                                                    <TextBlock Text="外部服务器 IP" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                    <TextBox Text="{Binding AlarmForwardIp, UpdateSourceTrigger=PropertyChanged}"
+                                                             Style="{StaticResource ConfigTextBoxStyle}"
+                                                             IsReadOnly="{Binding IsReadOnly, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}"
+                                                             IsEnabled="{Binding AlarmForwardEnabled}" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2" Grid.Row="0">
+                                                    <TextBlock Text="服务器端口" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                    <TextBox Text="{Binding AlarmForwardPort, UpdateSourceTrigger=PropertyChanged}"
+                                                             Style="{StaticResource ConfigTextBoxStyle}"
+                                                             IsReadOnly="{Binding IsReadOnly, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}"
+                                                             IsEnabled="{Binding AlarmForwardEnabled}" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="0" Grid.Row="2">
+                                                    <TextBlock Text="本机通信 IP" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                    <TextBox Text="{Binding ExternalAlarmListenIp, UpdateSourceTrigger=PropertyChanged}"
+                                                             Style="{StaticResource ConfigTextBoxStyle}"
+                                                             IsReadOnly="{Binding IsReadOnly, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}"
+                                                             IsEnabled="{Binding AlarmForwardEnabled}" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2" Grid.Row="2">
+                                                    <TextBlock Text="本机通信端口" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,5" />
+                                                    <TextBox Text="{Binding ExternalAlarmListenPort, UpdateSourceTrigger=PropertyChanged}"
+                                                             Style="{StaticResource ConfigTextBoxStyle}"
+                                                             IsReadOnly="{Binding IsReadOnly, RelativeSource={RelativeSource AncestorType={x:Type local:YardCommunicationConfigDialog}}}"
+                                                             IsEnabled="{Binding AlarmForwardEnabled}" />
+                                                </StackPanel>
+                                            </Grid>
+                                            <TextBlock Grid.Row="3"
+                                                       Text="发送和接收共用本机通信端口；启用报警转发后需要填写。"
+                                                       Foreground="{StaticResource SubtleTextBrush}"
+                                                       FontSize="10"
+                                                       Margin="0,9,0,0" />
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="2" Background="#051A2C" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,1,0,0" CornerRadius="0,0,7,7">
-                <Grid Margin="20,0,20,0">
-                    <TextBlock x:Name="DialogHintText" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+            <Border Grid.Row="2" Background="#031C33" BorderBrush="{StaticResource GridLineBrush}"
+                    BorderThickness="0,1,0,0" CornerRadius="0,0,7,7">
+                <Grid Margin="20,0,10,0">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="ⓘ" Foreground="{StaticResource AccentBrush}" FontSize="16" Margin="0,0,8,0" />
+                        <TextBlock x:Name="DialogHintText" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                    </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <Button Content="取消" Style="{StaticResource ConfigButtonStyle}" Margin="0,0,10,0" Click="OnCancelClick" />
+                        <Button Content="取消" Style="{StaticResource ConfigButtonStyle}" Margin="0,0,9,0" Click="OnCancelClick" />
                         <Button x:Name="SaveButton" Content="保存配置" Style="{StaticResource ConfigPrimaryButtonStyle}" IsDefault="True" Click="OnSaveClick" />
                     </StackPanel>
                 </Grid>

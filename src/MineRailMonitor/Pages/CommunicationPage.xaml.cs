@@ -18,7 +18,10 @@ public partial class CommunicationPage : UserControl
 {
     private readonly ObservableCollection<string> _packetLog = new();
     private readonly ObservableCollection<CommunicationLogRow> _communicationLogRows = new();
-    private readonly ObservableCollection<ExternalAlarmLogRow> _externalAlarmLogRows = new();
+    private readonly ObservableCollection<ExternalAlarmTxLogRow> _externalAlarmTxLogRows = new();
+    private readonly ObservableCollection<ExternalAlarmRxLogRow> _externalAlarmRxLogRows = new();
+    private readonly ObservableCollection<ExternalAlarmStateRow> _externalAlarmStateRows = new();
+    private readonly ExternalAlarmFrameCodec _externalAlarmFrameCodec = new();
     private readonly ObservableCollection<string> _frameRfidSlots = new();
     private readonly Dictionary<RfidStationEndpointKey, long> _invalidFrameCounts = new();
     private readonly Dictionary<string, long> _timeoutLogCounts = new(StringComparer.OrdinalIgnoreCase);
@@ -45,7 +48,9 @@ public partial class CommunicationPage : UserControl
         YardFilter.SelectedIndex = 0;
         RxListBox.ItemsSource = _packetLog;
         CommunicationLogList.ItemsSource = _communicationLogRows;
-        ExternalAlarmLogList.ItemsSource = _externalAlarmLogRows;
+        ExternalAlarmTxLogList.ItemsSource = _externalAlarmTxLogRows;
+        ExternalAlarmRxLogList.ItemsSource = _externalAlarmRxLogRows;
+        ExternalAlarmStateList.ItemsSource = _externalAlarmStateRows;
         FrameRfidSlotsItemsControl.ItemsSource = _frameRfidSlots;
         SetListenerStatus("监听尚未启动");
         LatestRxText.Text = "暂无报文";
@@ -146,6 +151,7 @@ public partial class CommunicationPage : UserControl
     private void ResetScopePresentation()
     {
         ClearLog();
+        _externalAlarmStateRows.Clear();
         LatestTxTimeText.Text = "-";
         LatestTxSummaryText.Text = "暂无发送报文";
         LatestTxLengthText.Text = "-";
@@ -201,14 +207,28 @@ public partial class CommunicationPage : UserControl
         var targetText = target is null
             ? "未配置"
             : $"{target.TargetIp}:{target.TargetPort}";
-        AddExternalAlarmLog(
+        AddExternalAlarmTxLog(
             sentAt,
             yardId,
-            "TX",
+            snapshot,
             payload,
             targetText,
-            $"发送成功 · 地址 0x{snapshot.StationAddress:X2} · 状态 {FormatExternalAlarmStatus(snapshot.Status)} · 车厢 {snapshot.AccumulatedVehicleCount}");
+            "发送成功");
         ExternalAlarmStatusText.Text = $"最近发送成功：{yardId} · {sentAt:HH:mm:ss.fff}";
+    }
+
+    public void SetExternalAlarmStationStates(IEnumerable<ExternalAlarmStationDiagnostic> diagnostics)
+    {
+        if (diagnostics is null) throw new ArgumentNullException(nameof(diagnostics));
+
+        _externalAlarmStateRows.Clear();
+        foreach (var diagnostic in diagnostics
+                     .Where(item => item is not null && IsExternalAlarmInDisplayScope(item.YardId))
+                     .OrderBy(item => item.YardId, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(item => item.StationId, StringComparer.OrdinalIgnoreCase))
+        {
+            _externalAlarmStateRows.Add(new ExternalAlarmStateRow(diagnostic));
+        }
     }
 
     public void AddExternalAlarmSendFailure(string yardId, ExternalAlarmStationSnapshot snapshot, Exception exception)
@@ -219,13 +239,13 @@ public partial class CommunicationPage : UserControl
         }
 
         var target = FindAlarmForward(yardId);
-        AddExternalAlarmLog(
+        AddExternalAlarmTxLog(
             DateTimeOffset.Now,
             yardId,
-            "TX",
+            snapshot,
             null,
             target is null ? "未配置" : $"{target.TargetIp}:{target.TargetPort}",
-            $"发送失败 · 地址 0x{snapshot.StationAddress:X2} · {exception.Message}");
+            $"发送失败 · {exception.Message}");
         ExternalAlarmStatusText.Text = $"发送失败：{yardId} · {exception.Message}";
     }
 
@@ -241,8 +261,15 @@ public partial class CommunicationPage : UserControl
             return;
         }
 
-        var description = isValid ? "收到合法清除帧" : "收到非法帧 · 已拒绝";
-        AddExternalAlarmLog(receivedAt, yardId, "RX", payload, sourceEndpoint.ToString(), description);
+        var crcResult = FormatExternalAlarmCrcResult(payload);
+        var parseResult = FormatExternalAlarmClearParseResult(payload, isValid, crcResult);
+        AddExternalAlarmRxLog(
+            receivedAt,
+            yardId,
+            payload,
+            sourceEndpoint.ToString(),
+            crcResult,
+            parseResult);
         ExternalAlarmStatusText.Text = isValid
             ? $"最近接收合法清除帧：{yardId} · {receivedAt:HH:mm:ss.fff}"
             : $"最近接收非法帧：{yardId} · {receivedAt:HH:mm:ss.fff}";
@@ -255,7 +282,7 @@ public partial class CommunicationPage : UserControl
             return;
         }
 
-        AddExternalAlarmLog(DateTimeOffset.Now, yardId, "RX", null, sourceEndpoint.ToString(), $"拒绝 · {reason}");
+        ExternalAlarmStatusText.Text = $"最近接收非法帧：{yardId} · {reason}";
     }
 
     public void AddExternalAlarmReceiveError(string yardId, Exception exception)
@@ -265,7 +292,13 @@ public partial class CommunicationPage : UserControl
             return;
         }
 
-        AddExternalAlarmLog(DateTimeOffset.Now, yardId, "RX", null, "本机监听", $"接收异常 · {exception.Message}");
+        AddExternalAlarmRxLog(
+            DateTimeOffset.Now,
+            yardId,
+            null,
+            "本机监听",
+            "未检查",
+            $"接收异常 · {exception.Message}");
         ExternalAlarmStatusText.Text = $"接收异常：{yardId} · {exception.Message}";
     }
 
@@ -412,7 +445,8 @@ public partial class CommunicationPage : UserControl
     {
         _packetLog.Clear();
         _communicationLogRows.Clear();
-        _externalAlarmLogRows.Clear();
+        _externalAlarmTxLogRows.Clear();
+        _externalAlarmRxLogRows.Clear();
         PacketLogCountText.Text = "0 / 50";
         LatestRxText.Text = "暂无报文";
         LatestRxTimeText.Text = "-";
@@ -807,28 +841,54 @@ public partial class CommunicationPage : UserControl
         }
     }
 
-    private void AddExternalAlarmLog(
+    private void AddExternalAlarmTxLog(
         DateTimeOffset at,
         string yardId,
-        string direction,
+        ExternalAlarmStationSnapshot snapshot,
         byte[]? payload,
-        string endpoint,
-        string description)
+        string target,
+        string result)
     {
-        _externalAlarmLogRows.Insert(
+        _externalAlarmTxLogRows.Insert(
             0,
-            new ExternalAlarmLogRow(
+            new ExternalAlarmTxLogRow(
                 at,
                 yardId,
-                direction,
-                endpoint,
+                snapshot.StationId,
+                snapshot.StationAddress,
+                FormatExternalAlarmStatus(snapshot.Status),
+                snapshot.AccumulatedVehicleCount,
+                target,
                 payload is null ? "-" : BitConverter.ToString(payload).Replace('-', ' '),
-                payload?.Length.ToString(CultureInfo.InvariantCulture) ?? "-",
-                description));
+                result));
 
-        while (_externalAlarmLogRows.Count > 100)
+        while (_externalAlarmTxLogRows.Count > 100)
         {
-            _externalAlarmLogRows.RemoveAt(_externalAlarmLogRows.Count - 1);
+            _externalAlarmTxLogRows.RemoveAt(_externalAlarmTxLogRows.Count - 1);
+        }
+    }
+
+    private void AddExternalAlarmRxLog(
+        DateTimeOffset at,
+        string yardId,
+        byte[]? payload,
+        string source,
+        string crcResult,
+        string parseResult)
+    {
+        _externalAlarmRxLogRows.Insert(
+            0,
+            new ExternalAlarmRxLogRow(
+                at,
+                yardId,
+                source,
+                payload is null ? "-" : BitConverter.ToString(payload).Replace('-', ' '),
+                crcResult,
+                parseResult));
+
+        while (_externalAlarmRxLogRows.Count > 100)
+        {
+            _externalAlarmRxLogRows.RemoveAt(_externalAlarmRxLogRows.Count - 1);
         }
     }
 
@@ -872,11 +932,38 @@ public partial class CommunicationPage : UserControl
 
     private static string FormatExternalAlarmStatus(ExternalAlarmStatus status) => status switch
     {
-        ExternalAlarmStatus.Normal => "正常",
-        ExternalAlarmStatus.Recognizing => "识别中",
-        ExternalAlarmStatus.UncouplingAlarm => "脱节报警",
+        ExternalAlarmStatus.NoVehicle => "0x00 无车",
+        ExternalAlarmStatus.Normal => "0x01 正常",
+        ExternalAlarmStatus.Recognizing => "0x02 识别中",
+        ExternalAlarmStatus.UncouplingAlarm => "0x03 脱节报警",
         _ => $"0x{(byte)status:X2}"
     };
+
+    private string FormatExternalAlarmCrcResult(byte[]? payload)
+    {
+        if (payload is null || payload.Length != 12)
+        {
+            return "未检查";
+        }
+
+        var expected = (ushort)(payload[8] | (payload[9] << 8));
+        var actual = new ExternalAlarmModbusCrcCalculator().Compute(payload, 0, 8);
+        return expected == actual
+            ? $"通过 0x{actual:X4}"
+            : $"失败(期望 0x{expected:X4}/计算 0x{actual:X4})";
+    }
+
+    private string FormatExternalAlarmClearParseResult(byte[] payload, bool isValid, string crcResult)
+    {
+        if (isValid && _externalAlarmFrameCodec.TryDecodeClear(payload, out var command))
+        {
+            return $"清除命令 0x{command.Command:X2} · 地址 0x{command.StationAddress:X2}";
+        }
+
+        return crcResult.StartsWith("失败", StringComparison.Ordinal)
+            ? "拒绝 · CRC失败"
+            : "拒绝 · 帧结构或命令无效";
+    }
 
     private void InitializeCommunicationLogSnapshot(IReadOnlyList<RfidStationPollingStatus> statuses)
     {
@@ -1097,33 +1184,103 @@ public partial class CommunicationPage : UserControl
         public Brush DescriptionBrush { get; }
     }
 
-    private sealed class ExternalAlarmLogRow
+    private sealed class ExternalAlarmTxLogRow
     {
-        public ExternalAlarmLogRow(
+        public ExternalAlarmTxLogRow(
             DateTimeOffset at,
             string yardId,
-            string direction,
-            string endpoint,
+            string stationId,
+            byte stationAddress,
+            string status,
+            int vehicleCount,
+            string target,
             string data,
-            string length,
-            string description)
+            string result)
         {
             TimeText = at.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
             YardText = yardId;
-            DirectionText = direction;
-            EndpointText = endpoint;
-            LengthText = length;
+            StationText = stationId;
+            AddressText = $"0x{stationAddress:X2}";
+            StatusText = status;
+            VehicleCountText = vehicleCount.ToString(CultureInfo.InvariantCulture);
+            TargetText = target;
             DataText = data;
-            DescriptionText = description;
+            ResultText = result;
         }
 
         public string TimeText { get; }
         public string YardText { get; }
-        public string DirectionText { get; }
-        public string EndpointText { get; }
-        public string LengthText { get; }
+        public string StationText { get; }
+        public string AddressText { get; }
+        public string StatusText { get; }
+        public string VehicleCountText { get; }
+        public string TargetText { get; }
         public string DataText { get; }
-        public string DescriptionText { get; }
+        public string ResultText { get; }
+    }
+
+    private sealed class ExternalAlarmStateRow
+    {
+        public ExternalAlarmStateRow(ExternalAlarmStationDiagnostic diagnostic)
+        {
+            YardText = diagnostic.YardId;
+            StationText = diagnostic.StationId;
+            AddressText = $"0x{diagnostic.StationAddress:X2}";
+            RuntimeStatusText = FormatRuntimeState(diagnostic.RuntimeState);
+            ExternalStatusText = diagnostic.ExternalStatus.HasValue
+                ? FormatExternalAlarmStatus(diagnostic.ExternalStatus.Value)
+                : "未启用";
+            VehicleCountText = diagnostic.VehicleCount.ToString(CultureInfo.InvariantCulture);
+            LastUpdatedText = diagnostic.LastUpdatedAt.HasValue
+                ? diagnostic.LastUpdatedAt.Value.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)
+                : "未更新";
+        }
+
+        public string YardText { get; }
+        public string StationText { get; }
+        public string AddressText { get; }
+        public string RuntimeStatusText { get; }
+        public string ExternalStatusText { get; }
+        public string VehicleCountText { get; }
+        public string LastUpdatedText { get; }
+    }
+
+    private static string FormatRuntimeState(PassageLifecycleState state) => state switch
+    {
+        PassageLifecycleState.Idle => "Idle 空闲",
+        PassageLifecycleState.Recognizing => "Recognizing 识别中",
+        PassageLifecycleState.Completed => "Completed 已完成",
+        PassageLifecycleState.Alarm => "Alarm 脱节报警",
+        PassageLifecycleState.Clearing => "Clearing 清除中",
+        PassageLifecycleState.WaitForEmpty => "WaitForEmpty 等待清空",
+        PassageLifecycleState.Finalizing => "Finalizing 收尾",
+        _ => state.ToString()
+    };
+
+    private sealed class ExternalAlarmRxLogRow
+    {
+        public ExternalAlarmRxLogRow(
+            DateTimeOffset at,
+            string yardId,
+            string source,
+            string data,
+            string crcResult,
+            string parseResult)
+        {
+            TimeText = at.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
+            YardText = yardId;
+            SourceText = source;
+            DataText = data;
+            CrcText = crcResult;
+            ParseResultText = parseResult;
+        }
+
+        public string TimeText { get; }
+        public string YardText { get; }
+        public string SourceText { get; }
+        public string DataText { get; }
+        public string CrcText { get; }
+        public string ParseResultText { get; }
     }
 
     private static string FormatStatus(RfidStationPollingStatus? status) =>

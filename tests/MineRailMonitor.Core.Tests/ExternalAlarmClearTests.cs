@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using MineRailMonitor.Core.Communication;
 using MineRailMonitor.Core.ExternalAlarm;
 using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
@@ -165,6 +166,39 @@ public sealed class ExternalAlarmClearTests
         }
     }
 
+    [Fact]
+    public void External_clear_acknowledges_alarm_after_rfid_lifecycle_returns_to_idle()
+    {
+        var station = CreateStation("RFID-620-01", "620", 0x01, 63113);
+        var start = new DateTimeOffset(2026, 9, 30, 10, 0, 0, TimeSpan.Zero);
+        var store = new InMemoryPassageRecordStore();
+        var runtime = new RfidRuntimeCoordinator(
+            new[] { station },
+            CreateSettings(),
+            store);
+        var state = runtime.EndpointStates.Values.Single();
+        var sixRfids = new ushort[] { 0x0001, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015 };
+
+        runtime.ProcessFrame(CreatePassageFrame(station, start, sixRfids));
+        runtime.ProcessFrame(CreatePassageFrame(station, start.AddSeconds(29.9), sixRfids));
+        runtime.Evaluate(start.AddSeconds(30));
+        var record = Assert.Single(store.Records);
+        Assert.Equal(PassageLifecycleState.Alarm, state.LifecycleState);
+
+        runtime.MarkCommandSent(station, RfidPollCommand.Clear, start.AddSeconds(30.1));
+        runtime.ProcessFrame(CreateEmptyFrame(station, start.AddSeconds(30.2)));
+        runtime.ProcessFrame(CreateEmptyFrame(station, start.AddSeconds(30.4)));
+        Assert.Equal(PassageLifecycleState.Idle, state.LifecycleState);
+        Assert.True(runtime.HasUnacknowledgedAlarm(record.PassageId));
+
+        var acknowledged = runtime.TryAcknowledgeAlarm(station.ProtocolAddress, start.AddSeconds(31));
+
+        Assert.True(acknowledged);
+        Assert.False(runtime.HasUnacknowledgedAlarm(record.PassageId));
+        Assert.Empty(store.GetUnacknowledgedAlarms());
+        Assert.NotEqual(RfidStationVisualState.Alarm, state.VisualState);
+    }
+
     [Theory]
     [InlineData(PassageLifecycleState.Clearing)]
     [InlineData(PassageLifecycleState.WaitForEmpty)]
@@ -173,6 +207,85 @@ public sealed class ExternalAlarmClearTests
         Assert.Equal(
             ExternalAlarmStatus.UncouplingAlarm,
             ExternalAlarmStatusMapper.FromLifecycleState(state));
+    }
+
+    [Fact]
+    public void Completed_eleven_vehicle_passage_stays_normal_during_rfid_clear()
+    {
+        var station = CreateStation("RFID-620-01", "620", 0x01, 63121);
+        var start = new DateTimeOffset(2026, 9, 30, 10, 0, 0, TimeSpan.Zero);
+        var runtime = new RfidRuntimeCoordinator(
+            new[] { station },
+            new RfidSettings
+            {
+                PollIntervalMs = 1000,
+                ExpectedVehicleCount = 11,
+                InterVehicleTimeoutSeconds = 30
+            },
+            new InMemoryPassageRecordStore());
+        var state = runtime.EndpointStates.Values.Single();
+
+        runtime.ProcessFrame(CreatePassageFrame(
+            station,
+            start,
+            Enumerable.Range(0x0011, 11).Select(value => (ushort)value).ToArray()));
+        Assert.Equal(PassageOutcome.Completed, state.LastPassageRecord?.Outcome);
+        Assert.Equal(11, state.DetectedVehicleCount);
+
+        runtime.MarkCommandSent(station, RfidPollCommand.Clear, start.AddMilliseconds(200));
+        Assert.Equal(
+            ExternalAlarmStatus.Normal,
+            ExternalAlarmStatusMapper.FromRuntimeState(state).Status);
+        runtime.ProcessFrame(CreateEmptyFrame(station, start.AddMilliseconds(400)));
+        Assert.Equal(PassageLifecycleState.WaitForEmpty, state.LifecycleState);
+
+        var snapshot = ExternalAlarmStatusMapper.FromRuntimeState(state);
+        var cache = new ExternalAlarmStatusCache();
+        cache.EnsureStation(station.StationId, station.ProtocolAddress, start);
+        cache.Update(station.StationId, snapshot, start.AddMilliseconds(400));
+        var frame = new ExternalAlarmFrameCodec().Encode(
+            cache.GetForSending(station.StationId, start.AddMilliseconds(400)));
+
+        Assert.Equal((byte)ExternalAlarmStatus.Normal, frame[4]);
+        Assert.Equal((byte)11, frame[7]);
+        Assert.True(cache.TryGet(station.StationId, out var cachedSnapshot));
+        Assert.False(cachedSnapshot.AlarmLatched);
+    }
+
+    [Fact]
+    public void Uncoupling_alarm_remains_external_alarm_during_clear_phase()
+    {
+        var station = CreateStation("RFID-620-01", "620", 0x01, 63122);
+        var start = new DateTimeOffset(2026, 9, 30, 10, 0, 0, TimeSpan.Zero);
+        var runtime = new RfidRuntimeCoordinator(
+            new[] { station },
+            new RfidSettings
+            {
+                PollIntervalMs = 1000,
+                ExpectedVehicleCount = 11,
+                InterVehicleTimeoutSeconds = 30
+            },
+            new InMemoryPassageRecordStore(),
+            new RfidRuntimePolicy(TimeSpan.FromMinutes(1)));
+        var state = runtime.EndpointStates.Values.Single();
+
+        runtime.ProcessFrame(CreatePassageFrame(
+            station,
+            start,
+            Enumerable.Range(0x0011, 6).Select(value => (ushort)value).ToArray()));
+        runtime.Evaluate(start.AddSeconds(30));
+        Assert.Equal(PassageOutcome.UncouplingAlarm, state.LastPassageRecord?.Outcome);
+
+        runtime.MarkCommandSent(station, RfidPollCommand.Clear, start.AddSeconds(31));
+        Assert.Equal(
+            ExternalAlarmStatus.UncouplingAlarm,
+            ExternalAlarmStatusMapper.FromRuntimeState(state).Status);
+
+        runtime.ProcessFrame(CreateEmptyFrame(station, start.AddSeconds(32)));
+        Assert.Equal(PassageLifecycleState.WaitForEmpty, state.LifecycleState);
+        Assert.Equal(
+            ExternalAlarmStatus.UncouplingAlarm,
+            ExternalAlarmStatusMapper.FromRuntimeState(state).Status);
     }
 
     private static PassageRecord CreateAlarmRecord(RfidStationConfig station, DateTimeOffset completedAt) =>
@@ -224,6 +337,22 @@ public sealed class ExternalAlarmClearTests
         ValidRfids = Array.Empty<ushort>(),
         ActualNonZeroSlotCount = 0,
         ReportedCardCount = 0
+    };
+
+    private static RfidStationFrame CreatePassageFrame(
+        RfidStationConfig station,
+        DateTimeOffset receivedAt,
+        ushort[] rfids) => new()
+    {
+        StationAddress = station.ProtocolAddress,
+        SourceEndpoint = new IPEndPoint(IPAddress.Loopback, station.Port),
+        ReceivedAt = receivedAt,
+        HeadRfid = rfids[0],
+        WagonRfids = rfids.Skip(1).ToArray(),
+        RawRfidSlots = rfids.Concat(new ushort[14 - rfids.Length]).ToArray(),
+        ValidRfids = rfids,
+        ActualNonZeroSlotCount = rfids.Length,
+        ReportedCardCount = (byte)rfids.Length
     };
 
     private static async Task WaitForAsync(Func<bool> condition)

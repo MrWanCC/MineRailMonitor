@@ -760,6 +760,7 @@ public partial class MainWindow : Window
             _yardCommunicationManager.AlarmForwardFailed -= OnYardAlarmForwardFailed;
             _yardCommunicationManager.ExternalAlarmStatusSendFailed -= OnYardExternalAlarmStatusSendFailed;
             _yardCommunicationManager.ExternalAlarmStatusSent -= OnYardExternalAlarmStatusSent;
+            _yardCommunicationManager.ExternalAlarmStatusUpdated -= OnYardExternalAlarmStatusUpdated;
             _yardCommunicationManager.ExternalAlarmFrameReceived -= OnYardExternalAlarmFrameReceived;
             _yardCommunicationManager.ExternalAlarmClearProcessed -= OnYardExternalAlarmClearProcessed;
             _yardCommunicationManager.ExternalAlarmFrameRejected -= OnYardExternalAlarmFrameRejected;
@@ -825,6 +826,7 @@ public partial class MainWindow : Window
         manager.AlarmForwardFailed += OnYardAlarmForwardFailed;
         manager.ExternalAlarmStatusSendFailed += OnYardExternalAlarmStatusSendFailed;
         manager.ExternalAlarmStatusSent += OnYardExternalAlarmStatusSent;
+        manager.ExternalAlarmStatusUpdated += OnYardExternalAlarmStatusUpdated;
         manager.ExternalAlarmFrameReceived += OnYardExternalAlarmFrameReceived;
         manager.ExternalAlarmClearProcessed += OnYardExternalAlarmClearProcessed;
         manager.ExternalAlarmFrameRejected += OnYardExternalAlarmFrameRejected;
@@ -855,6 +857,7 @@ public partial class MainWindow : Window
         }
 
         await manager.StartAllAsync();
+        LogYardEndpointDiagnostics(manager, project);
         _rfidListenerHealthy = IsCommunicationHealthy();
         UpdateHeaderStatusIndicators();
         _communicationPage.SetListenerStatus(
@@ -864,6 +867,36 @@ public partial class MainWindow : Window
         foreach (var diagnostic in manager.Diagnostics)
         {
             ((App)Application.Current).Logger.Warning(diagnostic);
+        }
+    }
+
+    private static void LogYardEndpointDiagnostics(
+        YardCommunicationManager manager,
+        ProjectConfig project)
+    {
+        foreach (var context in manager.Contexts.Values.OrderBy(
+                     item => item.Configuration.YardId,
+                     StringComparer.OrdinalIgnoreCase))
+        {
+            var configuration = context.Configuration;
+            var rfidEndpoint = configuration.TryResolveEndpoint(out var resolvedRfidEndpoint)
+                ? resolvedRfidEndpoint.ToString()
+                : "未配置";
+            var externalLocalEndpoint = configuration.TryResolveExternalAlarmEndpoint(out var resolvedExternalEndpoint)
+                ? resolvedExternalEndpoint.ToString()
+                : "未配置";
+            var targetConfiguration = project.YardAlarmForwards.FirstOrDefault(item =>
+                string.Equals(item.YardId, context.Configuration.YardId, StringComparison.OrdinalIgnoreCase));
+            var externalTargetEndpoint = targetConfiguration is not null &&
+                targetConfiguration.TryResolveEndpoint(out var resolvedTargetEndpoint)
+                ? resolvedTargetEndpoint.ToString()
+                : "未配置";
+
+            ((App)Application.Current).Logger.Information(
+                $"Yard={context.Configuration.YardId} " +
+                $"RFID监听端点={rfidEndpoint} " +
+                $"External本机端点={externalLocalEndpoint} " +
+                $"External目标端点={externalTargetEndpoint}");
         }
     }
 
@@ -1238,7 +1271,7 @@ public partial class MainWindow : Window
         ExternalAlarmStationSnapshot snapshot,
         byte[] payload)
     {
-        var stationKey = $"{context.YardId}:{snapshot.StationAddress:X2}";
+        var stationKey = $"{context.YardId}:{snapshot.StationId}";
         if (!_externalAlarmStatusChangeTracker.TryRecord(
                 stationKey,
                 snapshot.Status,
@@ -1263,6 +1296,16 @@ public partial class MainWindow : Window
                 snapshot,
                 payload,
                 DateTimeOffset.Now)));
+    }
+
+    private void OnYardExternalAlarmStatusUpdated(
+        YardCommunicationContext context,
+        ExternalAlarmStationSnapshot snapshot)
+    {
+        ((App)Application.Current).Logger.Information(
+            $"[ExternalUpdate] Yard={context.YardId} StationId={snapshot.StationId} " +
+            $"Address=0x{snapshot.StationAddress:X2} Status={snapshot.Status} " +
+            $"VehicleCount={snapshot.AccumulatedVehicleCount}");
     }
 
     private void OnYardExternalAlarmFrameReceived(
@@ -1320,6 +1363,7 @@ public partial class MainWindow : Window
                 manager.AlarmForwardFailed -= OnYardAlarmForwardFailed;
                 manager.ExternalAlarmStatusSendFailed -= OnYardExternalAlarmStatusSendFailed;
                 manager.ExternalAlarmStatusSent -= OnYardExternalAlarmStatusSent;
+                manager.ExternalAlarmStatusUpdated -= OnYardExternalAlarmStatusUpdated;
                 manager.ExternalAlarmFrameReceived -= OnYardExternalAlarmFrameReceived;
                 manager.ExternalAlarmClearProcessed -= OnYardExternalAlarmClearProcessed;
                 manager.ExternalAlarmFrameRejected -= OnYardExternalAlarmFrameRejected;
@@ -1723,6 +1767,7 @@ public partial class MainWindow : Window
 
     private void UpdateRfidRuntimeUi()
     {
+        _communicationPage.SetExternalAlarmStationStates(GetExternalAlarmDiagnostics());
         if (_monitorPage is null)
         {
             UpdateHeaderStatusIndicators();
@@ -2017,6 +2062,41 @@ public partial class MainWindow : Window
 
     private IReadOnlyList<StationRuntimeState> GetAllRuntimeStates() =>
         _yardCommunicationManager?.GetRuntimeStates() ?? Array.Empty<StationRuntimeState>();
+
+    private IReadOnlyList<ExternalAlarmStationDiagnostic> GetExternalAlarmDiagnostics()
+    {
+        if (_yardCommunicationManager is null)
+        {
+            return Array.Empty<ExternalAlarmStationDiagnostic>();
+        }
+
+        var diagnostics = new List<ExternalAlarmStationDiagnostic>();
+        foreach (var context in _yardCommunicationManager.Contexts.Values)
+        {
+            foreach (var runtimeState in context.RuntimeStates)
+            {
+                var hasExternalSnapshot = _yardCommunicationManager.TryGetExternalAlarmSnapshot(
+                    context.YardId,
+                    runtimeState.StationId,
+                    out var externalSnapshot,
+                    out var externalUpdatedAt);
+                diagnostics.Add(new ExternalAlarmStationDiagnostic
+                {
+                    YardId = context.YardId,
+                    StationId = runtimeState.StationId,
+                    StationAddress = runtimeState.StationAddress,
+                    RuntimeState = runtimeState.LifecycleState,
+                    ExternalStatus = hasExternalSnapshot ? externalSnapshot.Status : null,
+                    VehicleCount = hasExternalSnapshot
+                        ? externalSnapshot.AccumulatedVehicleCount
+                        : runtimeState.DetectedVehicleCount,
+                    LastUpdatedAt = hasExternalSnapshot ? externalUpdatedAt : runtimeState.LastResponseAt
+                });
+            }
+        }
+
+        return diagnostics;
+    }
 
     private IReadOnlyList<RfidStationPollingStatus> GetAllPollingStatuses() =>
         _yardCommunicationManager?.GetPollingStatuses() ?? Array.Empty<RfidStationPollingStatus>();

@@ -74,9 +74,16 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("本机收发端点", markup, StringComparison.Ordinal);
         Assert.Contains("固定 UDP Socket（发送/接收共用）", code, StringComparison.Ordinal);
         Assert.Contains("RfidTestControls.Visibility", code, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"ExternalAlarmLogList\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ExternalAlarmTxLogList\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ExternalAlarmRxLogList\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"状态\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"车厢数\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"CRC\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"解析结果\"", markup, StringComparison.Ordinal);
         Assert.Contains("AddExternalAlarmSent", code, StringComparison.Ordinal);
         Assert.Contains("AddExternalAlarmReceived", code, StringComparison.Ordinal);
+        Assert.Contains("_externalAlarmTxLogRows", code, StringComparison.Ordinal);
+        Assert.Contains("_externalAlarmRxLogRows", code, StringComparison.Ordinal);
         Assert.Contains("ExternalAlarmStatusSendFailed", mainWindowCode, StringComparison.Ordinal);
         Assert.Contains("ExternalAlarmFrameReceived", mainWindowCode, StringComparison.Ordinal);
     }

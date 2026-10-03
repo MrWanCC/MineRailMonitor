@@ -116,6 +116,69 @@ public sealed class ExternalAlarmStatusTests
     }
 
     [Fact]
+    public async Task Manager_migrates_latched_alarm_when_status_coordinator_is_reloaded()
+    {
+        var station = CreateStation("RFID-560-01", "560", 0x01, 62106);
+        var sender1 = new RecordingStatusSender();
+        var sender2 = new RecordingStatusSender();
+        var coordinator1 = CreateCoordinator(sender1);
+        var coordinator2 = CreateCoordinator(sender2);
+        var alarmTime = DateTimeOffset.UtcNow.AddMinutes(-1);
+        coordinator1.UpdateSnapshot(
+            station.StationId,
+            new ExternalAlarmStationSnapshot(
+                station.ProtocolAddress,
+                ExternalAlarmStatus.UncouplingAlarm,
+                accumulatedVehicleCount: 6,
+                stationId: station.StationId,
+                alarmLatched: true,
+                alarmTime: alarmTime),
+            alarmTime);
+
+        using var manager = new YardCommunicationManager(
+            new[] { CreateCommunication("560") },
+            new[] { station },
+            CreateSettings(),
+            new InMemoryPassageRecordStore(),
+            externalAlarmStatusCoordinators: new Dictionary<string, ExternalAlarmStatusCoordinator>
+            {
+                ["560"] = coordinator1
+            });
+
+        await coordinator1.StartAsync();
+        try
+        {
+            var initialAlarm = await sender1.WaitForStatusAsync((byte)ExternalAlarmStatus.UncouplingAlarm);
+            Assert.Equal(6, initialAlarm[7]);
+
+            manager.ApplyExternalAlarmStatusCoordinators(
+                new Dictionary<string, ExternalAlarmStatusCoordinator>
+                {
+                    ["560"] = coordinator2
+                });
+
+            await coordinator2.StartAsync();
+            var migratedAlarm = await sender2.WaitForStatusAsync((byte)ExternalAlarmStatus.UncouplingAlarm);
+            Assert.Equal(station.ProtocolAddress, migratedAlarm[2]);
+            Assert.Equal(6, migratedAlarm[7]);
+            Assert.True(coordinator2.SnapshotCache.TryGet(station.StationId, out var migratedSnapshot));
+            Assert.Equal(station.StationId, migratedSnapshot.StationId);
+            Assert.Equal(station.ProtocolAddress, migratedSnapshot.StationAddress);
+            Assert.Equal(ExternalAlarmStatus.UncouplingAlarm, migratedSnapshot.Status);
+            Assert.Equal(6, migratedSnapshot.AccumulatedVehicleCount);
+            Assert.True(migratedSnapshot.AlarmLatched);
+            Assert.Equal(alarmTime, migratedSnapshot.AlarmTime);
+
+            Assert.True(coordinator2.TryReleaseAlarm(station.ProtocolAddress, DateTimeOffset.UtcNow));
+            await sender2.WaitForStatusAsync((byte)ExternalAlarmStatus.Normal);
+        }
+        finally
+        {
+            await manager.StopAllAsync();
+        }
+    }
+
+    [Fact]
     public void Modbus_crc_calculator_matches_confirmed_external_frame_bytes()
     {
         var calculator = new ExternalAlarmModbusCrcCalculator();
@@ -283,6 +346,10 @@ public sealed class ExternalAlarmStatusTests
             {
                 ["560"] = coordinator
             });
+        var clearProcessed = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        manager.ExternalAlarmClearProcessed += (_, _, _, processed) =>
+            clearProcessed.TrySetResult(processed);
         var parser = new RfidFrameParser(new RfidFrameParserOptions { EmptyRfidValue = 0 });
         manager.DatagramReceived += (context, args) =>
         {
@@ -324,6 +391,14 @@ public sealed class ExternalAlarmStatusTests
                 clearFrame,
                 clearFrame.Length,
                 new IPEndPoint(IPAddress.Loopback, configuration.ExternalAlarmListenPort));
+            var clearCompleted = await Task.WhenAny(
+                clearProcessed.Task,
+                Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(clearProcessed.Task, clearCompleted);
+            Assert.True(await clearProcessed.Task);
+            Assert.True(coordinator.SnapshotCache.TryGet("RFID-560-01", out var releasedSnapshot));
+            Assert.Equal(ExternalAlarmStatus.Normal, releasedSnapshot.Status);
+            Assert.False(releasedSnapshot.AlarmLatched);
             await WaitForAsync(() =>
                 context.RuntimeStates.Single().LifecycleState is
                     PassageLifecycleState.Clearing or PassageLifecycleState.WaitForEmpty);

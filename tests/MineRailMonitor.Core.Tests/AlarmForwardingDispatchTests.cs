@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using MineRailMonitor.Core.Communication;
 using MineRailMonitor.Core.ExternalAlarm;
 using MineRailMonitor.Core.Interfaces;
@@ -138,14 +139,161 @@ public sealed class AlarmForwardingDispatchTests
         Assert.Equal(beforeErrorCount, context.ErrorCount);
     }
 
+    [Fact]
+    public async Task Recovery_tx_log_keeps_yard_and_station_identity_when_addresses_match()
+    {
+        var station560 = CreateStation("RFID-560-01", "560", 0x01, GetUnusedPort());
+        var station620 = CreateStation("RFID-620-01", "620", 0x01, GetUnusedPort());
+        var sender560 = new RecordingExternalAlarmStatusSender();
+        var sender620 = new RecordingExternalAlarmStatusSender();
+        var coordinator560 = CreateStatusCoordinator(sender560);
+        var coordinator620 = CreateStatusCoordinator(sender620);
+        using var manager = new YardCommunicationManager(
+            new[]
+            {
+                CreateCommunication("560"),
+                CreateCommunication("620")
+            },
+            new[] { station560, station620 },
+            CreateSettings(),
+            new InMemoryPassageRecordStore(),
+            externalAlarmStatusCoordinators: new Dictionary<string, ExternalAlarmStatusCoordinator>
+            {
+                ["560"] = coordinator560,
+                ["620"] = coordinator620
+            });
+        var normalTx = new List<(string YardId, string StationId, byte Address, int VehicleCount)>();
+        var normalTxSync = new object();
+        manager.ExternalAlarmStatusSent += (context, snapshot, _) =>
+        {
+            if (snapshot.Status != ExternalAlarmStatus.Normal)
+            {
+                return;
+            }
+
+            lock (normalTxSync)
+            {
+                normalTx.Add((
+                    context.YardId,
+                    snapshot.StationId,
+                    snapshot.StationAddress,
+                    snapshot.AccumulatedVehicleCount));
+            }
+        };
+
+        await coordinator560.StartAsync();
+        await coordinator620.StartAsync();
+        try
+        {
+            var context560 = manager.GetContext("560")!;
+            var context620 = manager.GetContext("620")!;
+            var testStart = DateTimeOffset.UtcNow;
+            TriggerAlarm(context560, station560, new byte[] { 0x56, 0x01 }, testStart);
+            TriggerAlarm(context620, station620, new byte[] { 0x62, 0x01 }, testStart);
+            await sender560.WaitForStatusAsync((byte)ExternalAlarmStatus.UncouplingAlarm);
+            await sender620.WaitForStatusAsync((byte)ExternalAlarmStatus.UncouplingAlarm);
+
+            lock (normalTxSync)
+            {
+                normalTx.Clear();
+            }
+
+            ReleaseAndRecover(context560, coordinator560, station560, testStart);
+            ReleaseAndRecover(context620, coordinator620, station620, testStart);
+            Assert.True(coordinator560.SnapshotCache.TryGet("RFID-560-01", out var recovery560));
+            Assert.Equal(ExternalAlarmStatus.Normal, recovery560.Status);
+            Assert.Equal("RFID-560-01", recovery560.StationId);
+            Assert.True(coordinator620.SnapshotCache.TryGet("RFID-620-01", out var recovery620));
+            Assert.Equal(ExternalAlarmStatus.Normal, recovery620.Status);
+            Assert.Equal("RFID-620-01", recovery620.StationId);
+            await sender560.WaitForStatusAsync((byte)ExternalAlarmStatus.Normal);
+            await sender620.WaitForStatusAsync((byte)ExternalAlarmStatus.Normal);
+            await WaitForAsync(() =>
+            {
+                lock (normalTxSync)
+                {
+                    return normalTx.Any(item => item.YardId == "560") &&
+                           normalTx.Any(item => item.YardId == "620");
+                }
+            });
+
+            lock (normalTxSync)
+            {
+                var tx560 = normalTx.Last(item => item.YardId == "560");
+                var tx620 = normalTx.Last(item => item.YardId == "620");
+                Assert.Equal("RFID-560-01", tx560.StationId);
+                Assert.Equal("RFID-620-01", tx620.StationId);
+                Assert.Equal((byte)0x01, tx560.Address);
+                Assert.Equal((byte)0x01, tx620.Address);
+                Assert.Equal(2, tx560.VehicleCount);
+                Assert.Equal(2, tx620.VehicleCount);
+            }
+        }
+        finally
+        {
+            await coordinator560.StopAsync();
+            await coordinator620.StopAsync();
+        }
+    }
+
     private static void TriggerAlarm(
         YardCommunicationContext context,
         RfidStationConfig station,
-        byte[] rawPayload)
+        byte[] rawPayload,
+        DateTimeOffset? start = null)
     {
-        context.ProcessFrame(CreateFrame(station, Start, new ushort[] { 0x0001, 0x0011 }, rawPayload));
-        context.ProcessFrame(CreateFrame(station, Start.AddSeconds(29.9), new ushort[] { 0x0001, 0x0011 }, new byte[] { 0x7F, 0x7F }));
-        context.Evaluate(Start.AddSeconds(30));
+        var startedAt = start ?? Start;
+        context.ProcessFrame(CreateFrame(station, startedAt, new ushort[] { 0x0001, 0x0011 }, rawPayload));
+        context.ProcessFrame(CreateFrame(station, startedAt.AddSeconds(29.9), new ushort[] { 0x0001, 0x0011 }, new byte[] { 0x7F, 0x7F }));
+        context.Evaluate(startedAt.AddSeconds(30));
+    }
+
+    private static void ReleaseAndRecover(
+        YardCommunicationContext context,
+        ExternalAlarmStatusCoordinator coordinator,
+        RfidStationConfig station,
+        DateTimeOffset start)
+    {
+        var acknowledgedAt = start.AddSeconds(31);
+        Assert.True(coordinator.TryReleaseAlarm(station.ProtocolAddress, acknowledgedAt));
+        Assert.True(context.TryProcessExternalAlarmClear(
+            new ExternalAlarmClearCommand(station.ProtocolAddress, 0x01, new byte[12]),
+            acknowledgedAt));
+        context.RuntimeCoordinator!.MarkCommandSent(
+            station,
+            RfidPollCommand.Clear,
+            acknowledgedAt);
+        context.ProcessFrame(CreateFrame(
+            station,
+            start.AddSeconds(32),
+            Array.Empty<ushort>(),
+            new byte[] { 0x80 }));
+        context.ProcessFrame(CreateFrame(
+            station,
+            start.AddSeconds(33),
+            Array.Empty<ushort>(),
+            new byte[] { 0x81 }));
+        Assert.Equal(PassageLifecycleState.Idle, context.RuntimeStates.Single().LifecycleState);
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(3);
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new TimeoutException("等待 External Alarm 恢复发送超时。");
+            }
+
+            await Task.Delay(10).ConfigureAwait(false);
+        }
+    }
+
+    private static int GetUnusedPort()
+    {
+        using var socket = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        return ((IPEndPoint)socket.Client.LocalEndPoint!).Port;
     }
 
     private static YardCommunicationConfig CreateCommunication(string yardId) => new()

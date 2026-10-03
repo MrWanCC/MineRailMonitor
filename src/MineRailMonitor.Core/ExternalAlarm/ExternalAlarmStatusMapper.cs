@@ -4,13 +4,17 @@ namespace MineRailMonitor.Core.ExternalAlarm;
 
 public static class ExternalAlarmStatusMapper
 {
-    public static ExternalAlarmStatus FromLifecycleState(PassageLifecycleState lifecycleState) =>
+    public static ExternalAlarmStatus FromLifecycleState(
+        PassageLifecycleState lifecycleState,
+        PassageOutcome? passageOutcome = null) =>
         lifecycleState switch
         {
             PassageLifecycleState.Idle => ExternalAlarmStatus.NoVehicle,
             PassageLifecycleState.Recognizing => ExternalAlarmStatus.Recognizing,
             PassageLifecycleState.Completed => ExternalAlarmStatus.Normal,
             PassageLifecycleState.Alarm => ExternalAlarmStatus.UncouplingAlarm,
+            PassageLifecycleState.Clearing when passageOutcome == PassageOutcome.Completed => ExternalAlarmStatus.Normal,
+            PassageLifecycleState.WaitForEmpty when passageOutcome == PassageOutcome.Completed => ExternalAlarmStatus.Normal,
             PassageLifecycleState.Clearing => ExternalAlarmStatus.UncouplingAlarm,
             PassageLifecycleState.WaitForEmpty => ExternalAlarmStatus.UncouplingAlarm,
             PassageLifecycleState.Finalizing => ExternalAlarmStatus.Normal,
@@ -23,7 +27,8 @@ public static class ExternalAlarmStatusMapper
 
         return new ExternalAlarmStationSnapshot(
             state.StationAddress,
-            FromLifecycleState(state.LifecycleState),
-            state.DetectedVehicleCount);
+            FromLifecycleState(state.LifecycleState, state.LastPassageRecord?.Outcome),
+            state.DetectedVehicleCount,
+            state.StationId);
     }
 }

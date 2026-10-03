@@ -27,6 +27,16 @@ public sealed class ExternalAlarmCompositionMarkupTests
         Assert.DoesNotContain("_rfidListenerHealthy = false", code, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Main_window_logs_all_yard_udp_endpoints_at_startup()
+    {
+        var code = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "MainWindow.xaml.cs"));
+
+        Assert.Contains("RFID监听端点=", code, StringComparison.Ordinal);
+        Assert.Contains("External本机端点=", code, StringComparison.Ordinal);
+        Assert.Contains("External目标端点=", code, StringComparison.Ordinal);
+    }
+
     private static string LocateSourceFile(params string[] segments)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

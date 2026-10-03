@@ -220,11 +220,15 @@ public sealed class SettingsPageMarkupTests
         Assert.Contains("每个站场使用独立监听地址和端口", markup, StringComparison.Ordinal);
         Assert.Contains("监听 IP", markup, StringComparison.Ordinal);
         Assert.Contains("监听端口", markup, StringComparison.Ordinal);
-        Assert.Contains("本机收发端口", markup, StringComparison.Ordinal);
-        Assert.Contains("本机 IP", markup, StringComparison.Ordinal);
-        Assert.Contains("本机 IP（绑定）", markup, StringComparison.Ordinal);
-        Assert.Contains("本机收发端口（固定）", markup, StringComparison.Ordinal);
-        Assert.Contains("发送和接收共用本机固定端口", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"外部服务器 IP\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"服务器端口\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"本机通信 IP\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"本机通信端口\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("外部服务器IP", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("外部服务器端口", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("本机 IP（绑定）", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("本机收发端口（固定）", markup, StringComparison.Ordinal);
+        Assert.Contains("发送和接收共用本机通信端口；启用报警转发后需要填写。", markup, StringComparison.Ordinal);
         Assert.Contains("ExternalAlarmListenIp", markup, StringComparison.Ordinal);
         Assert.Contains("ExternalAlarmListenPort", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("本机发送端口", markup, StringComparison.Ordinal);
@@ -234,6 +238,7 @@ public sealed class SettingsPageMarkupTests
         Assert.Contains("EditedRows", code, StringComparison.Ordinal);
         Assert.Contains("AlarmForwardSourcePort", code, StringComparison.Ordinal);
         Assert.Contains("ValidateExternalAlarm", settingsCode, StringComparison.Ordinal);
+        Assert.Contains("External Alarm 本机端点重复", settingsCode, StringComparison.Ordinal);
     }
 
     [Fact]

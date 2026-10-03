@@ -33,6 +33,8 @@ public partial class YardCommunicationConfigDialog : Window
 
     public bool IsEditingEnabled { get; }
 
+    public bool IsReadOnly => !IsEditingEnabled;
+
     public IReadOnlyList<YardCommunicationEditorRow> EditedRows => _rows;
 
     private void OnSaveClick(object sender, RoutedEventArgs e) => DialogResult = IsEditingEnabled;

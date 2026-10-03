@@ -55,6 +55,68 @@ public sealed class YardCommunicationManagerTests
     }
 
     [Fact]
+    public void Rejects_duplicate_external_alarm_local_endpoints_when_constructing_manager()
+    {
+        var externalPort = GetUnusedPort();
+        var first = CreateCommunication("560");
+        first.ExternalAlarmListenIp = IPAddress.Loopback.ToString();
+        first.ExternalAlarmListenPort = externalPort;
+        var second = CreateCommunication("620");
+        second.ExternalAlarmListenIp = IPAddress.Loopback.ToString();
+        second.ExternalAlarmListenPort = externalPort;
+
+        var exception = Assert.Throws<ArgumentException>(() => new YardCommunicationManager(
+            new[] { first, second },
+            Array.Empty<RfidStationConfig>(),
+            CreateSettings(),
+            new InMemoryPassageRecordStore()));
+
+        Assert.Contains("外部报警监听端点重复", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Allows_duplicate_station_addresses_and_reports_clear_ambiguity()
+    {
+        var communication = CreateCommunication("620");
+        communication.ExternalAlarmListenPort = GetUnusedPort();
+        var stations = new[]
+        {
+            CreateStation("RFID-620-01", "620", 0x01, 63201),
+            CreateStation("RFID-620-02", "620", 0x01, 63202)
+        };
+
+        using var manager = new YardCommunicationManager(
+            new[] { communication },
+            stations,
+            CreateSettings(),
+            new InMemoryPassageRecordStore());
+
+        Assert.Contains(manager.Diagnostics, message => message.IndexOf("重复 RFID 基站地址 0x01", StringComparison.Ordinal) >= 0);
+    }
+
+    [Fact]
+    public async Task Applying_external_alarm_clear_with_duplicate_station_addresses_is_allowed()
+    {
+        var stations = new[]
+        {
+            CreateStation("RFID-620-01", "620", 0x01, 63211),
+            CreateStation("RFID-620-02", "620", 0x01, 63212)
+        };
+        using var manager = new YardCommunicationManager(
+            new[] { CreateCommunication("620") },
+            stations,
+            CreateSettings(),
+            new InMemoryPassageRecordStore());
+        var candidate = CreateCommunication("620");
+        candidate.ExternalAlarmListenPort = GetUnusedPort();
+
+        await manager.ApplyConfigurationsAsync(new[] { candidate });
+
+        Assert.Equal(candidate.ExternalAlarmListenPort, manager.GetContext("620")!.Configuration.ExternalAlarmListenPort);
+        Assert.Contains(manager.Diagnostics, message => message.IndexOf("重复 RFID 基站地址 0x01", StringComparison.Ordinal) >= 0);
+    }
+
+    [Fact]
     public async Task Stopping_and_restarting_one_yard_does_not_change_the_other_yard()
     {
         var station560 = CreateStation("RFID-01", "560", 0x01, 63111);

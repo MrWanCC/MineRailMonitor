@@ -7,6 +7,45 @@ namespace MineRailMonitor.Infrastructure.Tests;
 public sealed class ProjectConfigPersistenceTests
 {
     [Fact]
+    public async Task Saving_duplicate_station_addresses_is_allowed_when_yard_external_alarm_is_active()
+    {
+        const string manifest = """
+            {
+              "Id": "Temporary",
+              "Name": "Temporary Project",
+              "DefaultStationId": "560",
+              "RfidStations": [],
+              "YardCommunications": [
+                { "YardId": "560", "ListenIp": "127.0.0.1", "ListenPort": 64100, "ExternalAlarmListenPort": 64101, "Enabled": true }
+              ],
+              "Stations": [ { "Id": "560", "ConfigFile": "stations/560.json" } ]
+            }
+            """;
+        using var project = TemporaryProject.Create(twoStations: false, manifest: manifest);
+        var service = CreateService();
+        var stations = new[]
+        {
+            new RfidStationConfig
+            {
+                StationId = "RFID-560-01", Name = "一号", YardId = "560",
+                IpAddress = "127.0.0.1", Port = 64201, ProtocolAddress = 0x01, Enabled = true
+            },
+            new RfidStationConfig
+            {
+                StationId = "RFID-560-02", Name = "二号", YardId = "560",
+                IpAddress = "127.0.0.1", Port = 64202, ProtocolAddress = 0x01, Enabled = true
+            }
+        };
+
+        var result = await service.SaveRfidStationsAsync(project.Path, stations);
+
+        Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Errors));
+        var reloaded = await service.LoadAsync(project.Path);
+        Assert.True(reloaded.Succeeded, string.Join(Environment.NewLine, reloaded.Errors));
+        Assert.Equal(2, reloaded.Project!.RfidStations.Count);
+    }
+
+    [Fact]
     public async Task Saves_coordinates_without_dropping_unknown_fields_or_map_protocol_configuration()
     {
         using var project = TemporaryProject.Create(twoStations: false);

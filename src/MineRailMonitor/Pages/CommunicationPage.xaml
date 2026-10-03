@@ -741,6 +741,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="54" />
                         <RowDefinition Height="76" />
+                        <RowDefinition Height="170" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
@@ -776,64 +777,189 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="2" Style="{StaticResource CommunicationSectionStyle}" Padding="8">
+                    <Border Grid.Row="2" Style="{StaticResource CommunicationSectionStyle}" Padding="8" Margin="0,0,0,6">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="34" />
                                 <RowDefinition Height="28" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <DockPanel VerticalAlignment="Center">
-                                <StackPanel Orientation="Horizontal">
-                                    <Border Width="4" Height="21" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
-                                    <TextBlock Text="外部接口收发日志" Style="{StaticResource SectionTitleStyle}" FontSize="15" />
-                                    <TextBlock Text="  ·  最近 100 条" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
-                                </StackPanel>
-                            </DockPanel>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Width="4" Height="21" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                                <TextBlock Text="实时状态" Style="{StaticResource SectionTitleStyle}" FontSize="15" />
+                                <TextBlock Text="  ·  每个站场 / 基站独立快照" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                            </StackPanel>
                             <Grid Grid.Row="1" Background="{StaticResource DataGridHeaderBrush}">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="94" />
-                                    <ColumnDefinition Width="50" />
-                                    <ColumnDefinition Width="42" />
+                                    <ColumnDefinition Width="48" />
+                                    <ColumnDefinition Width="145" />
+                                    <ColumnDefinition Width="58" />
+                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="58" />
                                     <ColumnDefinition Width="150" />
-                                    <ColumnDefinition Width="54" />
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="190" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="时间" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
-                                <TextBlock Grid.Column="1" Text="站场" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="2" Text="方向" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="3" Text="端点" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="4" Text="长度" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="5" Text="HEX" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="6" Text="结果" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Text="Yard" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
+                                <TextBlock Grid.Column="1" Text="Station" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2" Text="Byte2" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="3" Text="Runtime状态" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="4" Text="External状态" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="5" Text="车厢数" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="6" Text="最后更新时间" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
                             </Grid>
-                            <ListView x:Name="ExternalAlarmLogList" Grid.Row="2" Style="{StaticResource CommunicationLogListStyle}">
+                            <ListView x:Name="ExternalAlarmStateList" Grid.Row="2" Style="{StaticResource CommunicationLogListStyle}">
                                 <ListView.ItemTemplate>
                                     <DataTemplate>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="94" />
-                                                <ColumnDefinition Width="50" />
-                                                <ColumnDefinition Width="42" />
+                                                <ColumnDefinition Width="48" />
+                                                <ColumnDefinition Width="145" />
+                                                <ColumnDefinition Width="58" />
+                                                <ColumnDefinition Width="180" />
+                                                <ColumnDefinition Width="180" />
+                                                <ColumnDefinition Width="58" />
                                                 <ColumnDefinition Width="150" />
-                                                <ColumnDefinition Width="54" />
                                                 <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="190" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
-                                            <TextBlock Grid.Column="1" Text="{Binding YardText}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="2" Text="{Binding DirectionText}" Foreground="{StaticResource AccentBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="3" Text="{Binding EndpointText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="4" Text="{Binding LengthText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="5" Text="{Binding DataText}" Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                            <TextBlock Grid.Column="6" Text="{Binding DescriptionText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding YardText}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
+                                            <TextBlock Grid.Column="1" Text="{Binding StationText}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="{Binding AddressText}" Foreground="{StaticResource AccentBrush}" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="3" Text="{Binding RuntimeStatusText}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="4" Text="{Binding ExternalStatusText}" Foreground="{StaticResource AccentBrush}" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="5" Text="{Binding VehicleCountText}" Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="6" Text="{Binding LastUpdatedText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center" />
                                         </Grid>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
                             </ListView>
                         </Grid>
                     </Border>
+
+                    <Grid Grid.Row="3">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.15*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="1*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Column="0" Style="{StaticResource CommunicationSectionStyle}" Padding="8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="34" />
+                                    <RowDefinition Height="28" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Width="4" Height="21" Background="{StaticResource AccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                                    <TextBlock Text="TX 发送" Style="{StaticResource SectionTitleStyle}" FontSize="15" />
+                                    <TextBlock Text="  ·  最近 100 条" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <Grid Grid.Row="1" Background="{StaticResource DataGridHeaderBrush}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="78" />
+                                        <ColumnDefinition Width="42" />
+                                        <ColumnDefinition Width="108" />
+                                        <ColumnDefinition Width="54" />
+                                        <ColumnDefinition Width="88" />
+                                        <ColumnDefinition Width="48" />
+                                        <ColumnDefinition Width="138" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="时间" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
+                                    <TextBlock Grid.Column="1" Text="站场" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="Station" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="3" Text="Byte2" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="4" Text="Byte4状态" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="5" Text="Byte7" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="6" Text="TargetIP:Port" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="7" Text="HEX / 结果" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                </Grid>
+                                <ListView x:Name="ExternalAlarmTxLogList" Grid.Row="2" Style="{StaticResource CommunicationLogListStyle}">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="78" />
+                                                    <ColumnDefinition Width="42" />
+                                                    <ColumnDefinition Width="108" />
+                                                    <ColumnDefinition Width="54" />
+                                                    <ColumnDefinition Width="88" />
+                                                    <ColumnDefinition Width="48" />
+                                                    <ColumnDefinition Width="138" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center" Margin="8,0" />
+                                                <TextBlock Grid.Column="1" Text="{Binding YardText}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="2" Text="{Binding StationText}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="3" Text="{Binding AddressText}" Foreground="{StaticResource AccentBrush}" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="4" Text="{Binding StatusText}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="5" Text="{Binding VehicleCountText}" Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="6" Text="{Binding TargetText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                <StackPanel Grid.Column="7" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding DataText}" Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding ResultText}" Foreground="{StaticResource SuccessBrush}" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Column="2" Style="{StaticResource CommunicationSectionStyle}" Padding="8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="34" />
+                                    <RowDefinition Height="28" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Width="4" Height="21" Background="{StaticResource SuccessBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                                    <TextBlock Text="RX 接收" Style="{StaticResource SectionTitleStyle}" FontSize="15" />
+                                    <TextBlock Text="  ·  最近 100 条" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <Grid Grid.Row="1" Background="{StaticResource DataGridHeaderBrush}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="82" />
+                                        <ColumnDefinition Width="42" />
+                                        <ColumnDefinition Width="145" />
+                                        <ColumnDefinition Width="78" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="180" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="时间" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
+                                    <TextBlock Grid.Column="1" Text="站场" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="来源IP端口" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="3" Text="CRC" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="4" Text="HEX" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="5" Text="解析结果" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                </Grid>
+                                <ListView x:Name="ExternalAlarmRxLogList" Grid.Row="2" Style="{StaticResource CommunicationLogListStyle}">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="82" />
+                                                    <ColumnDefinition Width="42" />
+                                                    <ColumnDefinition Width="145" />
+                                                    <ColumnDefinition Width="78" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="180" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="10" VerticalAlignment="Center" Margin="8,0" />
+                                                <TextBlock Grid.Column="1" Text="{Binding YardText}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="11" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="2" Text="{Binding SourceText}" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="3" Text="{Binding CrcText}" Foreground="{StaticResource SuccessBrush}" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="4" Text="{Binding DataText}" Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="5" Text="{Binding ParseResultText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Grid>
             </TabItem>
         </TabControl>

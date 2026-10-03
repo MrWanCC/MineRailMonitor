@@ -64,6 +64,12 @@ public sealed class ExternalAlarmPhase3AcceptanceTests
             cache.Update("RFID-560-01", Snapshot(ExternalAlarmStatus.UncouplingAlarm, 5));
             await sender.WaitForPayloadAsync(IsStatus(ExternalAlarmStatus.UncouplingAlarm));
             cache.Update("RFID-560-01", Snapshot(ExternalAlarmStatus.Normal, 5));
+            await Task.Delay(TimeSpan.FromMilliseconds(150));
+            Assert.DoesNotContain(
+                sender.SnapshotPayloads(),
+                payload => payload[4] == (byte)ExternalAlarmStatus.Normal);
+            Assert.True(cache.TryReleaseAlarm(0x01, DateTimeOffset.UtcNow, out var released));
+            Assert.Equal(ExternalAlarmStatus.Normal, released.Status);
             await sender.WaitForPayloadAsync(IsStatus(ExternalAlarmStatus.Normal));
             var afterNormal = sender.Count;
             await sender.WaitForPayloadAsync(

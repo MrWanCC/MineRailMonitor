@@ -42,6 +42,60 @@ public sealed class ExternalAlarmStatusCoordinator : IDisposable
         }
     }
 
+    public IReadOnlyList<ExternalAlarmCoordinatorState> ExportState(string yardId)
+    {
+        if (string.IsNullOrWhiteSpace(yardId))
+        {
+            throw new ArgumentException("站场编号不能为空。", nameof(yardId));
+        }
+
+        return _snapshotCache.GetAll()
+            .Select(snapshot => new ExternalAlarmCoordinatorState(
+                yardId,
+                snapshot.StationId,
+                snapshot.StationAddress,
+                snapshot.Status,
+                snapshot.AccumulatedVehicleCount,
+                snapshot.AlarmLatched,
+                snapshot.AlarmTime))
+            .ToArray();
+    }
+
+    public void RestoreState(IEnumerable<ExternalAlarmCoordinatorState> states)
+    {
+        if (states is null) throw new ArgumentNullException(nameof(states));
+
+        IReadOnlyDictionary<string, byte> configuredStations;
+        lock (_syncRoot)
+        {
+            ThrowIfDisposed();
+            configuredStations = _stations;
+        }
+
+        foreach (var state in states)
+        {
+            if (state is null || !configuredStations.ContainsKey(state.StationId))
+            {
+                continue;
+            }
+
+            var status = state.AlarmLatched
+                ? ExternalAlarmStatus.UncouplingAlarm
+                : state.Status;
+            var snapshot = new ExternalAlarmStationSnapshot(
+                state.StationAddress,
+                status,
+                state.VehicleCount,
+                state.StationId,
+                state.AlarmLatched,
+                state.AlarmTime);
+            _snapshotCache.Update(
+                state.StationId,
+                snapshot,
+                state.AlarmTime ?? DateTimeOffset.UtcNow);
+        }
+    }
+
     public void ConfigureStations(IEnumerable<RfidStationConfig> stations)
     {
         if (stations is null) throw new ArgumentNullException(nameof(stations));
@@ -86,6 +140,15 @@ public sealed class ExternalAlarmStatusCoordinator : IDisposable
         ExternalAlarmStationSnapshot snapshot,
         DateTimeOffset? updatedAt = null) =>
         _snapshotCache.Update(stationId, snapshot, updatedAt);
+
+    public bool TryReleaseAlarm(byte stationAddress, DateTimeOffset releasedAt) =>
+        TryReleaseAlarm(stationAddress, releasedAt, out _);
+
+    public bool TryReleaseAlarm(
+        byte stationAddress,
+        DateTimeOffset releasedAt,
+        out ExternalAlarmStationSnapshot snapshot) =>
+        _snapshotCache.TryReleaseAlarm(stationAddress, releasedAt, out snapshot);
 
     public Task StartAsync(CancellationToken cancellationToken = default)
     {

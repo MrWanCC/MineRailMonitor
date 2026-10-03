@@ -126,6 +126,8 @@ public sealed class YardCommunicationManager : IDisposable
 
     public event Action<YardCommunicationContext, ExternalAlarmStationSnapshot, byte[]>? ExternalAlarmStatusSent;
 
+    public event Action<YardCommunicationContext, ExternalAlarmStationSnapshot>? ExternalAlarmStatusUpdated;
+
     public event Action<YardCommunicationContext, byte[], IPEndPoint, bool, DateTimeOffset>? ExternalAlarmFrameReceived;
 
     public event Action<YardCommunicationContext, ExternalAlarmClearCommand, IPEndPoint, bool>? ExternalAlarmClearProcessed;
@@ -142,6 +144,23 @@ public sealed class YardCommunicationManager : IDisposable
         }
 
         return _contexts.TryGetValue(yardId.Trim(), out var context) ? context : null;
+    }
+
+    public bool TryGetExternalAlarmSnapshot(
+        string yardId,
+        string stationId,
+        out ExternalAlarmStationSnapshot snapshot,
+        out DateTimeOffset updatedAt)
+    {
+        if (string.IsNullOrWhiteSpace(yardId) || string.IsNullOrWhiteSpace(stationId) ||
+            !_externalAlarmStatusCoordinators.TryGetValue(yardId.Trim(), out var coordinator))
+        {
+            snapshot = null!;
+            updatedAt = default;
+            return false;
+        }
+
+        return coordinator.SnapshotCache.TryGet(stationId, out snapshot, out updatedAt);
     }
 
     public async Task StartAllAsync(CancellationToken cancellationToken = default)
@@ -279,6 +298,10 @@ public sealed class YardCommunicationManager : IDisposable
 
         ThrowIfDisposed();
         var previousCoordinators = _externalAlarmStatusCoordinators;
+        var previousStates = previousCoordinators.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.ExportState(pair.Key),
+            StringComparer.OrdinalIgnoreCase);
         _externalAlarmStatusCoordinators = CopyExternalAlarmStatusCoordinators(externalAlarmStatusCoordinators);
         foreach (var context in _contexts.Values)
         {
@@ -287,6 +310,16 @@ public sealed class YardCommunicationManager : IDisposable
                 : _externalAlarmStatusCoordinators.TryGetValue(context.YardId, out var configuredCoordinator)
                     ? configuredCoordinator
                     : null;
+
+            var isReplacement = previousCoordinators.TryGetValue(context.YardId, out var previousCoordinator) &&
+                !ReferenceEquals(previousCoordinator, coordinator);
+            if (isReplacement && coordinator is not null &&
+                previousStates.TryGetValue(context.YardId, out var states))
+            {
+                coordinator.ConfigureStations(context.Stations);
+                coordinator.RestoreState(states);
+            }
+
             context.UpdateExternalAlarmStatusCoordinator(coordinator);
             context.UpdateExternalAlarmUdpChannel(coordinator?.Sender as ExternalAlarmUdpChannel);
         }
@@ -509,6 +542,7 @@ public sealed class YardCommunicationManager : IDisposable
         context.AlarmForwardFailed += OnContextAlarmForwardFailed;
         context.ExternalAlarmStatusSendFailed += OnContextExternalAlarmStatusSendFailed;
         context.ExternalAlarmStatusSent += OnContextExternalAlarmStatusSent;
+        context.ExternalAlarmStatusUpdated += OnContextExternalAlarmStatusUpdated;
         context.ExternalAlarmFrameReceived += OnContextExternalAlarmFrameReceived;
         context.ExternalAlarmClearProcessed += OnContextExternalAlarmClearProcessed;
         context.ExternalAlarmFrameRejected += OnContextExternalAlarmFrameRejected;
@@ -529,6 +563,7 @@ public sealed class YardCommunicationManager : IDisposable
         context.AlarmForwardFailed -= OnContextAlarmForwardFailed;
         context.ExternalAlarmStatusSendFailed -= OnContextExternalAlarmStatusSendFailed;
         context.ExternalAlarmStatusSent -= OnContextExternalAlarmStatusSent;
+        context.ExternalAlarmStatusUpdated -= OnContextExternalAlarmStatusUpdated;
         context.ExternalAlarmFrameReceived -= OnContextExternalAlarmFrameReceived;
         context.ExternalAlarmClearProcessed -= OnContextExternalAlarmClearProcessed;
         context.ExternalAlarmFrameRejected -= OnContextExternalAlarmFrameRejected;
@@ -619,6 +654,11 @@ public sealed class YardCommunicationManager : IDisposable
         ExternalAlarmStationSnapshot snapshot,
         byte[] payload) =>
         ExternalAlarmStatusSent?.Invoke(context, snapshot, payload);
+
+    private void OnContextExternalAlarmStatusUpdated(
+        YardCommunicationContext context,
+        ExternalAlarmStationSnapshot snapshot) =>
+        ExternalAlarmStatusUpdated?.Invoke(context, snapshot);
 
     private void OnContextExternalAlarmFrameReceived(
         YardCommunicationContext context,

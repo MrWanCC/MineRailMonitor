@@ -1332,6 +1332,22 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             errors.Add($"启用的站场监听端点重复：{duplicate.First().ListenIp}:{duplicate.First().ListenPort}。");
         }
 
+        foreach (var duplicate in configurations
+                     .Where(configuration => configuration.Enabled && configuration.TryResolveExternalAlarmEndpoint(out _))
+                     .GroupBy(configuration =>
+                         configuration.TryResolveExternalAlarmEndpoint(out var endpoint)
+                             ? $"{endpoint.Address}|{endpoint.Port}"
+                             : string.Empty,
+                         StringComparer.OrdinalIgnoreCase)
+                     .Where(group => group.Count() > 1))
+        {
+            var yards = string.Join("、", duplicate.Select(configuration => configuration.YardId));
+            var endpoint = duplicate.First().TryResolveExternalAlarmEndpoint(out var resolvedEndpoint)
+                ? resolvedEndpoint.ToString()
+                : $"{duplicate.First().ExternalAlarmListenIp}:{duplicate.First().ExternalAlarmListenPort}";
+            errors.Add($"站场 {yards} 的 External Alarm 本机端点重复：{endpoint}。");
+        }
+
         return configurations;
     }
 

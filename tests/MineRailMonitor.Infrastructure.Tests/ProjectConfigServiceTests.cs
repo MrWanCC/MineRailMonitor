@@ -208,7 +208,8 @@ public sealed class ProjectConfigServiceTests
     public async Task Loads_sanitized_example_project_without_field_map_data()
     {
         var service = CreateService();
-        var projectDirectory = Path.Combine(AppContext.BaseDirectory, "Projects", "Example");
+        var projectsDirectory = Path.Combine(AppContext.BaseDirectory, "Projects");
+        var projectDirectory = ProjectDirectoryResolver.Resolve(projectsDirectory, acceptanceMode: true);
 
         var result = await service.LoadAsync(projectDirectory);
 
@@ -216,6 +217,19 @@ public sealed class ProjectConfigServiceTests
         Assert.NotNull(result.Project);
         Assert.Equal("Example", result.Project!.Id);
         Assert.Empty(result.Project.Vehicles);
+        Assert.Null(result.Project.RfidSettings.ExpectedVehicleCount);
+        Assert.DoesNotContain(result.Project.Vehicles, vehicle => vehicle.VehicleNo == "K001" || vehicle.VehicleNo == "K002");
+        Assert.All(result.Project.RfidStations, item =>
+            Assert.True(System.Net.IPAddress.IsLoopback(System.Net.IPAddress.Parse(item.IpAddress))));
+        Assert.All(result.Project.YardCommunications, item =>
+            Assert.True(System.Net.IPAddress.IsLoopback(System.Net.IPAddress.Parse(item.ListenIp))));
+        using (var manifest = System.Text.Json.JsonDocument.Parse(
+                   File.ReadAllText(Path.Combine(projectDirectory, "project.json"))))
+        {
+            Assert.True(manifest.RootElement.TryGetProperty("Vehicles", out var vehicles));
+            Assert.Equal(System.Text.Json.JsonValueKind.Array, vehicles.ValueKind);
+            Assert.Empty(vehicles.EnumerateArray());
+        }
         var station = Assert.Single(result.Project!.Stations, station => station.Id == "560");
         Assert.Empty(station.Points);
         Assert.Empty(station.Labels);

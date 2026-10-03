@@ -4,7 +4,6 @@
   "DefaultStationId": "560",
   "RfidSettings": {
     "PollIntervalMs": 200,
-    "ExpectedVehicleCount": 11,
     "InterVehicleTimeoutSeconds": 30,
     "EmptyRfidValue": 0
   },
@@ -42,6 +41,7 @@
       "Enabled": false
     }
   ],
+  "Vehicles": [],
   "Stations": [
     {
       "Id": "560",

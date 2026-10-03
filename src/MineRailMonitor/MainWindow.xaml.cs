@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Configuration;
 using System.Diagnostics;
@@ -94,9 +95,9 @@ public partial class MainWindow : Window
             explicitlyEnabled);
         var appPaths = ((App)Application.Current).Paths;
         _externalInterfaceAvailable = false;
-        _projectDirectory = _acceptanceOptions.Enabled
-            ? Path.Combine(AppContext.BaseDirectory, "Projects", "Example")
-            : ResolveProjectDirectory(appPaths.ProjectsDirectory);
+        _projectDirectory = ProjectDirectoryResolver.Resolve(
+            appPaths.ProjectsDirectory,
+            _acceptanceOptions.Enabled);
         if (_acceptanceOptions.Enabled)
         {
             WindowState = WindowState.Minimized;
@@ -140,14 +141,6 @@ public partial class MainWindow : Window
         {
             source.AddHook(WindowProc);
         }
-    }
-
-    private static string ResolveProjectDirectory(string projectsDirectory)
-    {
-        var defaultDirectory = Path.Combine(projectsDirectory, "Default");
-        return File.Exists(Path.Combine(defaultDirectory, "project.json"))
-            ? defaultDirectory
-            : Path.Combine(projectsDirectory, "Example");
     }
 
     private static IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -207,6 +200,16 @@ public partial class MainWindow : Window
         var result = await _configService.LoadAsync(_projectDirectory);
         if (!result.Succeeded || result.Project is null)
         {
+            var productionProjectMissing = !_acceptanceOptions.Enabled && result.Errors.Any(error =>
+                error.StartsWith("未找到项目配置文件：", StringComparison.Ordinal));
+            if (productionProjectMissing)
+            {
+                PageContent.Content = new PlaceholderPage(
+                    "现场项目配置缺失",
+                    "请配置 Projects/Default/project.json 后重新启动。");
+                return;
+            }
+
             var error = result.Errors.Count == 0
                 ? "项目配置未返回有效内容。"
                 : string.Join(Environment.NewLine, result.Errors);

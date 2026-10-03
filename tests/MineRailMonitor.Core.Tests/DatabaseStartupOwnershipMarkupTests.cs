@@ -99,13 +99,11 @@ public sealed class DatabaseStartupOwnershipMarkupTests
 
         Assert.Contains("appPaths.ProjectsDirectory", mainWindow);
         Assert.Contains("appPaths.BlackBoxDirectory", mainWindow);
-        Assert.Contains(
-            "Path.Combine(AppContext.BaseDirectory, \"Projects\", \"Example\")",
-            mainWindow);
+        Assert.Contains("ProjectDirectoryResolver.Resolve", mainWindow);
         Assert.DoesNotContain(
             "Path.Combine(AppContext.BaseDirectory, \"Logs\", \"BlackBox\")",
             mainWindow);
-        Assert.DoesNotContain("ResolveProjectDirectory()", mainWindow);
+        Assert.DoesNotContain("ResolveProjectDirectory", mainWindow);
     }
 
     [Fact]

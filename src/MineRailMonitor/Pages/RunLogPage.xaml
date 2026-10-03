@@ -1,0 +1,414 @@
+<UserControl x:Class="MineRailMonitor.Pages.RunLogPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource AppBackgroundBrush}">
+    <UserControl.Resources>
+        <Style x:Key="RunLogTabItemStyle" TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="MinWidth" Value="112" />
+            <Setter Property="Padding" Value="18,0" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="0,0,0,2"
+                                CornerRadius="4,4,0,0" Padding="{TemplateBinding Padding}">
+                            <Grid>
+                                <ContentPresenter ContentSource="Header" HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}" />
+                                <Border x:Name="SelectedIndicator" Height="2"
+                                        Background="{StaticResource PrimaryBlueBrush}"
+                                        CornerRadius="1" VerticalAlignment="Bottom" Opacity="0" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#0B314C" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}" />
+                                <Setter TargetName="SelectedIndicator" Property="Opacity" Value="1" />
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#09263D" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="RunLogTabControlStyle" TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource RunLogTabItemStyle}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid KeyboardNavigation.TabNavigation="Local" KeyboardNavigation.DirectionalNavigation="Contained">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="42" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Background="#041B2E" BorderBrush="{StaticResource GridLineBrush}"
+                                    BorderThickness="0,0,0,1" CornerRadius="4,4,0,0" Padding="4,2">
+                                <TabPanel IsItemsHost="True" />
+                            </Border>
+                            <Border Grid.Row="1" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter ContentSource="SelectedContent" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="RunLogSectionStyle" TargetType="Border" BasedOn="{StaticResource PanelBorderStyle}">
+            <Setter Property="Background" Value="#03182B" />
+            <Setter Property="BorderBrush" Value="#0D6792" />
+            <Setter Property="Padding" Value="9" />
+        </Style>
+        <Style x:Key="EventStatusTextStyle" TargetType="TextBlock" BasedOn="{StaticResource DataGridTextElementStyle}">
+            <Setter Property="Foreground" Value="#93A9B8" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusKind}" Value="InProgress"><Setter Property="Foreground" Value="#49B7FF" /></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="Complete"><Setter Property="Foreground" Value="#38D39F" /></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="Alarm"><Setter Property="Foreground" Value="#FF766B" /></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="Unverified"><Setter Property="Foreground" Value="#E8AD52" /></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="Clear"><Setter Property="Foreground" Value="#9AAEBB" /></DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="StationStatusTextStyle" TargetType="TextBlock" BasedOn="{StaticResource DataGridTextElementStyle}">
+            <Setter Property="Foreground" Value="#9AAEBB" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Status}" Value="在线"><Setter Property="Foreground" Value="#38D39F" /></DataTrigger>
+                <DataTrigger Binding="{Binding Status}" Value="离线"><Setter Property="Foreground" Value="#FF766B" /></DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="TimelineDotStyle" TargetType="Ellipse">
+            <Setter Property="Fill" Value="#9AAEBB" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusKind}" Value="InProgress"><Setter Property="Fill" Value="#49B7FF" /></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="Complete"><Setter Property="Fill" Value="#38D39F" /></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="Alarm"><Setter Property="Fill" Value="#FF766B" /></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="Unverified"><Setter Property="Fill" Value="#E8AD52" /></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="Clear"><Setter Property="Fill" Value="#9AAEBB" /></DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Margin="12,10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="50" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="#06223A" BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1" CornerRadius="5" Padding="14,0" Margin="0,0,0,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,8,12,8" />
+                <TextBlock Grid.Column="1" Text="运行日志" Style="{StaticResource PageTitleStyle}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="车辆通行事件与基站状态"
+                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
+                           VerticalAlignment="Center" Margin="18,0,0,0" />
+            </Grid>
+        </Border>
+
+        <TabControl x:Name="RunLogTabs" Grid.Row="1" Style="{StaticResource RunLogTabControlStyle}" SelectedIndex="0">
+            <TabItem Header="车辆事件">
+                <Grid Margin="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2.1*" />
+                        <ColumnDefinition Width="1.15*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Style="{StaticResource RunLogSectionStyle}" Margin="0,0,8,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="34" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,6,4">
+                                <Border Width="4" Height="22" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                                <TextBlock Text="车辆事件列表" Style="{StaticResource SectionTitleStyle}" />
+                            </StackPanel>
+                            <Grid Grid.Row="1">
+                                <DataGrid x:Name="EventGrid" Style="{StaticResource IndustrialDataGridStyle}"
+                                          AutoGenerateColumns="False" HeadersVisibility="Column" IsReadOnly="True"
+                                          SelectionChanged="EventGrid_SelectionChanged">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="时间" Binding="{Binding TimeText}" Width="1.18*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                        <DataGridTextColumn Header="事件类型" Binding="{Binding EventTypeText}" Width="0.95*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                        <DataGridTextColumn Header="车辆编号" Binding="{Binding VehicleNo}" Width="0.85*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                        <DataGridTextColumn Header="事件内容" Binding="{Binding Content}" Width="1.65*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                        <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="0.68*" ElementStyle="{StaticResource EventStatusTextStyle}" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <TextBlock x:Name="EventEmptyText" Text="暂无事件记录"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="14"
+                                           IsHitTestVisible="False" Visibility="Collapsed" />
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <Border x:Name="RunDetailsPanel" Grid.Column="1" Style="{StaticResource RunLogSectionStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="34" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="34" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,6,4">
+                                <Border Width="4" Height="22" Background="{StaticResource AccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                                <TextBlock Text="车辆运行详情" Style="{StaticResource SectionTitleStyle}" />
+                            </StackPanel>
+                            <Grid Grid.Row="1" Margin="6,0,6,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="32" />
+                                    <RowDefinition Height="32" />
+                                    <RowDefinition Height="32" />
+                                    <RowDefinition Height="32" />
+                                    <RowDefinition Height="32" />
+                                    <RowDefinition Height="32" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="车辆编号" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="{Binding VehicleNo, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="2" Text="车辆名称" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="10,0,0,0" />
+                                <TextBlock Grid.Column="3" Text="{Binding VehicleName, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Row="1" Text="车头标签" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding HeadRfidText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="理论节数" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="10,0,0,0" />
+                                <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding ExpectedCountText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="2" Text="实际节数" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding ActualCountText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="缺少节数" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="10,0,0,0" />
+                                <TextBlock Grid.Row="2" Grid.Column="3" Text="{Binding MissingCountText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="3" Text="当前状态" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding CurrentStatusText, TargetNullValue=--}" Style="{StaticResource EventStatusTextStyle}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="3" Grid.Column="2" Text="通行编号" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="10,0,0,0" />
+                                <TextBlock Grid.Row="3" Grid.Column="3" Text="{Binding PassageIdText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding PassageIdText}" />
+                                <Border Grid.Row="4" Grid.ColumnSpan="4" Background="#08243A" BorderBrush="{StaticResource GridLineBrush}"
+                                        BorderThickness="1" CornerRadius="4" Padding="8,4" Margin="0,2,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="2*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="StationId" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Text="{Binding StationIdText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding StationIdText}" Margin="6,0,12,0" />
+                                        <TextBlock Grid.Column="2" Text="判定说明" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="3" Text="{Binding OutcomeReasonText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="6,0,0,0" />
+                                    </Grid>
+                                </Border>
+                                <Border Grid.Row="5" Grid.ColumnSpan="4" Background="#08243A" BorderBrush="{StaticResource GridLineBrush}"
+                                        BorderThickness="1" CornerRadius="4" Padding="8,4" Margin="0,2,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="报警产生" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Text="{Binding AlarmOccurredAtText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" Margin="5,0,8,0" />
+                                        <TextBlock Grid.Column="2" Text="确认" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="3" Text="{Binding AlarmAcknowledgedAtText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" Margin="5,0,8,0" />
+                                        <TextBlock Grid.Column="4" Text="恢复" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="5" Text="{Binding AlarmRecoveredAtText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" Margin="5,0,0,0" />
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,6,4">
+                                <Border Width="4" Height="22" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                                <TextBlock Text="运行过程" Style="{StaticResource SectionTitleStyle}" />
+                            </StackPanel>
+                            <Grid Grid.Row="3" Margin="4,0,4,2">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsControl ItemsSource="{Binding Timeline}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="2,2,4,5">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="20" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="20" />
+                                                        <RowDefinition Height="*" />
+                                                    </Grid.RowDefinitions>
+                                                    <Ellipse Grid.Row="0" Width="10" Height="10" Fill="{StaticResource PrimaryBlueBrush}"
+                                                             Style="{StaticResource TimelineDotStyle}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    <Border Grid.Row="1" Width="1" Background="#1A5B7B" HorizontalAlignment="Center" />
+                                                    <Border Grid.Column="1" Grid.RowSpan="2" Background="#08243A" BorderBrush="{StaticResource GridLineBrush}"
+                                                            BorderThickness="1" CornerRadius="4" Padding="8,6">
+                                                        <StackPanel>
+                                                            <DockPanel LastChildFill="True">
+                                                                <TextBlock Text="{Binding TimeText}" Foreground="#49B7FF" FontSize="11" FontWeight="SemiBold" DockPanel.Dock="Right" />
+                                                                <TextBlock Text="{Binding EventTypeText}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" />
+                                                            </DockPanel>
+                                                            <ItemsControl ItemsSource="{Binding Details}" Margin="0,4,0,0">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <TextBlock Text="{Binding}" Foreground="{StaticResource TextSecondaryBrush}"
+                                                                                   FontSize="11" Margin="0,1,0,0" TextWrapping="Wrap" />
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                                <TextBlock x:Name="TimelineEmptyText" Text="暂无运行过程"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="13"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           IsHitTestVisible="False" />
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="基站状态">
+                <Border Style="{StaticResource RunLogSectionStyle}" Margin="8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="34" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,6,4">
+                            <Border Width="4" Height="22" Background="{StaticResource SuccessBrush}" CornerRadius="2" Margin="0,0,10,0" />
+                            <TextBlock Text="基站状态" Style="{StaticResource SectionTitleStyle}" />
+                        </StackPanel>
+                        <Grid Grid.Row="1">
+                            <DataGrid x:Name="CommunicationGrid" Style="{StaticResource IndustrialDataGridStyle}"
+                                      AutoGenerateColumns="False" HeadersVisibility="Column" IsReadOnly="True">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="基站名称" Binding="{Binding StationName}" Width="1.25*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                    <DataGridTextColumn Header="StationId" Binding="{Binding StationId}" Width="1.15*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                    <DataGridTextColumn Header="IP地址" Binding="{Binding IpAddress}" Width="1.3*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                    <DataGridTextColumn Header="端口" Binding="{Binding Port}" Width="0.7*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                    <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="0.8*" ElementStyle="{StaticResource StationStatusTextStyle}" />
+                                    <DataGridTextColumn Header="最后接收时间" Binding="{Binding LastReceivedTimeText}" Width="1.5*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                            <TextBlock x:Name="StationStatusEmptyText" Text="暂无 RFID 基站配置"
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="14"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       IsHitTestVisible="False" Visibility="Collapsed" />
+                        </Grid>
+                    </Grid>
+                </Border>
+            </TabItem>
+
+            <TabItem Header="系统日志">
+                <Border Style="{StaticResource RunLogSectionStyle}" Margin="8">
+                    <TextBlock Text="暂无系统日志" Foreground="{StaticResource TextSecondaryBrush}"
+                               FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+            </TabItem>
+
+            <TabItem Header="操作记录">
+                <Border Style="{StaticResource RunLogSectionStyle}" Margin="8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.55*" />
+                            <ColumnDefinition Width="1*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Style="{StaticResource RunLogSectionStyle}" Margin="0,0,8,0" Padding="6">
+                            <Grid>
+                                <DataGrid x:Name="OperationGrid" Style="{StaticResource IndustrialDataGridStyle}"
+                                          AutoGenerateColumns="False" HeadersVisibility="Column" IsReadOnly="True"
+                                          SelectionChanged="OperationGrid_SelectionChanged">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="时间" Binding="{Binding TimeText}" Width="1.2*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                        <DataGridTextColumn Header="操作类型" Binding="{Binding OperationType}" Width="1.2*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                        <DataGridTextColumn Header="对象" Binding="{Binding TargetText}" Width="1*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                        <DataGridTextColumn Header="内容" Binding="{Binding Content}" Width="2.2*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                        <DataGridTextColumn Header="结果" Binding="{Binding Result}" Width="0.7*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <TextBlock x:Name="OperationEmptyText" Text="暂无操作记录"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="14"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           IsHitTestVisible="False" />
+                            </Grid>
+                        </Border>
+                        <Border Grid.Column="1" Style="{StaticResource RunLogSectionStyle}" Padding="12">
+                            <Grid x:Name="OperationDetailsPanel">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="32" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Width="4" Height="20" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="2" Margin="0,0,9,0" />
+                                    <TextBlock Text="操作详情" Style="{StaticResource SectionTitleStyle}" />
+                                </StackPanel>
+                                <Grid Grid.Row="1" Margin="2,6,2,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="86" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="30" />
+                                        <RowDefinition Height="30" />
+                                        <RowDefinition Height="30" />
+                                        <RowDefinition Height="30" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="操作时间" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{Binding TimeText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Row="1" Text="操作人" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding OperatorName, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Row="2" Text="操作类型" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding OperationType, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Row="3" Text="对象" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding TargetText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" />
+                                </Grid>
+                                <StackPanel Grid.Row="3" Margin="2,4,2,0">
+                                    <TextBlock Text="修改前" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,5" />
+                                    <Border Background="#08243A" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" CornerRadius="4" Padding="8" MinHeight="54">
+                                        <TextBlock Text="{Binding BeforeValue, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" TextWrapping="Wrap" />
+                                    </Border>
+                                    <TextBlock Text="修改后" Style="{StaticResource FieldLabelStyle}" Margin="0,10,0,5" />
+                                    <Border Background="#08243A" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" CornerRadius="4" Padding="8" MinHeight="54">
+                                        <TextBlock Text="{Binding AfterValue, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" TextWrapping="Wrap" />
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</UserControl>

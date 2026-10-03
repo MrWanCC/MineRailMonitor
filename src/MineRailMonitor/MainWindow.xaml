@@ -193,6 +193,13 @@
                                     <TextBlock Text="历史查询" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Button>
+                            <Button Tag="RunLogs" Style="{StaticResource NavButtonStyle}" Click="OnNavigationClick">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Data="{StaticResource QueryIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+                                    <TextBlock Text="运行日志" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
                             <Button Tag="Communication" Style="{StaticResource NavButtonStyle}" Click="OnNavigationClick">
                                 <StackPanel Orientation="Horizontal">
                                     <Path Data="{StaticResource CommunicationIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"

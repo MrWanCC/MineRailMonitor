@@ -24,6 +24,7 @@ using MineRailMonitor.Core.Services;
 using MineRailMonitor.Infrastructure.Configuration;
 using MineRailMonitor.Infrastructure.BlackBox;
 using MineRailMonitor.Infrastructure.ExternalData;
+using MineRailMonitor.Infrastructure.Logging;
 using MineRailMonitor.Infrastructure.Persistence;
 using MineRailMonitor.Pages;
 
@@ -38,6 +39,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _clockTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private MonitorPage? _monitorPage;
     private readonly CommunicationPage _communicationPage;
+    private readonly RunLogPage _runLogPage;
+    private readonly IOperationRecordStore _operationRecordStore;
     private RfidFrameParser _rfidFrameParser;
     private SettingsPage? _settingsPage;
     private HistoryPage? _historyPage;
@@ -92,6 +95,15 @@ public partial class MainWindow : Window
         UpdateAdminModeBanner();
         _configService = new ProjectConfigService(((App)Application.Current).Logger);
         _communicationPage = new CommunicationPage();
+        var passageEventLogDirectory = _acceptanceOptions.Enabled
+            ? _acceptanceOptions.LogDirectory!
+            : appPaths.LogsDirectory;
+        _operationRecordStore = new OperationRecordJsonlStore(passageEventLogDirectory);
+        _runLogPage = new RunLogPage(
+            new PassageEventJsonlQueryService(passageEventLogDirectory),
+            _operationRecordStore,
+            _passageRecordStore,
+            () => _yardCommunicationManager?.GetPollingStatuses() ?? Array.Empty<RfidStationPollingStatus>());
         var blackBoxRootDirectory = _acceptanceOptions.Enabled
             ? Path.Combine(_acceptanceOptions.LogDirectory!, "BlackBox")
             : appPaths.BlackBoxDirectory;
@@ -223,11 +235,14 @@ public partial class MainWindow : Window
             bindingSaveRequested: SaveRfidBindingAsync,
             viewMapPointRequested: ViewRfidMapPoint,
             yardCommunications: result.Project.YardCommunications,
-            yardAlarmForwards: result.Project.YardAlarmForwards);
+            yardAlarmForwards: result.Project.YardAlarmForwards,
+            vehicles: result.Project.Vehicles);
         _settingsPage.SaveRequested += SaveRfidSettingsAsync;
         _settingsPage.StationsSaveRequested += SaveRfidStationsAsync;
         _settingsPage.SaveYardCommunicationsRequested += SaveYardCommunicationsAsync;
         _settingsPage.SaveYardAlarmForwardsRequested += SaveYardAlarmForwardsAsync;
+        _settingsPage.VehiclesSaveRequested += SaveVehiclesAsync;
+        _settingsPage.AdminModeExitRequested += ExitAdminModeAsync;
         await RecreateYardCommunicationManagerAsync(result.Project, settingsStations, runtimeSettings);
         _acceptanceRuntimeStateWriter?.Write("loaded");
         _historyPage = new HistoryPage(
@@ -243,6 +258,7 @@ public partial class MainWindow : Window
         _communicationPage.SetYardOptions(result.Project.Stations);
         _communicationPage.SetExternalAlarmConfigurations(result.Project.YardCommunications, result.Project.YardAlarmForwards);
         _communicationPage.ConfigureStations(settingsStations, SendCommunicationTestAsync);
+        _runLogPage.SetRfidStations(settingsStations);
         StationButtonsPanel.Children.Clear();
         foreach (var station in result.Project.Stations)
         {
@@ -335,6 +351,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (page == "RunLogs")
+        {
+            _runLogPage.Refresh();
+            PageContent.Content = _runLogPage;
+            return;
+        }
+
         if (page == "Alarms" && _alarmHistoryPage is not null)
         {
             ApplyCurrentYardDisplayScope();
@@ -405,6 +428,7 @@ public partial class MainWindow : Window
             return true;
         }
 
+        var previousSettings = _loadedProject.RfidSettings;
         var result = await _configService.SaveRfidSettingsAsync(_projectDirectory, settings);
         if (!result.Succeeded)
         {
@@ -412,6 +436,7 @@ public partial class MainWindow : Window
             return false;
         }
         _loadedProject.RfidSettings = settings;
+        RecordOperationChanges(ConfigurationOperationRecordFormatter.GetRfidSettingsChanges(previousSettings, settings));
         _rfidFrameParser = new RfidFrameParser(new RfidFrameParserOptions { EmptyRfidValue = settings.EmptyRfidValue });
         _yardCommunicationManager?.UpdateSettings(settings);
         if (_yardCommunicationManager is not null)
@@ -427,6 +452,38 @@ public partial class MainWindow : Window
         left.ExpectedVehicleCount == right.ExpectedVehicleCount &&
         left.InterVehicleTimeoutSeconds == right.InterVehicleTimeoutSeconds &&
         left.EmptyRfidValue == right.EmptyRfidValue;
+
+    private async Task<bool> SaveVehiclesAsync(IReadOnlyList<VehicleConfig> vehicles)
+    {
+        if (_loadedProject is null || _settingsPage is null)
+        {
+            return false;
+        }
+        if (!_adminModeService.IsAdmin)
+        {
+            _settingsPage.SetVehicleSaveResult("请先进入管理员模式后再保存车辆配置。", true);
+            return false;
+        }
+        if (_acceptanceOptions.Enabled)
+        {
+            _settingsPage.SetVehicleSaveResult("验收模式禁止保存正式车辆配置。", true);
+            return false;
+        }
+
+        var previousVehicles = _loadedProject.Vehicles.ToArray();
+        var result = await _configService.SaveVehiclesAsync(_projectDirectory, vehicles);
+        if (!result.Succeeded)
+        {
+            _settingsPage.SetVehicleSaveResult(string.Join(Environment.NewLine, result.Errors), true);
+            return false;
+        }
+
+        _loadedProject.Vehicles = vehicles.ToArray();
+        RecordOperationChanges(ConfigurationOperationRecordFormatter.GetVehicleChanges(previousVehicles, _loadedProject.Vehicles));
+        _yardCommunicationManager?.UpdateVehicleConfigurations(_loadedProject.Vehicles);
+        _settingsPage.SetVehicleSaveResult("车辆编组配置已保存。", false);
+        return true;
+    }
 
     private async Task<bool> SaveYardCommunicationsAsync(IReadOnlyList<YardCommunicationConfig> configurations)
     {
@@ -535,6 +592,7 @@ public partial class MainWindow : Window
             return false;
         }
 
+        var previousStations = _loadedProject.RfidStations.ToArray();
         var requiresRuntimeRestart = RfidStationConfigurationChangeRules.RequiresRuntimeRestart(
             _loadedProject.RfidStations,
             stations);
@@ -546,7 +604,9 @@ public partial class MainWindow : Window
         }
 
         _loadedProject.RfidStations = stations.ToArray();
+        RecordOperationChanges(ConfigurationOperationRecordFormatter.GetStationChanges(previousStations, _loadedProject.RfidStations));
         _yardRfidStationResolver = new YardRfidStationResolver(_loadedProject.Stations, _loadedProject.RfidStations);
+        _runLogPage.SetRfidStations(_loadedProject.RfidStations);
         ApplyCurrentYardDisplayScope();
         _communicationPage.ConfigureStations(_loadedProject.RfidStations, SendCommunicationTestAsync);
         _historyPage?.SetRfidStations(_loadedProject.RfidStations);
@@ -667,6 +727,13 @@ public partial class MainWindow : Window
         _externalAlarmStatusChangeTracker.Clear();
         if (_yardCommunicationManager is not null)
         {
+            foreach (var context in _yardCommunicationManager.Contexts.Values)
+            {
+                if (context.RuntimeCoordinator is not null)
+                {
+                    context.RuntimeCoordinator.AlarmRecovered -= OnAlarmRecovered;
+                }
+            }
             _yardCommunicationManager.Dispose();
             _yardCommunicationManager.DatagramReceived -= OnYardDatagramReceived;
             _yardCommunicationManager.DatagramSent -= OnYardDatagramSent;
@@ -722,6 +789,14 @@ public partial class MainWindow : Window
                 externalAlarmStatusCoordinators: externalAlarmStatusCoordinators,
                 vehicleConfigurations: project.Vehicles,
                 passageEventLogger: ((App)Application.Current).PassageEventLogger);
+        }
+
+        foreach (var context in manager.Contexts.Values)
+        {
+            if (context.RuntimeCoordinator is not null)
+            {
+                context.RuntimeCoordinator.AlarmRecovered += OnAlarmRecovered;
+            }
         }
 
         manager.DatagramReceived += OnYardDatagramReceived;
@@ -1133,17 +1208,23 @@ public partial class MainWindow : Window
 
     private async void OnExitAdminModeClick(object sender, RoutedEventArgs e)
     {
+        await ExitAdminModeAsync();
+    }
+
+    private async Task<bool> ExitAdminModeAsync()
+    {
         if (_monitorPage is not null && !await _monitorPage.TryLeaveMapEditingAsync("退出管理员模式"))
         {
-            return;
+            return false;
         }
 
         if (_settingsPage is not null && !await _settingsPage.TryLeaveAsync("退出管理员模式"))
         {
-            return;
+            return false;
         }
 
         _adminModeService.ExitAdminMode();
+        return true;
     }
 
     private async void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -1424,6 +1505,10 @@ public partial class MainWindow : Window
             FilterCurrentYardPollingStatuses(GetAllPollingStatuses()));
         _communicationPage.SetStationStatuses(
             GetAllPollingStatuses());
+        if (ReferenceEquals(PageContent.Content, _runLogPage))
+        {
+            _runLogPage.RefreshStationStatuses();
+        }
         _monitorPage.SetSystemRfidStatus(_rfidListenerHealthy);
         UpdateHeaderStatusIndicators();
     }
@@ -1442,6 +1527,20 @@ public partial class MainWindow : Window
         }
 
         await context.SendAsync(station, command, CancellationToken.None);
+        if (command == RfidPollCommand.Clear)
+        {
+            RecordOperationChanges(new[]
+            {
+                new OperationRecord
+                {
+                    OperationType = "发送基站清空命令",
+                    TargetType = "基站",
+                    TargetName = !string.IsNullOrWhiteSpace(station.Name) ? station.Name : station.StationId,
+                    AfterValue = "操作: 已发送清空命令",
+                    Result = "成功"
+                }
+            });
+        }
     }
 
     private void AcknowledgeAlarm(Guid passageId, DateTimeOffset acknowledgedAt)
@@ -1479,10 +1578,53 @@ public partial class MainWindow : Window
             _passageRecordStore.MarkAlarmAcknowledged(passageId, acknowledgedAt);
         }
 
+        RecordOperationChanges(new[] { AlarmOperationRecordFactory.CreateAcknowledged(record, acknowledgedAt) });
+        var updatedRecord = _passageRecordStore.GetDetails(passageId);
+        if (contexts.Length == 0 && record.AlarmRecoveredAt is null && updatedRecord?.AlarmRecoveredAt.HasValue == true)
+        {
+            OnAlarmRecovered(updatedRecord);
+        }
+
         UpdateRecognitionStatus();
         UpdateRfidRuntimeUi();
         RefreshRecentAlarmHistory();
         _alarmHistoryPage?.Refresh();
+        _runLogPage.Refresh();
+    }
+
+    private void OnAlarmRecovered(PassageRecord record)
+    {
+        if (record.AlarmRecoveredAt is not DateTimeOffset recoveredAt)
+        {
+            return;
+        }
+
+        RecordOperationChanges(new[] { AlarmOperationRecordFactory.CreateRecovered(record, recoveredAt) });
+        void RefreshAlarmViews()
+        {
+            RefreshRecentAlarmHistory();
+            _alarmHistoryPage?.Refresh();
+            _runLogPage.Refresh();
+            UpdateRecognitionStatus();
+            UpdateRfidRuntimeUi();
+        }
+
+        if (Dispatcher.CheckAccess())
+        {
+            RefreshAlarmViews();
+        }
+        else
+        {
+            _ = Dispatcher.BeginInvoke(new Action(RefreshAlarmViews));
+        }
+    }
+
+    private void RecordOperationChanges(IEnumerable<OperationRecord> records)
+    {
+        foreach (var record in records)
+        {
+            OperationRecordWriteSafety.TryAppend(_operationRecordStore, record);
+        }
     }
 
     private void RefreshHistoricalStatistics()
@@ -1567,6 +1709,7 @@ public partial class MainWindow : Window
         var selectedYardId = scope.IsGlobal ? null : scope.YardId;
         _settingsPage?.SetSelectedYard(selectedYardId);
         _communicationPage.SetDisplayScope(stationIds, selectedYardId);
+        _runLogPage.SetDisplayScope(stationIds, selectedYardId);
         _historyPage?.SetDisplayScope(stationIds, selectedYardId);
         _alarmHistoryPage?.SetDisplayScope(stationIds, selectedYardId);
         _statisticsPage?.SetDisplayScope(stationIds, selectedYardId);

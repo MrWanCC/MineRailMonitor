@@ -267,7 +267,11 @@ public sealed class SettingsPageMarkupTests
         Assert.Contains("<ControlTemplate TargetType=\"Button\">", markup, StringComparison.Ordinal);
         Assert.Contains("<Trigger Property=\"IsPressed\" Value=\"True\">", markup, StringComparison.Ordinal);
         Assert.Contains("<ControlTemplate TargetType=\"CheckBox\">", markup, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"CheckMark\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ToggleTrack\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ToggleThumb\"", markup, StringComparison.Ordinal);
+        Assert.Contains("<Trigger Property=\"IsChecked\" Value=\"True\">", markup, StringComparison.Ordinal);
+        Assert.Contains("<Setter TargetName=\"ToggleTrack\" Property=\"Background\" Value=\"#078FE5\" />", markup, StringComparison.Ordinal);
+        Assert.Contains("<Setter TargetName=\"ToggleThumb\" Property=\"HorizontalAlignment\" Value=\"Right\" />", markup, StringComparison.Ordinal);
     }
 
     [Fact]

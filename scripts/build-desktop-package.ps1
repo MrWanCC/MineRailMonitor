@@ -28,6 +28,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE"
 }
 
+# Keep release symbols in the normal build output, but exclude them from the
+# field staging directory consumed by the installer.
+Get-ChildItem -LiteralPath $appDirectory -Filter "*.pdb" -File -Recurse |
+    Remove-Item -Force
+
 $publishedProjects = Join-Path $appDirectory "Projects"
 if (Test-Path $publishedProjects) {
     throw "Publish output must not contain App\Projects: $publishedProjects"

@@ -11,6 +11,12 @@ if (-not (Test-Path -LiteralPath $root -PathType Container)) {
     throw "Desktop package root does not exist: $root"
 }
 
+$debugSymbolFiles = @(Get-ChildItem -LiteralPath $root -Filter '*.pdb' -File -Recurse -Force)
+if ($debugSymbolFiles.Count -gt 0) {
+    $symbolPaths = ($debugSymbolFiles | ForEach-Object { $_.FullName }) -join ', '
+    throw "Desktop package must not contain PDB debug symbols: $symbolPaths"
+}
+
 $requiredFiles = @(
     (Join-Path $root 'App\MineRailMonitor.exe'),
     (Join-Path $root 'App\MineRailMonitor.exe.config'),
@@ -50,6 +56,21 @@ if (Test-Path -LiteralPath $nestedProjects) {
 $defaultProject = Join-Path $root 'Projects\Default'
 if (Test-Path -LiteralPath $defaultProject) {
     throw "Clean staging must not contain Projects\Default: $defaultProject"
+}
+
+foreach ($forbiddenDirectoryName in @('artifacts', '.verify', 'TestResults')) {
+    $forbiddenDirectory = Join-Path $root $forbiddenDirectoryName
+    if (Test-Path -LiteralPath $forbiddenDirectory) {
+        throw "Clean staging must not contain ${forbiddenDirectoryName}: $forbiddenDirectory"
+    }
+}
+
+foreach ($runtimeDataDirectoryName in @('Data', 'Logs', 'Backups')) {
+    $runtimeDataDirectory = Join-Path $root $runtimeDataDirectoryName
+    $runtimeDataFiles = @(Get-ChildItem -LiteralPath $runtimeDataDirectory -File -Recurse -Force)
+    if ($runtimeDataFiles.Count -gt 0) {
+        throw "Clean staging must not contain runtime data files under ${runtimeDataDirectoryName}: $runtimeDataDirectory"
+    }
 }
 
 $projectsRoot = Join-Path $root 'Projects'

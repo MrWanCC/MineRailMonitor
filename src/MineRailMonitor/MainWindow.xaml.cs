@@ -389,6 +389,7 @@ public partial class MainWindow : Window
             "Query" => "数据查询",
             "Alarms" => "报警记录",
             "History" => "历史查询",
+            "RunLogs" => "运行日志",
             "Communication" => "通信调试",
             "Settings" => "系统设置",
             _ => "页面"

@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private readonly AdminModeService _adminModeService;
     private readonly string _projectDirectory;
     private readonly AcceptanceCommandLineOptions _acceptanceOptions;
+    private readonly bool _verboseRfidFrameLoggingEnabled;
     private readonly DispatcherTimer _clockTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private MonitorPage? _monitorPage;
     private readonly CommunicationPage _communicationPage;
@@ -79,6 +80,18 @@ public partial class MainWindow : Window
         _passageRecordStore = passageRecordStore ?? throw new ArgumentNullException(nameof(passageRecordStore));
         InitializeComponent();
         _acceptanceOptions = ((App)Application.Current).AcceptanceOptions;
+#if DEBUG
+        const bool debugBuild = true;
+#else
+        const bool debugBuild = false;
+#endif
+        var verboseLoggingSetting = ConfigurationManager.AppSettings["RfidVerboseLogging"];
+        var explicitlyEnabled = bool.TryParse(verboseLoggingSetting, out var configuredVerboseLogging) &&
+                                configuredVerboseLogging;
+        _verboseRfidFrameLoggingEnabled = RfidFrameTextLoggingPolicy.ShouldWriteVerboseFrameLogs(
+            _acceptanceOptions.Enabled,
+            debugBuild,
+            explicitlyEnabled);
         var appPaths = ((App)Application.Current).Paths;
         _externalInterfaceAvailable = false;
         _projectDirectory = _acceptanceOptions.Enabled
@@ -795,6 +808,7 @@ public partial class MainWindow : Window
         {
             if (context.RuntimeCoordinator is not null)
             {
+                context.RuntimeCoordinator.VehicleMatchResolved += LogVehicleMatch;
                 context.RuntimeCoordinator.AlarmRecovered += OnAlarmRecovered;
             }
         }
@@ -876,8 +890,20 @@ public partial class MainWindow : Window
             return;
         }
 
-        var hex = BitConverter.ToString(args.Data).Replace('-', ' ');
-        var message = $"RFID UDP RX [{context.YardId}] {args.RemoteEndPoint} {args.Data.Length} Bytes {hex}";
+        var stationId = ResolveRfidStationId(context, args);
+        string? hex = null;
+        if (_verboseRfidFrameLoggingEnabled)
+        {
+            hex = BitConverter.ToString(args.Data).Replace('-', ' ');
+            var stationMatch = stationId is null ? "Unmatched" : $"Matched:{stationId}";
+            var byte2 = args.Data.Length >= 3 ? $"0x{args.Data[2]:X2}" : "N/A";
+            var byte7 = args.Data.Length >= 8 ? args.Data[7].ToString() : "N/A";
+            ((App)Application.Current).Logger.Information(
+                $"RFID RX DIAG Time={args.ReceivedAt:O} SourceIP={args.RemoteEndPoint.Address} " +
+                $"SourcePort={args.RemoteEndPoint.Port} Byte2={byte2} Byte7={byte7} " +
+                $"StationIdMatch={stationMatch} HEX={hex}");
+        }
+
         var responseMatched = false;
         if (args.IsValid)
         {
@@ -887,15 +913,24 @@ public partial class MainWindow : Window
             }
             if (responseMatched)
             {
-                ((App)Application.Current).Logger.Information(message);
+                if (_verboseRfidFrameLoggingEnabled)
+                {
+                    hex ??= BitConverter.ToString(args.Data).Replace('-', ' ');
+                    ((App)Application.Current).Logger.Information(
+                        $"RFID UDP RX [{context.YardId}] {args.RemoteEndPoint} {args.Data.Length} Bytes {hex}");
+                }
             }
             else
             {
+                hex ??= BitConverter.ToString(args.Data).Replace('-', ' ');
+                var message = $"RFID UDP RX [{context.YardId}] {args.RemoteEndPoint} {args.Data.Length} Bytes {hex}";
                 ((App)Application.Current).Logger.Warning($"未匹配 RFID 基站端点或协议地址，已丢弃：{message}");
             }
         }
         else
         {
+            hex ??= BitConverter.ToString(args.Data).Replace('-', ' ');
+            var message = $"RFID UDP RX [{context.YardId}] {args.RemoteEndPoint} {args.Data.Length} Bytes {hex}";
             ((App)Application.Current).Logger.Warning($"非法 RFID UDP 帧：{args.ValidationError}；{message}");
         }
 
@@ -905,12 +940,120 @@ public partial class MainWindow : Window
             _rfidFrameParser.TryParse(args.Data, args.RemoteEndPoint, args.ReceivedAt, out parsedFrame);
         }
 
+        if (_verboseRfidFrameLoggingEnabled)
+        {
+            ((App)Application.Current).Logger.Information(
+                RfidReceiveDiagnosticFormatter.Format(
+                    context.YardId,
+                    stationId,
+                    args,
+                    parsedFrame));
+        }
+
         _ = Dispatcher.BeginInvoke(new Action(() =>
         {
             var recognitionSession = (StationRecognitionSession?)null;
             if (parsedFrame is not null)
             {
+                var runtimeStateBefore = string.IsNullOrWhiteSpace(stationId)
+                    ? null
+                    : context.RuntimeStates.FirstOrDefault(state => string.Equals(
+                        state.StationId,
+                        stationId,
+                        StringComparison.OrdinalIgnoreCase));
+                var previousLifecycle = runtimeStateBefore?.LifecycleState ?? PassageLifecycleState.Idle;
+                var previousEmptyReads = runtimeStateBefore?.ConsecutiveEmptyReads ?? 0;
+                var previousPassageId = runtimeStateBefore?.RecognitionSession?.PassageId ?? runtimeStateBefore?.LastPassageRecord?.PassageId;
+                var isEmptyFrame = parsedFrame.ValidRfids.Count == 0;
                 recognitionSession = context.ProcessFrame(parsedFrame);
+                var runtimeState = stationId is null
+                    ? null
+                    : context.RuntimeStates.FirstOrDefault(state => string.Equals(
+                        state.StationId,
+                        stationId,
+                        StringComparison.OrdinalIgnoreCase));
+                if (runtimeState is not null)
+                {
+                    if (!isEmptyFrame && previousLifecycle == PassageLifecycleState.Idle && runtimeState.RecognitionSession is not null)
+                    {
+                        LogRfidLifecycleDiagnostic(
+                            "NEXT_VEHICLE_FIRST_NON_EMPTY_FRAME",
+                            runtimeState,
+                            args.ReceivedAt,
+                            detail: "first-non-empty-frame");
+                    }
+                    else if (!isEmptyFrame && previousLifecycle is PassageLifecycleState.Completed or
+                             PassageLifecycleState.Alarm or PassageLifecycleState.Clearing or PassageLifecycleState.WaitForEmpty)
+                    {
+                        LogRfidLifecycleDiagnostic(
+                            "NON_EMPTY_FRAME_AFTER_TERMINAL_STATE",
+                            runtimeState,
+                            args.ReceivedAt,
+                            detail: $"PreviousState={previousLifecycle};CandidateMayBeResidualOrNextTrain");
+                    }
+
+                    if (runtimeState.LifecycleState != previousLifecycle)
+                    {
+                        LogRfidLifecycleDiagnostic(
+                            "STATE_TRANSITION",
+                            runtimeState,
+                            args.ReceivedAt,
+                            detail: $"From={previousLifecycle};To={runtimeState.LifecycleState}",
+                            passageIdOverride: previousPassageId);
+                    }
+
+                    var emptyConfirmationReads = RfidRuntimePolicy.Default.EmptyConfirmationReads;
+                    if (isEmptyFrame &&
+                        runtimeState.LifecycleState == PassageLifecycleState.WaitForEmpty &&
+                        runtimeState.ConsecutiveEmptyReads > previousEmptyReads)
+                    {
+                        LogRfidLifecycleDiagnostic(
+                            "EMPTY_CONFIRMATION",
+                            runtimeState,
+                            args.ReceivedAt,
+                            runtimeState.ConsecutiveEmptyReads,
+                            $"Count={runtimeState.ConsecutiveEmptyReads}/{emptyConfirmationReads}");
+                    }
+                    else if (isEmptyFrame &&
+                             runtimeState.LifecycleState == PassageLifecycleState.Idle &&
+                             previousLifecycle == PassageLifecycleState.WaitForEmpty &&
+                             previousEmptyReads > 0)
+                    {
+                        var confirmedCount = Math.Min(previousEmptyReads + 1, emptyConfirmationReads);
+                        LogRfidLifecycleDiagnostic(
+                            "EMPTY_CONFIRMATION",
+                            runtimeState,
+                            args.ReceivedAt,
+                            confirmedCount,
+                            $"Count={confirmedCount}/{emptyConfirmationReads}",
+                            previousPassageId);
+                    }
+                    else if (!isEmptyFrame &&
+                             runtimeState.LifecycleState == PassageLifecycleState.WaitForEmpty &&
+                             previousEmptyReads > 0)
+                    {
+                        LogRfidLifecycleDiagnostic(
+                            "EMPTY_CONFIRMATION_RESET",
+                            runtimeState,
+                            args.ReceivedAt,
+                            0,
+                            $"PreviousCount={previousEmptyReads}/{emptyConfirmationReads};NonEmptyFrame",
+                            previousPassageId);
+                    }
+                }
+                if (_verboseRfidFrameLoggingEnabled)
+                {
+                    ((App)Application.Current).Logger.Information(
+                        $"[RFIDRuntime] Time={args.ReceivedAt:O} Yard={context.YardId} " +
+                        $"RuntimeKey={args.RemoteEndPoint}/0x{parsedFrame.StationAddress:X2} " +
+                        $"StationId={runtimeState?.StationId ?? stationId ?? "Unmatched"} " +
+                        $"ProtocolAddress(Byte2)=0x{parsedFrame.StationAddress:X2} " +
+                        $"VehicleCount={runtimeState?.DetectedVehicleCount.ToString() ?? "N/A"} " +
+                        $"ExpectedCount={runtimeState?.ExpectedVehicleCount.ToString() ?? "N/A"} " +
+                        $"PassageId={(runtimeState?.RecognitionSession?.PassageId ?? runtimeState?.LastPassageRecord?.PassageId)?.ToString("D") ?? "-"} " +
+                        $"LastNewVehicleAt={runtimeState?.LastNewVehicleAt?.ToString("O") ?? "-"} " +
+                        $"LifecycleState={runtimeState?.LifecycleState.ToString() ?? "Unmatched"}");
+                }
                 if (recognitionSession is not null)
                 {
                     _monitorPage?.SetRecognitionSnapshot(parsedFrame, recognitionSession);
@@ -928,6 +1071,62 @@ public partial class MainWindow : Window
                 _communicationPage.SetListenerStatus($"[{context.YardId}] 最近收到有效报文：{context.ListenerEndPoint}", context.YardId);
             }
         }));
+    }
+
+    private void LogVehicleMatch(VehicleMatchResult result)
+    {
+        ((App)Application.Current).Logger.Information(
+            VehicleMatchDiagnosticFormatter.Format(result));
+    }
+
+    private static void LogRfidLifecycleDiagnostic(
+        string eventType,
+        StationRuntimeState state,
+        DateTimeOffset occurredAt,
+        int? emptyConfirmationCount = null,
+        string? detail = null,
+        Guid? passageIdOverride = null)
+    {
+        var passageId = passageIdOverride ?? state.RecognitionSession?.PassageId ?? state.LastPassageRecord?.PassageId;
+        ((App)Application.Current).Logger.Information(
+            RfidRuntimeDiagnosticFormatter.FormatLifecycle(
+                state.StationId,
+                passageId,
+                occurredAt,
+                eventType,
+                state.LifecycleState,
+                state.ExpectedVehicleCount,
+                state.DetectedVehicleCount,
+                state.LastNewVehicleAt,
+                state.ClearAttempts,
+                emptyConfirmationCount ?? state.ConsecutiveEmptyReads,
+                RfidRuntimePolicy.Default.EmptyConfirmationReads,
+                detail));
+    }
+
+    private static string? ResolveRfidStationId(
+        YardCommunicationContext context,
+        RfidUdpDatagramEventArgs args)
+    {
+        if (args.Data.Length < 3)
+        {
+            return null;
+        }
+
+        var protocolAddress = args.Data[2];
+        foreach (var station in context.Stations)
+        {
+            if (station.ProtocolAddress != protocolAddress ||
+                !station.TryResolveEndpoint(out var endpoint) ||
+                !endpoint.Equals(args.RemoteEndPoint))
+            {
+                continue;
+            }
+
+            return station.StationId;
+        }
+
+        return null;
     }
 
     private void OnYardDatagramSent(YardCommunicationContext context, RfidUdpDatagramSentEventArgs args)
@@ -1185,6 +1384,23 @@ public partial class MainWindow : Window
         RfidPollCommand command,
         DateTimeOffset sentAt)
     {
+        if (command == RfidPollCommand.Clear)
+        {
+            var state = context.RuntimeStates.FirstOrDefault(item => string.Equals(
+                item.StationId,
+                station.StationId,
+                StringComparison.OrdinalIgnoreCase));
+            if (state is not null)
+            {
+                LogRfidLifecycleDiagnostic(
+                    "CLEAR_COMMAND_SENT",
+                    state,
+                    sentAt,
+                    detail: $"Attempt={state.ClearAttempts};Retry={state.ClearAttempts > 1}");
+            }
+            _acceptanceRuntimeStateWriter?.Write("clear-command-sent");
+        }
+
         _ = Dispatcher.BeginInvoke(new Action(() =>
             _communicationPage.AddCommandSent(station, command, sentAt)));
     }
@@ -1427,7 +1643,22 @@ public partial class MainWindow : Window
     private void OnClockTick(object? sender, EventArgs e)
     {
         UpdateClock();
-        _yardCommunicationManager?.Evaluate(DateTimeOffset.Now);
+        var lifecycleBeforeEvaluation = GetAllRuntimeStates()
+            .ToDictionary(state => state, state => state.LifecycleState);
+        var evaluatedAt = DateTimeOffset.Now;
+        _yardCommunicationManager?.Evaluate(evaluatedAt);
+        foreach (var state in GetAllRuntimeStates())
+        {
+            if (lifecycleBeforeEvaluation.TryGetValue(state, out var previousLifecycle) &&
+                state.LifecycleState != previousLifecycle)
+            {
+                LogRfidLifecycleDiagnostic(
+                    "STATE_TRANSITION",
+                    state,
+                    evaluatedAt,
+                    detail: $"From={previousLifecycle};To={state.LifecycleState};Source=Evaluate");
+            }
+        }
         _communicationPage.SetBlackBoxStatus(_rawPacketBlackBoxWriter.GetSnapshot());
         _acceptanceRuntimeStateWriter?.Write("tick");
         UpdateRecognitionStatus();

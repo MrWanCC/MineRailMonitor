@@ -18,7 +18,6 @@ New-Item -ItemType Directory -Force -Path @(
     $projectsDirectory,
     (Join-Path $stagingRoot "Data"),
     (Join-Path $stagingRoot "Backups\SQLite"),
-    (Join-Path $stagingRoot "Logs\BlackBox"),
     (Join-Path $stagingRoot "Docs")
 ) | Out-Null
 

@@ -31,8 +31,6 @@ $requiredDirectories = @(
     (Join-Path $root 'Data'),
     (Join-Path $root 'Backups'),
     (Join-Path $root 'Backups\SQLite'),
-    (Join-Path $root 'Logs'),
-    (Join-Path $root 'Logs\BlackBox'),
     (Join-Path $root 'Docs')
 )
 
@@ -58,14 +56,14 @@ if (Test-Path -LiteralPath $defaultProject) {
     throw "Clean staging must not contain Projects\Default: $defaultProject"
 }
 
-foreach ($forbiddenDirectoryName in @('artifacts', '.verify', 'TestResults')) {
+foreach ($forbiddenDirectoryName in @('artifacts', '.verify', 'TestResults', 'Logs')) {
     $forbiddenDirectory = Join-Path $root $forbiddenDirectoryName
     if (Test-Path -LiteralPath $forbiddenDirectory) {
         throw "Clean staging must not contain ${forbiddenDirectoryName}: $forbiddenDirectory"
     }
 }
 
-foreach ($runtimeDataDirectoryName in @('Data', 'Logs', 'Backups')) {
+foreach ($runtimeDataDirectoryName in @('Data', 'Backups')) {
     $runtimeDataDirectory = Join-Path $root $runtimeDataDirectoryName
     $runtimeDataFiles = @(Get-ChildItem -LiteralPath $runtimeDataDirectory -File -Recurse -Force)
     if ($runtimeDataFiles.Count -gt 0) {

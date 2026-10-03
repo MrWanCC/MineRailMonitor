@@ -421,7 +421,7 @@ public partial class CommunicationPage : UserControl
             lines.Add($"RFID 槽位：{string.Join("  ", parsedFrame.RawRfidSlots.Select((value, index) => $"RFID{index + 1}  {value:X4}"))}");
             if (recognitionSession is not null)
             {
-                lines.Add($"当前列车：{recognitionSession.DetectedVehicleCount} / {recognitionSession.ExpectedVehicleCount}");
+                lines.Add($"当前列车：{FormatVehicleProgress(recognitionSession.DetectedVehicleCount, recognitionSession.ExpectedVehicleCount)}");
             }
             if (parsedFrame.ProtocolDataWarning)
             {
@@ -1051,7 +1051,7 @@ public partial class CommunicationPage : UserControl
             : (Brush)FindResource("SuccessBrush");
         FrameDescriptionText.Text = recognitionSession is null
             ? $"读取到 {parsedFrame.ActualNonZeroSlotCount} 个 RFID 标签"
-            : $"当前列车：{recognitionSession.DetectedVehicleCount} / {recognitionSession.ExpectedVehicleCount}";
+            : $"当前列车：{FormatVehicleProgress(recognitionSession.DetectedVehicleCount, recognitionSession.ExpectedVehicleCount)}";
 
         foreach (var (value, index) in parsedFrame.RawRfidSlots.Select((value, index) => (value, index)))
         {
@@ -1076,6 +1076,11 @@ public partial class CommunicationPage : UserControl
         string.IsNullOrWhiteSpace(station.Name)
             ? RfidStationIdentity.GetDisplayId(station.StationId, station.YardId)
             : $"{RfidStationIdentity.GetDisplayId(station.StationId, station.YardId)} · {station.Name}";
+
+    private static string FormatVehicleProgress(int detectedCount, int? expectedCount) =>
+        expectedCount.HasValue
+            ? $"{detectedCount} / {expectedCount.Value}"
+            : $"{detectedCount} / 未判定";
 
     private static string FormatEndpoint(IPEndPoint endpoint) => $"{endpoint.Address}:{endpoint.Port}";
 

@@ -119,6 +119,26 @@ public sealed class SettingsPageMarkupTests
     }
 
     [Fact]
+    public void Settings_exposes_admin_access_in_shared_header_and_keeps_tab_saves_separate()
+    {
+        var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
+        var code = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml.cs"));
+
+        Assert.Contains("x:Name=\"AdminModeButton\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AdminModeStatusText\"", markup, StringComparison.Ordinal);
+        Assert.Contains("请先在页头开启管理员模式", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("OnEnterAdminModeClick", markup, StringComparison.Ordinal);
+        Assert.True(markup.IndexOf("x:Name=\"AdminModeButton\"", StringComparison.Ordinal) <
+                    markup.IndexOf("<TabControl", StringComparison.Ordinal));
+        Assert.Contains("AdminModeStatusText.Text = _adminModeService.IsAdmin", code, StringComparison.Ordinal);
+
+        Assert.Contains("await SaveChangesAsync(includeVehicles: false)", code, StringComparison.Ordinal);
+        Assert.Contains("SaveChangesAsync(includeVehicles: true)", code, StringComparison.Ordinal);
+        Assert.Contains("if (includeVehicles && !AreVehicleDraftsEqual", code, StringComparison.Ordinal);
+        Assert.Contains("SaveAllChangesAsync()", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Settings_page_exposes_an_about_entry_available_in_all_modes()
     {
         var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));

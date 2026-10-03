@@ -327,7 +327,7 @@ public partial class MonitorPage : UserControl
         if (session is null) throw new ArgumentNullException(nameof(session));
 
         RecognitionSnapshotText.Text =
-            $"基站 {frame.StationAddress:X2} · 上报 {frame.ReportedCardCount} · 实际 {frame.ActualNonZeroSlotCount} · 当前列车：{session.DetectedVehicleCount}/{session.ExpectedVehicleCount}";
+            $"基站 {frame.StationAddress:X2} · 上报 {frame.ReportedCardCount} · 实际 {frame.ActualNonZeroSlotCount} · 当前列车：{FormatVehicleProgress(session.DetectedVehicleCount, session.ExpectedVehicleCount)}";
     }
 
     public void SetRfidRuntimeStates(IEnumerable<StationRuntimeState> states)
@@ -362,7 +362,7 @@ public partial class MonitorPage : UserControl
 
         var head = active.CurrentHeadRfid?.ToString("X4") ?? "-";
         RecognitionSnapshotText.Text =
-            $"基站 {active.StationAddress:X2} · {GetRuntimeStateText(active)} · 当前列车：{head} · {active.DetectedVehicleCount}/{active.ExpectedVehicleCount}";
+            $"基站 {active.StationAddress:X2} · {GetRuntimeStateText(active)} · 当前列车：{head} · {FormatVehicleProgress(active.DetectedVehicleCount, active.ExpectedVehicleCount)}";
     }
 
     private void UpdateSystemStatusIndicators()
@@ -573,7 +573,7 @@ public partial class MonitorPage : UserControl
             GetRfidMapPointName(stationId),
             statusText,
             hasPassage ? state?.CurrentHeadRfid?.ToString("X4") ?? "-" : "--",
-            hasPassage && expected > 0 ? $"{detected} / {expected}" : "--",
+            hasPassage ? FormatVehicleProgress(detected, state?.ExpectedVehicleCount) : "--",
             progressValue,
             isOffline ? "等待连接" : latestAt?.ToLocalTime().ToString("HH:mm:ss") ?? "-",
             isActive,
@@ -680,6 +680,11 @@ public partial class MonitorPage : UserControl
         if (state is not null && IsUncouplingAlarm(state))
         {
             return "脱节报警";
+        }
+
+        if (state?.LastPassageRecord?.Outcome == PassageOutcome.Unverified)
+        {
+            return "完整性未判定";
         }
 
         if (state is null || state.CommunicationState == StationCommunicationState.Offline)
@@ -1529,11 +1534,11 @@ public partial class MonitorPage : UserControl
         SelectedRfidCommunicationText.Text = state.CommunicationState == StationCommunicationState.Online ? "在线" : "离线";
         SelectedRfidBusinessStateText.Text = GetRuntimeStateText(state);
         SelectedDeviceHeadRfid.Text = state.CurrentHeadRfid?.ToString("X4") ?? "-";
-        SelectedDeviceProgress.Text = $"{state.DetectedVehicleCount} / {state.ExpectedVehicleCount}";
+        SelectedDeviceProgress.Text = FormatVehicleProgress(state.DetectedVehicleCount, state.ExpectedVehicleCount);
         var latestRfid = state.ObservedVehicleSequence.LastOrDefault(value => value != state.EmptyRfidValue);
         SelectedDeviceLatestRfid.Text = latestRfid == state.EmptyRfidValue ? "-" : latestRfid.ToString("X4");
         SelectedDeviceLastCommunication.Text = state.LastResponseAt?.ToLocalTime().ToString("HH:mm:ss") ?? "-";
-        SelectedRfidProgressText.Text = $"{state.DetectedVehicleCount} / {state.ExpectedVehicleCount}";
+        SelectedRfidProgressText.Text = FormatVehicleProgress(state.DetectedVehicleCount, state.ExpectedVehicleCount);
         SelectedRfidLastCommunicationText.Text = state.LastResponseAt?.ToLocalTime().ToString("HH:mm:ss") ?? "-";
         SelectedRfidValidCountText.Text = state.ObservedVehicleSequence
             .Count(value => value != state.EmptyRfidValue)
@@ -1650,6 +1655,11 @@ public partial class MonitorPage : UserControl
 
     private static string GetRuntimeStateText(StationRuntimeState state)
     {
+        if (state.LastPassageRecord?.Outcome == PassageOutcome.Unverified)
+        {
+            return "完整性未判定";
+        }
+
         if (IsUncouplingAlarm(state))
         {
             return "脱节报警";
@@ -1669,6 +1679,11 @@ public partial class MonitorPage : UserControl
             _ => state.WarningMessages.Count > 0 ? "识别不完整" : "空闲"
         };
     }
+
+    private static string FormatVehicleProgress(int detectedCount, int? expectedCount) =>
+        expectedCount.HasValue
+            ? $"{detectedCount} / {expectedCount.Value}"
+            : $"{detectedCount} / 未判定";
 
     private RfidStationConfig? FindRfidStation(string? stationId) =>
         string.IsNullOrWhiteSpace(stationId)

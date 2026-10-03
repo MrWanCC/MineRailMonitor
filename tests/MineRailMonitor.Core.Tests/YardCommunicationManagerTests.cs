@@ -447,6 +447,73 @@ public sealed class YardCommunicationManagerTests
     }
 
     [Fact]
+    public void Updating_vehicle_configurations_preserves_active_passage_and_updates_next_session()
+    {
+        var station = CreateStation("RFID-01", "560", 0x01, 63163);
+        var originalVehicle = new VehicleConfig
+        {
+            HeadRfid = 1,
+            Name = "矿车旧配置",
+            Tags = new List<VehicleTagConfig>
+            {
+                new() { Position = 0, Rfid = 1, Type = VehicleTagType.Head },
+                new() { Position = 1, Rfid = 17, Type = VehicleTagType.Carriage },
+                new() { Position = 2, Rfid = 18, Type = VehicleTagType.Carriage }
+            }
+        };
+        var updatedVehicle = new VehicleConfig
+        {
+            HeadRfid = 1,
+            Name = "矿车新配置",
+            Tags = new List<VehicleTagConfig>
+            {
+                new() { Position = 0, Rfid = 1, Type = VehicleTagType.Head },
+                new() { Position = 1, Rfid = 17, Type = VehicleTagType.Carriage },
+                new() { Position = 2, Rfid = 18, Type = VehicleTagType.Carriage },
+                new() { Position = 3, Rfid = 19, Type = VehicleTagType.Carriage }
+            }
+        };
+        var store = new InMemoryPassageRecordStore();
+        using var manager = new YardCommunicationManager(
+            new[] { CreateCommunication("560") },
+            new[] { station },
+            CreateSettings(),
+            store,
+            vehicleConfigurations: new[] { originalVehicle });
+        var context = manager.GetContext("560")!;
+        var at = DateTimeOffset.UtcNow;
+        var activeSession = context.ProcessFrame(CreateFrame(station, at, new ushort[] { 1, 17 }));
+
+        Assert.NotNull(activeSession);
+        Assert.Equal(3, activeSession!.ExpectedVehicleCount);
+        Assert.Equal("矿车旧配置", activeSession.VehicleName);
+
+        manager.UpdateVehicleConfigurations(new[] { updatedVehicle });
+
+        var stillActive = context.RuntimeStates.Single().RecognitionSession;
+        Assert.Same(activeSession, stillActive);
+        Assert.Equal(3, stillActive!.ExpectedVehicleCount);
+        Assert.Equal("矿车旧配置", stillActive.VehicleName);
+
+        context.ProcessFrame(CreateFrame(station, at.AddSeconds(1), new ushort[] { 1, 17, 18 }));
+
+        var passage = Assert.Single(store.Records);
+        Assert.Equal(3, passage.ExpectedVehicleCount);
+        Assert.Equal("矿车旧配置", passage.VehicleName);
+        Assert.Equal((ushort)1, passage.VehicleHeadRfid);
+
+        context.RuntimeCoordinator!.MarkCommandSent(station, RfidPollCommand.Clear, at.AddSeconds(2));
+        context.ProcessFrame(CreateFrame(station, at.AddSeconds(3), Array.Empty<ushort>()));
+        context.ProcessFrame(CreateFrame(station, at.AddSeconds(4), Array.Empty<ushort>()));
+
+        var nextSession = context.ProcessFrame(CreateFrame(station, at.AddSeconds(5), new ushort[] { 1, 17 }));
+
+        Assert.NotNull(nextSession);
+        Assert.Equal(4, nextSession!.ExpectedVehicleCount);
+        Assert.Equal("矿车新配置", nextSession.VehicleName);
+    }
+
+    [Fact]
     public void Legacy_shared_listener_is_explicitly_diagnosed_and_marked()
     {
         var station = CreateStation("RFID-01", string.Empty, 0x01, 63171);

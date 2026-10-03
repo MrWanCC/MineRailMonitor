@@ -13,7 +13,7 @@ public sealed class SqliteBackupRecoveryRegressionTests
         new(2026, 9, 20, 10, 30, 0, TimeSpan.FromHours(8));
 
     [Fact]
-    public async Task Schema_v1_v2_v3_migrations_remain_unchanged_after_health_and_backup_inspection()
+    public async Task Schema_v1_v2_v3_migrations_reach_v4_after_health_and_backup_inspection()
     {
         foreach (var version in new[] { 1, 2, 3 })
         {
@@ -35,7 +35,7 @@ public sealed class SqliteBackupRecoveryRegressionTests
             {
                 var record = store.GetDetails(expectedPassageId);
                 Assert.NotNull(record);
-                Assert.Equal(3, ReadUserVersion(workspace.ProductionPath));
+                Assert.Equal(SqlitePassageRecordStore.CurrentSchemaVersion, ReadUserVersion(workspace.ProductionPath));
 
                 if (version == 1)
                 {
@@ -61,7 +61,7 @@ public sealed class SqliteBackupRecoveryRegressionTests
             }
 
             Assert.True(File.Exists(backup.FinalPath));
-            Assert.Equal(3, ReadUserVersion(workspace.ProductionPath));
+            Assert.Equal(SqlitePassageRecordStore.CurrentSchemaVersion, ReadUserVersion(workspace.ProductionPath));
         }
     }
 

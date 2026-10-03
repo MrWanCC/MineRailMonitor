@@ -137,7 +137,7 @@ public sealed class DatabaseRecoveryDialogMarkupTests
         Assert.Contains("当前应用支持版本", markup);
         Assert.Contains("health.SchemaVersion", code);
         Assert.Contains("SqlitePassageRecordStore.CurrentSchemaVersion", code);
-        Assert.Contains("public const int CurrentSchemaVersion = 3", store);
+        Assert.Contains("public const int CurrentSchemaVersion = 6", store);
         Assert.DoesNotContain("Text=\"3\"", markup);
     }
 

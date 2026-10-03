@@ -97,7 +97,9 @@ public partial class DeviceLayer : UserControl
             }
 
             var progress = state.DetectedVehicleCount > 0
-                ? $"{state.DetectedVehicleCount}/{state.ExpectedVehicleCount}"
+                ? state.ExpectedVehicleCount.HasValue
+                    ? $"{state.DetectedVehicleCount}/{state.ExpectedVehicleCount.Value}"
+                    : $"{state.DetectedVehicleCount}/未判定"
                 : null;
             visual.SetRuntimeState(state.VisualState, progress);
         }

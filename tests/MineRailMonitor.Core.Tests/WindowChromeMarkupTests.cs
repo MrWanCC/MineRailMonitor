@@ -73,9 +73,13 @@ public sealed class WindowChromeMarkupTests
     public void SettingsPage_exposes_an_administrator_mode_entry()
     {
         var xaml = File.ReadAllText(LocateSourceFile("Pages", "SettingsPage.xaml"));
+        var code = File.ReadAllText(LocateSourceFile("Pages", "SettingsPage.xaml.cs"));
 
         Assert.Contains("进入管理员模式", xaml);
-        Assert.Contains("Click=\"OnEnterAdminModeClick\"", xaml);
+        Assert.Contains("x:Name=\"AdminModeButton\"", xaml);
+        Assert.Contains("Click=\"OnAdminModeButtonClick\"", xaml);
+        Assert.Contains("private async void OnAdminModeButtonClick", code);
+        Assert.Contains("AdminModeButton.Content = _adminModeService.IsAdmin", code);
     }
 
     [Fact]

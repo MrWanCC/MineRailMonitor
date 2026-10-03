@@ -57,6 +57,18 @@ public sealed class RfidStationConfigurationChangeRulesTests
     }
 
     [Fact]
+    public void Expected_vehicle_count_changes_require_runtime_restart()
+    {
+        var previous = CreateStation("RFID-01", 62001, 1);
+        var candidate = CreateStation("RFID-01", 62001, 1);
+        candidate.ExpectedVehicleCount = 6;
+
+        Assert.True(RfidStationConfigurationChangeRules.RequiresRuntimeRestart(
+            new[] { previous },
+            new[] { candidate }));
+    }
+
+    [Fact]
     public void Adding_or_removing_a_station_requires_runtime_restart()
     {
         var first = CreateStation("RFID-01", 62001, 1);

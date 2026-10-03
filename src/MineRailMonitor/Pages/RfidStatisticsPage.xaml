@@ -3,302 +3,217 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Background="{StaticResource AppBackgroundBrush}">
     <UserControl.Resources>
-        <Geometry x:Key="StatisticsRankingIconGeometry">M4,20 V10 M10,20 V5 M16,20 V12 M22,20 H2</Geometry>
-        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
-        <Style x:Key="StatisticsHeaderStyle" TargetType="Border" BasedOn="{StaticResource PanelBorderStyle}">
-            <Setter Property="Background" Value="#06223A" />
-            <Setter Property="Padding" Value="14,0" />
-            <Setter Property="CornerRadius" Value="5" />
+        <Style x:Key="StatisticsTabItemStyle" TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="MinWidth" Value="112" />
+            <Setter Property="Padding" Value="18,0" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="0,0,0,2"
+                                CornerRadius="4,4,0,0" Padding="{TemplateBinding Padding}">
+                            <Grid>
+                                <ContentPresenter ContentSource="Header" HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}" />
+                                <Border x:Name="SelectedIndicator" Height="2"
+                                        Background="{StaticResource PrimaryBlueBrush}"
+                                        CornerRadius="1" VerticalAlignment="Bottom" Opacity="0" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#0B314C" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}" />
+                                <Setter TargetName="SelectedIndicator" Property="Opacity" Value="1" />
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#09263D" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="StatisticsTabControlStyle" TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource StatisticsTabItemStyle}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid KeyboardNavigation.TabNavigation="Local" KeyboardNavigation.DirectionalNavigation="Contained">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="42" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Background="#041B2E" BorderBrush="{StaticResource GridLineBrush}"
+                                    BorderThickness="0,0,0,1" CornerRadius="4,4,0,0" Padding="4,2">
+                                <TabPanel IsItemsHost="True" />
+                            </Border>
+                            <Border Grid.Row="1" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter ContentSource="SelectedContent" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style x:Key="StatisticsSectionStyle" TargetType="Border" BasedOn="{StaticResource PanelBorderStyle}">
             <Setter Property="Background" Value="#03182B" />
             <Setter Property="BorderBrush" Value="#0D6792" />
-            <Setter Property="Padding" Value="10" />
+            <Setter Property="Padding" Value="12" />
         </Style>
         <Style x:Key="StatisticsMetricStyle" TargetType="Border">
             <Setter Property="Background" Value="#061F36" />
             <Setter Property="BorderBrush" Value="#15516E" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="5" />
-            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Padding" Value="14,12" />
+            <Setter Property="Margin" Value="0,0,8,0" />
         </Style>
         <Style x:Key="StatisticsMetricNumberStyle" TargetType="TextBlock" BasedOn="{StaticResource TextBlockBaseStyle}">
-            <Setter Property="FontSize" Value="24" />
+            <Setter Property="FontSize" Value="25" />
             <Setter Property="FontWeight" Value="SemiBold" />
-        </Style>
-        <Style x:Key="StatisticsMetricLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource FieldLabelStyle}">
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Margin" Value="0,2,0,0" />
-        </Style>
-        <Style x:Key="StatisticsRangeButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Width" Value="88" />
-            <Setter Property="Height" Value="30" />
-            <Setter Property="MinHeight" Value="30" />
-            <Setter Property="Padding" Value="6,0" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Background" Value="#0B2A43" />
-            <Setter Property="BorderBrush" Value="#15516E" />
-        </Style>
-        <Style x:Key="StatisticsSmallTextStyle" TargetType="TextBlock" BasedOn="{StaticResource TextBlockBaseStyle}">
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
-        </Style>
-        <Style x:Key="StatisticsChartIconStyle" TargetType="Path">
-            <Setter Property="Width" Value="18" />
-            <Setter Property="Height" Value="18" />
-            <Setter Property="Stretch" Value="Uniform" />
-            <Setter Property="Stroke" Value="{StaticResource HeaderAccentBrush}" />
-            <Setter Property="StrokeThickness" Value="1.8" />
-            <Setter Property="Fill" Value="Transparent" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-        <Style x:Key="StatisticsTableHeaderStyle" TargetType="TextBlock" BasedOn="{StaticResource StatisticsSmallTextStyle}">
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
-            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
     </UserControl.Resources>
 
     <Grid x:Name="StatisticsPageGrid" VerticalAlignment="Stretch" Margin="12,10">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="50" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="82" />
-                <RowDefinition Height="*" MinHeight="286" />
-                <RowDefinition Height="*" MinHeight="252" />
-                <RowDefinition Height="92" />
-            </Grid.RowDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="50" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" Style="{StaticResource StatisticsHeaderStyle}" Margin="0,0,0,8">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="8" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Border Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,8,12,8" />
-                    <TextBlock Grid.Column="1" Text="RFID统计" Style="{StaticResource PageTitleStyle}" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="2" Text="统计分析 RFID 车列通过、基站运行和异常识别情况"
-                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
-                               VerticalAlignment="Center" Margin="18,0,0,0" />
-                </Grid>
-            </Border>
-
-            <Border Grid.Row="1" Style="{StaticResource StatisticsSectionStyle}" Margin="0,0,0,8">
-                <WrapPanel VerticalAlignment="Center">
-                    <TextBlock Text="站场范围" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <ComboBox x:Name="YardFilter" Width="150" Height="30" Margin="0,0,14,0"
-                              SelectionChanged="OnYardFilterChanged">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding DisplayName}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <TextBlock Text="基站筛选" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <ComboBox x:Name="StationFilter" Width="190" Height="30" Margin="0,0,14,0" />
-                    <TextBlock Text="结果筛选" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <ComboBox x:Name="OutcomeFilter" Width="150" Height="30" Margin="0,0,14,0">
-                        <ComboBoxItem Content="全部结果" Tag="" />
-                        <ComboBoxItem Content="正常通过" Tag="Completed" />
-                        <ComboBoxItem Content="脱节报警" Tag="UncouplingAlarm" />
-                    </ComboBox>
-                    <TextBlock Text="车头RFID" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <TextBox x:Name="HeadRfidFilter" Width="150" Height="30" Margin="0,0,14,0" ToolTip="例如：0003 或 0x0003" />
-                    <Button Content="查询" Width="78" Height="30" MinHeight="30" Background="#087DDD" BorderBrush="#16B8FF" Click="OnQueryClick" />
-                    <Button Content="重置" Width="78" Height="30" MinHeight="30" Margin="8,0,0,0" Click="OnResetClick" />
-                    <TextBlock x:Name="QueryErrorText" Margin="14,0,0,0" Foreground="#FFFF9B9B" FontSize="12" VerticalAlignment="Center" />
-                </WrapPanel>
-            </Border>
-
-            <UniformGrid Grid.Row="2" Columns="6" Margin="0,0,0,8">
-                <Border Style="{StaticResource StatisticsMetricStyle}" Margin="0,0,6,0" BorderBrush="#167EB3">
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock x:Name="PassageMetricValue" Text="0" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="{StaticResource TextPrimaryBrush}" />
-                        <TextBlock x:Name="PassageMetricLabel" Text="今日通过" Style="{StaticResource StatisticsMetricLabelStyle}" />
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource StatisticsMetricStyle}" Margin="0,0,6,0" BorderBrush="#008F8A">
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock x:Name="NormalMetricValue" Text="0" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="{StaticResource SuccessBrush}" />
-                        <TextBlock Text="正常通过" Style="{StaticResource StatisticsMetricLabelStyle}" />
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource StatisticsMetricStyle}" Margin="0,0,6,0" BorderBrush="#A43754">
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock x:Name="AlarmMetricValue" Text="0" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="{StaticResource AlarmBrush}" />
-                        <TextBlock Text="脱节报警" Style="{StaticResource StatisticsMetricLabelStyle}" />
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource StatisticsMetricStyle}" Margin="0,0,6,0" BorderBrush="#167EB3">
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock x:Name="OnlineMetricValue" Text="0 / 0" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="{StaticResource PrimaryBlueBrush}" />
-                        <TextBlock Text="在线基站" Style="{StaticResource StatisticsMetricLabelStyle}" />
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource StatisticsMetricStyle}" Margin="0,0,6,0" BorderBrush="#167EB3">
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock x:Name="RecognizingMetricValue" Text="0" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="{StaticResource PrimaryBlueBrush}" />
-                        <TextBlock Text="识别中" Style="{StaticResource StatisticsMetricLabelStyle}" />
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource StatisticsMetricStyle}" BorderBrush="#167EB3">
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock x:Name="AverageMetricValue" Text="0.0 s" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="{StaticResource PrimaryBlueBrush}" />
-                        <TextBlock Text="平均识别时长" Style="{StaticResource StatisticsMetricLabelStyle}" />
-                    </StackPanel>
-                </Border>
-            </UniformGrid>
-
-            <Grid Grid.Row="3" Margin="0,0,0,8">
+        <Border Grid.Row="0" Background="#06223A" BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="1" CornerRadius="5" Padding="14,0" Margin="0,0,0,8">
+            <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2.1*" />
-                    <ColumnDefinition Width="360" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-
-                <Border Grid.Column="0" Style="{StaticResource StatisticsSectionStyle}" Margin="0,0,8,0">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="34" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-                        <Grid>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <Border Width="4" Height="22" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
-                                <TextBlock Text="通行趋势" Style="{StaticResource SectionTitleStyle}" />
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                <Button x:Name="TodayRangeButton" Content="今日" Style="{StaticResource StatisticsRangeButtonStyle}" Click="OnTodayRangeClick" />
-                                <Button x:Name="Last7DaysButton" Content="近7天" Style="{StaticResource StatisticsRangeButtonStyle}" Margin="4,0,0,0" Click="OnLast7DaysClick" />
-                                <Button x:Name="Last30DaysButton" Content="近30天" Style="{StaticResource StatisticsRangeButtonStyle}" Margin="4,0,0,0" Click="OnLast30DaysClick" />
-                            </StackPanel>
-                        </Grid>
-                        <Canvas x:Name="TrendCanvas" Grid.Row="1" MinHeight="228" Margin="0,2,0,0" Background="#041B31" SizeChanged="OnTrendCanvasSizeChanged" />
-                    </Grid>
-                </Border>
-
-                <Border Grid.Column="1" Width="360" VerticalAlignment="Stretch" Style="{StaticResource StatisticsSectionStyle}" Padding="8,6,8,8">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="34" />
-                            <RowDefinition Height="24" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-                        <Grid>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <Path Data="{StaticResource StatisticsRankingIconGeometry}" Style="{StaticResource StatisticsChartIconStyle}" Margin="0,0,8,0" />
-                                <TextBlock Text="基站通行排行" Style="{StaticResource SectionTitleStyle}" />
-                            </StackPanel>
-                            <TextBlock x:Name="RankingScopeText" Text="全部基站（0）" Style="{StaticResource StatisticsSmallTextStyle}"
-                                       HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="11" />
-                        </Grid>
-                        <Border Grid.Row="1" Background="{StaticResource DataGridHeaderBrush}" Padding="8,0">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="32" />
-                                    <ColumnDefinition Width="1.6*" />
-                                    <ColumnDefinition Width="1.15*" />
-                                    <ColumnDefinition Width="32" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="排名" Style="{StaticResource StatisticsTableHeaderStyle}" />
-                                <TextBlock Grid.Column="1" Text="基站名称" Style="{StaticResource StatisticsTableHeaderStyle}" />
-                                <TextBlock Grid.Column="2" Text="通行次数" Style="{StaticResource StatisticsTableHeaderStyle}" />
-                            </Grid>
-                        </Border>
-                        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0">
-                            <ItemsControl x:Name="RankingItemsControl">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,0,1">
-                                            <Grid Height="30">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="32" />
-                                                <ColumnDefinition Width="1.6*" />
-                                                <ColumnDefinition Width="1.15*" />
-                                                <ColumnDefinition Width="32" />
-                                            </Grid.ColumnDefinitions>
-                                            <Grid VerticalAlignment="Center">
-                                                <Path Data="{StaticResource TrainIconGeometry}" Width="14" Height="14" Stretch="Uniform"
-                                                      Stroke="{StaticResource SuccessBrush}" StrokeThickness="1.4" Fill="Transparent"
-                                                      Visibility="{Binding IsTopRank, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                <TextBlock Text="{Binding RankText}" VerticalAlignment="Center" />
-                                            </Grid>
-                                            <TextBlock Grid.Column="1" Text="{Binding StationText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                            <Border Grid.Column="2" Height="11" VerticalAlignment="Center" Background="#0B2A43" CornerRadius="2">
-                                                <Border Width="{Binding BarWidth}" HorizontalAlignment="Left" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="2" />
-                                            </Border>
-                                            <TextBlock Grid.Column="3" Text="{Binding Count}" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                            </Grid>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </Grid>
-                </Border>
+                <Border Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,8,12,8" />
+                <TextBlock Grid.Column="1" Text="统计分析" Style="{StaticResource PageTitleStyle}" VerticalAlignment="Center" />
+                <Grid Grid.Column="2" Margin="18,0,0,0">
+                    <TextBlock x:Name="StatisticsSubtitleText" Text="统计范围：全部站场"
+                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
+                               VerticalAlignment="Center" />
+                    <TextBlock x:Name="StatisticsErrorText" Foreground="{StaticResource AlarmBrush}"
+                               FontSize="12" VerticalAlignment="Center" Visibility="Collapsed" />
+                </Grid>
+                <Button x:Name="RefreshButton" Grid.Column="3" Content="刷新" Width="78" Height="30"
+                        MinHeight="30" Click="OnRefreshClick" />
             </Grid>
+        </Border>
 
-            <Border Grid.Row="4" Style="{StaticResource StatisticsSectionStyle}" Padding="8" Margin="0,0,0,8">
-                <Grid>
+        <TabControl x:Name="StatisticsTabs" Grid.Row="1" Style="{StaticResource StatisticsTabControlStyle}" SelectedIndex="0">
+            <TabItem Header="今日概览">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="34" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Margin="4,0,4,6">
+                        <TextBlock x:Name="StatisticsDateText" Text="统计日期：—"
+                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
+                                   VerticalAlignment="Center" />
+                        <TextBlock x:Name="OverviewEmptyText" Text="今日暂无通行记录"
+                                   Foreground="{StaticResource MutedTextBrush}" FontSize="12"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Collapsed" />
+                    </Grid>
+                    <UniformGrid Grid.Row="1" Columns="6">
+                        <Border Style="{StaticResource StatisticsMetricStyle}" BorderBrush="#167EB3">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="PassageMetricValue" Text="0" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="{StaticResource TextPrimaryBrush}" />
+                                <TextBlock Text="通行次数" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource StatisticsMetricStyle}" BorderBrush="#008F8A">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="NormalMetricValue" Text="0" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="{StaticResource SuccessBrush}" />
+                                <TextBlock Text="正常通过" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource StatisticsMetricStyle}" BorderBrush="#A43754">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="AlarmMetricValue" Text="0" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="{StaticResource AlarmBrush}" />
+                                <TextBlock Text="脱节报警" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource StatisticsMetricStyle}" BorderBrush="#A8792A">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="UnverifiedMetricValue" Text="0" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="#E8AD52" />
+                                <TextBlock Text="完整性未判定" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource StatisticsMetricStyle}" BorderBrush="#A43754">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="AlarmRateMetricValue" Text="0.0%" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="{StaticResource AlarmBrush}" />
+                                <TextBlock Text="报警率" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource StatisticsMetricStyle}" BorderBrush="#167EB3" Margin="0">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="AverageMetricValue" Text="0.0 秒" Style="{StaticResource StatisticsMetricNumberStyle}" Foreground="{StaticResource PrimaryBlueBrush}" />
+                                <TextBlock Text="平均通行时长" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </UniformGrid>
+                    <Border Grid.Row="2" Style="{StaticResource StatisticsSectionStyle}" Margin="0,10,0,0">
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                            <TextBlock Text="今日统计口径" Foreground="{StaticResource TextPrimaryBrush}"
+                                       FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                            <TextBlock x:Name="OverviewSummaryText" Text="通行次数按完成时间统计；报警率按脱节报警次数占通行次数计算。"
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
+                                       Margin="0,8,0,0" TextAlignment="Center" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </TabItem>
+            <TabItem Header="车辆统计">
+                <Grid Margin="10">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="34" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0">
-                        <Border Width="4" Height="22" Background="{StaticResource HeaderAccentBrush}" CornerRadius="2" Margin="0,0,10,0" />
-                        <TextBlock Text="最近通行记录" Style="{StaticResource SectionTitleStyle}" />
-                    </StackPanel>
+                    <Grid Margin="4,0,4,6">
+                        <TextBlock x:Name="VehicleStatisticsDateText" Text="按车辆编号汇总今日通行和报警情况"
+                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
+                                   VerticalAlignment="Center" />
+                    </Grid>
                     <Grid Grid.Row="1">
-                        <DataGrid x:Name="RecentPassageGrid" Style="{StaticResource IndustrialDataGridStyle}"
+                        <DataGrid x:Name="VehicleStatisticsGrid" Style="{StaticResource IndustrialDataGridStyle}"
                                   AutoGenerateColumns="False" HeadersVisibility="Column" IsReadOnly="True">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="完成时间" Binding="{Binding CompletedAtText}" Width="1.25*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                                <DataGridTextColumn Header="基站" Binding="{Binding StationText}" Width="1.1*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                                <DataGridTextColumn Header="车头RFID" Binding="{Binding HeadRfidText}" Width="0.85*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                                <DataGridTextColumn Header="识别数量" Binding="{Binding ProgressText}" Width="0.8*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                                <DataGridTemplateColumn Header="结果" Width="0.9*">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate><TextBlock Text="{Binding OutcomeText}" Foreground="{Binding OutcomeBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" /></DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
-                                <DataGridTextColumn Header="耗时" Binding="{Binding DurationText}" Width="0.75*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                                <DataGridTemplateColumn Header="清除状态" Width="0.9*">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate><TextBlock Text="{Binding ClearStateText}" Foreground="{Binding ClearStateBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" /></DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="车辆编号" Binding="{Binding VehicleNoText}" Width="1.1*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                <DataGridTextColumn Header="车辆名称" Binding="{Binding VehicleNameText}" Width="1.4*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                <DataGridTextColumn Header="通行次数" Binding="{Binding TotalCount}" Width="0.9*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                <DataGridTextColumn Header="报警次数" Binding="{Binding AlarmCount}" Width="0.9*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                <DataGridTextColumn Header="报警率" Binding="{Binding AlarmRateText}" Width="0.9*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                             </DataGrid.Columns>
                         </DataGrid>
-                        <TextBlock x:Name="RecentNoDataText" Text="暂无符合条件的通行记录" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" IsHitTestVisible="False" />
+                        <TextBlock x:Name="VehicleGridEmptyText" Text="暂无车辆统计数据"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="14"
+                                   IsHitTestVisible="False" Visibility="Collapsed" />
                     </Grid>
                 </Grid>
-            </Border>
-
-            <Border Grid.Row="5" Style="{StaticResource StatisticsSectionStyle}" Padding="10">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="190" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="识别效率洞察" Style="{StaticResource SectionTitleStyle}" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0">
-                        <TextBlock Text="高峰时段" Style="{StaticResource StatisticsSmallTextStyle}" />
-                        <TextBlock x:Name="PeakHourText" Text="-" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBlueBrush}" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="12,0">
-                        <TextBlock Text="异常高发基站" Style="{StaticResource StatisticsSmallTextStyle}" />
-                        <TextBlock x:Name="AlarmStationText" Text="-" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource AlarmBrush}" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="12,0">
-                        <TextBlock Text="最长等待" Style="{StaticResource StatisticsSmallTextStyle}" />
-                        <TextBlock x:Name="LongestDurationText" Text="-" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBlueBrush}" />
-                    </StackPanel>
-                </Grid>
-            </Border>
+            </TabItem>
+        </TabControl>
     </Grid>
 </UserControl>

@@ -244,63 +244,51 @@ public sealed class OperationalPagesMarkupTests
     }
 
     [Fact]
-    public void Rfid_statistics_page_exposes_filters_metrics_trend_distribution_and_records()
+    public void Statistics_analysis_page_exposes_today_and_vehicle_tabs()
     {
         var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml"));
         var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml.cs"));
 
-        Assert.Contains("RFID统计", markup, StringComparison.Ordinal);
-        Assert.Contains("TodayRangeButton", markup, StringComparison.Ordinal);
-        Assert.Contains("Last7DaysButton", markup, StringComparison.Ordinal);
-        Assert.Contains("Last30DaysButton", markup, StringComparison.Ordinal);
-        Assert.Contains("StationFilter", markup, StringComparison.Ordinal);
-        Assert.Contains("站场范围", markup, StringComparison.Ordinal);
-        Assert.Contains("YardFilter", markup, StringComparison.Ordinal);
-        Assert.Contains("OutcomeFilter", markup, StringComparison.Ordinal);
-        Assert.Contains("HeadRfidFilter", markup, StringComparison.Ordinal);
-        Assert.Contains("TrendCanvas", markup, StringComparison.Ordinal);
-        Assert.Contains("RankingItemsControl", markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("ResultDistributionPanel", markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("ResultDonutPath", markup, StringComparison.Ordinal);
-        Assert.Contains("RecentPassageGrid", markup, StringComparison.Ordinal);
-        Assert.Contains("识别效率洞察", markup, StringComparison.Ordinal);
+        Assert.Contains("统计分析", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"StatisticsTabs\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"今日概览\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"车辆统计\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"通行次数\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"正常通过\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"脱节报警\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"完整性未判定\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"报警率\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"平均通行时长\"", markup, StringComparison.Ordinal);
+        Assert.Contains("VehicleStatisticsGrid", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"车辆编号\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"车辆名称\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"通行次数\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"报警次数\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"报警率\"", markup, StringComparison.Ordinal);
+        Assert.Contains("今日暂无通行记录", markup, StringComparison.Ordinal);
+        Assert.Contains("暂无车辆统计数据", markup, StringComparison.Ordinal);
         Assert.Contains("StatisticsPageGrid", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"统计范围：全部站场\"", markup, StringComparison.Ordinal);
         Assert.Contains("VerticalAlignment=\"Stretch\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Height=\"*\" MinHeight=\"286\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Height=\"*\" MinHeight=\"252\"", markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("x:Name=\"StatisticsPageScrollViewer\"", markup, StringComparison.Ordinal);
-        Assert.Contains("IPassageRecordStore", code, StringComparison.Ordinal);
-        Assert.Contains("YardPassageFilter.BuildStatistics", code, StringComparison.Ordinal);
-        Assert.Contains("SetRuntimeStates", code, StringComparison.Ordinal);
-        Assert.Contains("SetYardOptions", code, StringComparison.Ordinal);
-        Assert.Contains("RfidYardFilter", code, StringComparison.Ordinal);
-        Assert.Contains("CompletedAt", code, StringComparison.Ordinal);
-        Assert.Contains("RfidTrendAggregator.Build", code, StringComparison.Ordinal);
-        Assert.Contains("_rangeDays", code, StringComparison.Ordinal);
-        Assert.Contains("RfidStationIdentity.GetDisplayId", code, StringComparison.Ordinal);
+        Assert.Contains("IStatisticsService", code, StringComparison.Ordinal);
+        Assert.Contains("public void SetDisplayScope", code, StringComparison.Ordinal);
+        Assert.Contains("FormatDisplayScope", code, StringComparison.Ordinal);
+        Assert.Contains("GetOverview", code, StringComparison.Ordinal);
+        Assert.Contains("GetVehicleStatistics", code, StringComparison.Ordinal);
+        Assert.Contains("AverageDurationSeconds", code, StringComparison.Ordinal);
+        Assert.Contains("overview.HasVerifiablePassages", code, StringComparison.Ordinal);
+        Assert.Contains("UnverifiedCount", code, StringComparison.Ordinal);
+        Assert.Contains(": \"—\"", code, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Rfid_statistics_ranking_matches_reference_layout()
+    public void Statistics_analysis_reuses_the_existing_rfid_navigation_entry()
     {
-        var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml"));
-        var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml.cs"));
+        var navigation = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml"));
 
-        Assert.DoesNotContain("StatisticsDistributionIconGeometry", markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("NormalCountText", markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("AlarmCountText", markup, StringComparison.Ordinal);
-        Assert.Contains("Width=\"360\" VerticalAlignment=\"Stretch\"", markup, StringComparison.Ordinal);
-        Assert.Contains("<ColumnDefinition Width=\"360\" />", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"基站通行排行\"", markup, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"RankingScopeText\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"排名\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"基站名称\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"通行次数\"", markup, StringComparison.Ordinal);
-        Assert.Contains("TrainIconGeometry", markup, StringComparison.Ordinal);
-        Assert.Contains("BooleanToVisibilityConverter", markup, StringComparison.Ordinal);
-        Assert.Contains("IsTopRank", markup, StringComparison.Ordinal);
-        Assert.Contains("RankingScopeText.Text", code, StringComparison.Ordinal);
-        Assert.Contains("configuredStations", code, StringComparison.Ordinal);
+        Assert.Contains("Text=\"统计分析\"", navigation, StringComparison.Ordinal);
+        Assert.Contains("Tag=\"Rfid\"", navigation, StringComparison.Ordinal);
+        Assert.DoesNotContain("Tag=\"Statistics\"", navigation, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -309,12 +297,13 @@ public sealed class OperationalPagesMarkupTests
         var code = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));
 
         Assert.Contains("RfidStatisticsPage", code, StringComparison.Ordinal);
+        Assert.Contains("new RfidStatisticsPage(_passageRecordStore)", code, StringComparison.Ordinal);
         Assert.Contains("_statisticsPage.Refresh()", code, StringComparison.Ordinal);
-        Assert.Contains("_statisticsPage?.SetRuntimeStates", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("_statisticsPage?.SetRuntimeStates", code, StringComparison.Ordinal);
         Assert.Contains("_communicationPage.ConfigureStations", code, StringComparison.Ordinal);
         Assert.Contains("_historyPage.SetYardOptions", code, StringComparison.Ordinal);
         Assert.Contains("_alarmHistoryPage.SetYardOptions", code, StringComparison.Ordinal);
-        Assert.Contains("_statisticsPage.SetYardOptions", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("_statisticsPage.SetYardOptions", code, StringComparison.Ordinal);
         Assert.Contains("_settingsPage?.SetSelectedYard", code, StringComparison.Ordinal);
         Assert.Contains("_communicationPage.SetStationStatuses", code, StringComparison.Ordinal);
         Assert.Contains("_communicationPage.SetDisplayScope", code, StringComparison.Ordinal);

@@ -237,12 +237,9 @@ public partial class MainWindow : Window
             _passageRecordStore,
             _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations,
             AcknowledgeAlarm);
-        _statisticsPage = new RfidStatisticsPage(
-            _passageRecordStore,
-            _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations);
+        _statisticsPage = new RfidStatisticsPage(_passageRecordStore);
         _historyPage.SetYardOptions(result.Project.Stations);
         _alarmHistoryPage.SetYardOptions(result.Project.Stations);
-        _statisticsPage.SetYardOptions(result.Project.Stations);
         _communicationPage.SetYardOptions(result.Project.Stations);
         _communicationPage.SetExternalAlarmConfigurations(result.Project.YardCommunications, result.Project.YardAlarmForwards);
         _communicationPage.ConfigureStations(settingsStations, SendCommunicationTestAsync);
@@ -318,7 +315,6 @@ public partial class MainWindow : Window
 
         if (page == "Rfid" && _statisticsPage is not null)
         {
-            ApplyCurrentYardDisplayScope();
             _statisticsPage.Refresh();
             PageContent.Content = _statisticsPage;
             return;
@@ -349,7 +345,7 @@ public partial class MainWindow : Window
 
         var title = page switch
         {
-            "Rfid" => "RFID统计",
+            "Rfid" => "统计分析",
             "Query" => "数据查询",
             "Alarms" => "报警记录",
             "History" => "历史查询",
@@ -555,7 +551,6 @@ public partial class MainWindow : Window
         _communicationPage.ConfigureStations(_loadedProject.RfidStations, SendCommunicationTestAsync);
         _historyPage?.SetRfidStations(_loadedProject.RfidStations);
         _alarmHistoryPage?.SetRfidStations(_loadedProject.RfidStations);
-        _statisticsPage?.SetRfidStations(_loadedProject.RfidStations);
 
         if (requiresRuntimeRestart)
         {
@@ -1429,7 +1424,6 @@ public partial class MainWindow : Window
             FilterCurrentYardPollingStatuses(GetAllPollingStatuses()));
         _communicationPage.SetStationStatuses(
             GetAllPollingStatuses());
-        _statisticsPage?.SetRuntimeStates(GetAllRuntimeStates());
         _monitorPage.SetSystemRfidStatus(_rfidListenerHealthy);
         UpdateHeaderStatusIndicators();
     }

@@ -4,7 +4,7 @@ using MineRailMonitor.Core.Models;
 
 namespace MineRailMonitor.Infrastructure.Persistence;
 
-public sealed class SqlitePassageRecordStore : IPassageRecordStore, IDisposable
+public sealed class SqlitePassageRecordStore : IPassageRecordStore, IStatisticsService, IDisposable
 {
     public const int CurrentSchemaVersion = 6;
     private const string ConnectionPragmas =
@@ -302,6 +302,125 @@ GROUP BY station_id, result;";
         return new PassageStatistics(normal + alarm, normal, alarm, byStation);
     }
 
+    public OverviewStatistics GetOverview(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        IEnumerable<string>? stationIds = null)
+    {
+        ValidateRange(start, end);
+
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        var stationFilter = AddStatisticsStationFilter(command, stationIds);
+        command.CommandText = $@"
+SELECT COUNT(*),
+       COALESCE(SUM(CASE WHEN result = $normal_result THEN 1 ELSE 0 END), 0),
+       COALESCE(SUM(CASE WHEN result = $alarm_result THEN 1 ELSE 0 END), 0),
+       COALESCE(SUM(CASE WHEN result = $unverified_result THEN 1 ELSE 0 END), 0),
+       COALESCE(AVG(CASE WHEN completed_at >= started_at THEN completed_at - started_at END), 0)
+FROM passage_record
+WHERE completed_at >= $start AND completed_at < $end
+  {stationFilter};";
+        AddTimeRangeParameters(command, start, end);
+        command.Parameters.AddWithValue("$normal_result", (int)PassageOutcome.Completed);
+        command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
+        command.Parameters.AddWithValue("$unverified_result", (int)PassageOutcome.Unverified);
+
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            return new OverviewStatistics(0, 0, 0);
+        }
+
+        return new OverviewStatistics(
+            reader.GetInt32(0),
+            reader.GetInt32(1),
+            reader.GetInt32(2),
+            reader.GetDouble(4) / 1000d,
+            reader.GetInt32(3));
+    }
+
+    public IReadOnlyList<VehicleStatisticsItem> GetVehicleStatistics(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        IEnumerable<string>? stationIds = null)
+    {
+        ValidateRange(start, end);
+
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        var stationFilter = AddStatisticsStationFilter(command, stationIds);
+        command.CommandText = $@"
+SELECT vehicle_no, MAX(vehicle_name), COUNT(*),
+       SUM(CASE WHEN result = $normal_result THEN 1 ELSE 0 END),
+       SUM(CASE WHEN result = $alarm_result THEN 1 ELSE 0 END)
+FROM passage_record
+WHERE completed_at >= $start AND completed_at < $end
+  {stationFilter}
+  AND result IN ($normal_result, $alarm_result)
+GROUP BY vehicle_no
+ORDER BY COUNT(*) DESC, vehicle_no COLLATE NOCASE;";
+        AddTimeRangeParameters(command, start, end);
+        command.Parameters.AddWithValue("$normal_result", (int)PassageOutcome.Completed);
+        command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
+
+        var result = new List<VehicleStatisticsItem>();
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                result.Add(new VehicleStatisticsItem(
+                    reader.IsDBNull(0) ? null : reader.GetString(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.GetInt32(2),
+                    reader.GetInt32(3),
+                    reader.GetInt32(4)));
+            }
+        }
+
+        return result;
+    }
+
+    public IReadOnlyList<AlarmStatisticsItem> GetAlarmStatistics(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        IEnumerable<string>? stationIds = null)
+    {
+        ValidateRange(start, end);
+
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        var stationFilter = AddStatisticsStationFilter(command, stationIds);
+        const string alarmStatusExpression = @"CASE
+            WHEN alarm_acknowledged_at IS NULL THEN $unconfirmed_status
+            WHEN alarm_recovered_at IS NOT NULL THEN $recovered_status
+            ELSE $acknowledged_status END";
+        command.CommandText = $@"
+SELECT {alarmStatusExpression}, COUNT(*)
+FROM passage_record
+WHERE completed_at >= $start AND completed_at < $end
+  {stationFilter}
+  AND result = $alarm_result
+GROUP BY {alarmStatusExpression}
+ORDER BY {alarmStatusExpression};";
+        AddTimeRangeParameters(command, start, end);
+        command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
+        command.Parameters.AddWithValue("$unconfirmed_status", (int)AlarmStatus.Unconfirmed);
+        command.Parameters.AddWithValue("$acknowledged_status", (int)AlarmStatus.Acknowledged);
+        command.Parameters.AddWithValue("$recovered_status", (int)AlarmStatus.Recovered);
+
+        var result = new List<AlarmStatisticsItem>();
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                result.Add(new AlarmStatisticsItem((AlarmStatus)reader.GetInt32(0), reader.GetInt32(1)));
+            }
+        }
+
+        return result;
+    }
+
     public void Dispose()
     {
     }
@@ -537,6 +656,70 @@ PRAGMA user_version=6;";
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
         return Convert.ToInt32(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static void ValidateRange(DateTimeOffset start, DateTimeOffset end)
+    {
+        if (end <= start)
+        {
+            throw new ArgumentOutOfRangeException(nameof(end), "结束时间必须晚于开始时间。");
+        }
+    }
+
+    private static void AddTimeRangeParameters(SQLiteCommand command, DateTimeOffset start, DateTimeOffset end)
+    {
+        command.Parameters.AddWithValue("$start", ToUnixMilliseconds(start));
+        command.Parameters.AddWithValue("$end", ToUnixMilliseconds(end));
+    }
+
+    private static string AddStatisticsStationFilter(SQLiteCommand command, IEnumerable<string>? stationIds)
+    {
+        if (stationIds is null)
+        {
+            return string.Empty;
+        }
+
+        var normalizedStationIds = stationIds
+            .Where(stationId => !string.IsNullOrWhiteSpace(stationId))
+            .Select(stationId => NormalizeStationId(stationId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (normalizedStationIds.Length == 0)
+        {
+            return "AND 1 = 0";
+        }
+
+        var stationClauses = new List<string>();
+        if (normalizedStationIds.Any(stationId => string.Equals(
+                stationId,
+                PassageRecord.LegacyStationId,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            stationClauses.Add("(station_id IS NULL OR TRIM(station_id) = '')");
+        }
+
+        var configuredStationIds = normalizedStationIds
+            .Where(stationId => !string.Equals(
+                stationId,
+                PassageRecord.LegacyStationId,
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (configuredStationIds.Length > 0)
+        {
+            var parameterNames = new List<string>(configuredStationIds.Length);
+            for (var index = 0; index < configuredStationIds.Length; index++)
+            {
+                var parameterName = $"$statistics_station_id_{index}";
+                parameterNames.Add(parameterName);
+                command.Parameters.AddWithValue(parameterName, configuredStationIds[index]);
+            }
+
+            stationClauses.Add($"station_id IN ({string.Join(", ", parameterNames)})");
+        }
+
+        return stationClauses.Count == 0
+            ? string.Empty
+            : $"AND ({string.Join(" OR ", stationClauses)})";
     }
 
     private static void AddRecordParameters(SQLiteCommand command, PassageRecord record)

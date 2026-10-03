@@ -167,37 +167,43 @@
                             <Border Height="1" Background="#138AC2" Margin="12,16,12,12" />
                             <Button x:Name="MonitorNavButton" Tag="Monitor" Style="{StaticResource NavButtonStyle}" Click="OnNavigationClick">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE80F;" Style="{StaticResource SegoeFluentIconStyle}" />
+                                    <Path Data="{StaticResource MonitorIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
                                     <TextBlock Text="实时监控" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Button>
                             <Button Tag="Rfid" Style="{StaticResource NavButtonStyle}" Click="OnNavigationClick">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" />
-                                    <TextBlock Text="RFID统计" VerticalAlignment="Center" />
+                                    <Path Data="{StaticResource QueryIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+                                    <TextBlock Text="统计分析" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Button>
                             <Button x:Name="AlarmNavButton" Tag="Alarms" Style="{StaticResource NavButtonStyle}" Click="OnNavigationClick">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE7BA;" Style="{StaticResource SegoeFluentIconStyle}" />
+                                    <Path Data="{StaticResource AlarmIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
                                     <TextBlock Text="报警记录" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Button>
                             <Button Tag="History" Style="{StaticResource NavButtonStyle}" Click="OnNavigationClick">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE81C;" Style="{StaticResource SegoeFluentIconStyle}" />
+                                    <Path Data="{StaticResource QueryIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
                                     <TextBlock Text="历史查询" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Button>
                             <Button Tag="Communication" Style="{StaticResource NavButtonStyle}" Click="OnNavigationClick">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE701;" Style="{StaticResource SegoeFluentIconStyle}" />
+                                    <Path Data="{StaticResource CommunicationIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
                                     <TextBlock Text="通信测试" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Button>
                             <Button Tag="Settings" Style="{StaticResource NavButtonStyle}" Click="OnNavigationClick">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE713;" Style="{StaticResource SegoeFluentIconStyle}" />
+                                    <Path Data="{StaticResource SettingsIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
                                     <TextBlock Text="系统设置" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Button>

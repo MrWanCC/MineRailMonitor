@@ -23,14 +23,19 @@ public sealed class AcceptanceRuntimeStateWriterTests
 
         try
         {
-            coordinator.ProcessFrame(CreateFrame(DateTimeOffset.Now, new ushort[] { 0x0001, 0x0011 }));
+            var receivedAt = DateTimeOffset.Now;
+            coordinator.ProcessFrame(CreateFrame(receivedAt, new ushort[] { 0x0001, 0x0011 }));
             using var writer = new AcceptanceRuntimeStateWriter(path, coordinator);
             writer.Write("frame");
 
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             var root = document.RootElement;
+            var station = root.GetProperty("Stations")[0];
             Assert.Equal("frame", root.GetProperty("Trigger").GetString());
-            Assert.Equal("Recognizing", root.GetProperty("Stations")[0].GetProperty("LifecycleState").GetString());
+            Assert.Equal("Recognizing", station.GetProperty("LifecycleState").GetString());
+            Assert.Equal(coordinator.States[0x01].RecognitionSession!.PassageId.ToString("D"), station.GetProperty("PassageId").GetString());
+            Assert.Equal(receivedAt, station.GetProperty("LastNewVehicleAt").GetDateTimeOffset());
+            Assert.Equal(0, station.GetProperty("ClearAttempts").GetInt32());
             Assert.Contains(root.GetProperty("History").EnumerateArray(), item =>
                 item.GetProperty("Stations")[0].GetProperty("Detected").GetInt32() == 2);
             Assert.Empty(Directory.EnumerateFiles(directory, "*.tmp"));

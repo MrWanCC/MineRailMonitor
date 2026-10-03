@@ -138,7 +138,51 @@ public sealed class SimulatorScenarioRunner
             return;
         }
 
-        if (scenario.Name == "TwoConsecutiveTrains")
+        if (scenario.SendNextTrainImmediatelyAfterClear)
+        {
+            var firstTrain = scenario.Trains[0];
+            var nextTrain = scenario.Trains[1];
+            await ApplyTrainAsync(firstTrain, stations, responder, cancellationToken).ConfigureAwait(false);
+            await WaitForClearAsync(firstTrain.StationAddress, responder, minimumClearCount: 1, cancellationToken).ConfigureAwait(false);
+            var immediateFirstClearAt = responder.RequestLogs
+                .Where(item => item.StationAddress == firstTrain.StationAddress && item.Command == RfidPollCommand.Clear)
+                .Select(item => item.ReceivedAt)
+                .First();
+            await WaitForAsync(
+                () => responder.ResponseLogs.Any(item =>
+                    item.StationAddress == firstTrain.StationAddress &&
+                    item.SentAt >= immediateFirstClearAt &&
+                    item.IsEmpty),
+                cancellationToken,
+                "首辆车Clear后未观察到空槽响应。").ConfigureAwait(false);
+
+            var station = stations.Single(item => item.Address == nextTrain.StationAddress);
+            lock (station)
+            {
+                Array.Clear(station.Slots, 0, station.Slots.Length);
+                for (var index = 0; index < nextTrain.VehicleRfids.Count; index++)
+                {
+                    station.Slots[nextTrain.OccupiedSlotIndexes[index]] = nextTrain.VehicleRfids[index];
+                }
+            }
+
+            await WaitForAsync(
+                () => responder.ResponseLogs.Any(item =>
+                    item.StationAddress == nextTrain.StationAddress &&
+                    item.SentAt >= immediateFirstClearAt &&
+                    !item.IsEmpty &&
+                    item.Slots.Contains(nextTrain.VehicleRfids[0])),
+                cancellationToken,
+                "未在首辆车清场期间观察到第二辆车RFID。").ConfigureAwait(false);
+            await WaitForClearAndEmptyAsync(
+                firstTrain.StationAddress,
+                responder,
+                minimumClearCount: 2,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (scenario.Name is "TwoConsecutiveTrains" or "UdpU07ConsecutiveAfterClear")
         {
             for (var trainIndex = 0; trainIndex < scenario.Trains.Count; trainIndex++)
             {
@@ -191,7 +235,13 @@ public sealed class SimulatorScenarioRunner
         var nextInsertionAt = DateTimeOffset.UtcNow;
         foreach (var item in plan.VehicleRfids.Select((rfid, index) => new { rfid, index }))
         {
-            var delay = nextInsertionAt - DateTimeOffset.UtcNow;
+            var scheduledAt = nextInsertionAt;
+            if (item.index == plan.VehicleRfids.Count - 1)
+            {
+                scheduledAt += plan.DelayBeforeFinalRfid;
+            }
+
+            var delay = scheduledAt - DateTimeOffset.UtcNow;
             if (delay > TimeSpan.Zero)
             {
                 await Task.Delay(delay, cancellationToken).ConfigureAwait(false);

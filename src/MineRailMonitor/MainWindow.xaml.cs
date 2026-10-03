@@ -223,6 +223,10 @@ public partial class MainWindow : Window
                 $"RFID基站编号已规范化：{legacyStationIdMigration.Count} 个别名，历史记录更新 {migratedRecordCount} 条。");
         }
         var runtimeSettings = GetRuntimeSettings(result.Project);
+        if (_acceptanceOptions.Enabled)
+        {
+            result.Project.Vehicles = CreateAcceptanceVehicles();
+        }
         _rfidFrameParser = new RfidFrameParser(new RfidFrameParserOptions
         {
             EmptyRfidValue = runtimeSettings.EmptyRfidValue
@@ -2134,6 +2138,39 @@ public partial class MainWindow : Window
         CreateAcceptanceStation(0x01, "560", _acceptanceOptions.SimulatorPort),
         CreateAcceptanceStation(0x04, "620", _acceptanceOptions.SimulatorPort620)
     };
+
+    private static IReadOnlyList<VehicleConfig> CreateAcceptanceVehicles() => new[]
+    {
+        CreateAcceptanceVehicle("K001", "11节验收车辆001", 0x1001, 0x1101),
+        CreateAcceptanceVehicle("K002", "11节验收车辆002", 0x1002, 0x1201)
+    };
+
+    private static VehicleConfig CreateAcceptanceVehicle(
+        string vehicleNo,
+        string vehicleName,
+        ushort headRfid,
+        ushort firstWagonRfid)
+    {
+        var tags = new List<VehicleTagConfig>
+        {
+            new() { Position = 0, Rfid = headRfid, Type = VehicleTagType.Head }
+        };
+        tags.AddRange(Enumerable.Range(0, 10).Select(index => new VehicleTagConfig
+        {
+            Position = index + 1,
+            Rfid = (ushort)(firstWagonRfid + index),
+            Type = VehicleTagType.Carriage
+        }));
+
+        return new VehicleConfig
+        {
+            VehicleNo = vehicleNo,
+            VehicleName = vehicleName,
+            HeadRfid = headRfid,
+            Enabled = true,
+            Tags = tags
+        };
+    }
 
     private RfidStationConfig CreateAcceptanceStation(byte address, string yardId, int simulatorPort) => new()
     {

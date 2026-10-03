@@ -29,7 +29,15 @@ $scenarioNames = @(
     'ClearReappearingTags',
     'SparseSlots',
     'MultipleHeads',
-    'NoHead'
+    'NoHead',
+    'UdpU01Normal11',
+    'UdpU02Uncoupling10Of11',
+    'UdpU03LateEleventhCompletes',
+    'UdpU04RepeatedTagsTimeout',
+    'UdpU05HeadAppearsLate',
+    'UdpU06UnknownHeadFallback',
+    'UdpU07ConsecutiveAfterClear',
+    'UdpU08ImmediateConsecutive'
 )
 
 function Write-AtomicText {
@@ -285,7 +293,9 @@ function Get-DatabaseSnapshot {
 
     $recordRows = @(Invoke-SqliteQuery -DatabasePath $DatabasePath -Sql @"
 SELECT passage_id, station_id, station_address, head_rfid, expected_vehicle_count,
-       detected_vehicle_count, result, clear_state, warning_message, alarm_message
+       detected_vehicle_count, result, clear_state, warning_message, alarm_message,
+       vehicle_no, vehicle_name, vehicle_head_rfid,
+       alarm_acknowledged_at, alarm_recovered_at
 FROM passage_record
 ORDER BY completed_at ASC, created_at ASC;
 "@
@@ -308,10 +318,14 @@ ORDER BY completed_at ASC, created_at ASC;
             StationAddress = [int]$row.station_address
             Station = ('RFID-{0:X2}' -f [int]$row.station_address)
             HeadRfid = Format-Rfid $row.head_rfid
+            VehicleHeadRfid = Format-Rfid $row.vehicle_head_rfid
+            VehicleNo = if ($row.IsNull('vehicle_no')) { $null } else { [string]$row.vehicle_no }
+            VehicleName = if ($row.IsNull('vehicle_name')) { $null } else { [string]$row.vehicle_name }
             Expected = [int]$row.expected_vehicle_count
             Detected = [int]$row.detected_vehicle_count
             Result = if ([int]$row.result -eq 0) { 'Completed' } else { 'UncouplingAlarm' }
             ClearState = if ([int]$row.clear_state -eq 1) { 'Cleared' } else { 'PendingClear' }
+            AlarmStatus = if ([int]$row.result -ne 1) { $null } elseif (-not $row.IsNull('alarm_recovered_at')) { 'Recovered' } elseif (-not $row.IsNull('alarm_acknowledged_at')) { 'Acknowledged' } else { 'Unconfirmed' }
             Warning = $warning
             Rfids = $rfids
         })
@@ -319,39 +333,129 @@ ORDER BY completed_at ASC, created_at ASC;
     return $records.ToArray()
 }
 
+function Get-StandardTagSequence {
+    param(
+        [Parameter(Mandatory = $true)][int]$Head,
+        [Parameter(Mandatory = $true)][int]$FirstWagon,
+        [Parameter(Mandatory = $true)][int]$WagonCount
+    )
+
+    $values = New-Object System.Collections.ArrayList
+    [void]$values.Add((Format-Rfid $Head))
+    for ($index = 0; $index -lt $WagonCount; $index++) {
+        [void]$values.Add((Format-Rfid ($FirstWagon + $index)))
+    }
+    return $values.ToArray()
+}
+
+function Get-PassageEvents {
+    param([Parameter(Mandatory = $true)][string]$LogDirectory)
+
+    $passageDirectory = Join-Path $LogDirectory 'Passage'
+    $events = New-Object System.Collections.ArrayList
+    foreach ($file in @(Get-ChildItem -LiteralPath $passageDirectory -Filter 'passage-event-*.jsonl' -File -ErrorAction SilentlyContinue)) {
+        foreach ($line in @(Get-Content -LiteralPath $file.FullName -ErrorAction SilentlyContinue)) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            [void]$events.Add(($line | ConvertFrom-Json))
+        }
+    }
+    return $events.ToArray()
+}
+
+function Get-RfidLifecycleLogLines {
+    param([Parameter(Mandatory = $true)][string]$LogDirectory)
+
+    $lines = New-Object System.Collections.ArrayList
+    foreach ($logFile in @(Get-ChildItem -LiteralPath $LogDirectory -Filter '*.log' -File -ErrorAction SilentlyContinue)) {
+        foreach ($line in @(Get-Content -LiteralPath $logFile.FullName -ErrorAction SilentlyContinue)) {
+            if ($line.Contains('[RFIDLifecycle]')) {
+                [void]$lines.Add([string]$line)
+            }
+        }
+    }
+    return $lines.ToArray()
+}
+
+function Get-StatisticsSnapshot {
+    param([Parameter(Mandatory = $true)][string]$DatabasePath)
+
+    $store = [MineRailMonitor.Infrastructure.Persistence.SqlitePassageRecordStore]::new($DatabasePath)
+    try {
+        $overview = $store.GetOverview([DateTimeOffset]::MinValue, [DateTimeOffset]::MaxValue, $null)
+        return [pscustomobject]@{
+            TotalCount = $overview.TotalCount
+            NormalCount = $overview.NormalCount
+            AlarmCount = $overview.AlarmCount
+            AlarmRatePercent = $overview.AlarmRatePercent
+            AverageDurationSeconds = $overview.AverageDurationSeconds
+        }
+    }
+    finally {
+        $store.Dispose()
+    }
+}
+
 function Get-ScenarioExpectation {
     param([Parameter(Mandatory = $true)][string]$Name)
 
     switch ($Name) {
         'Normal11' {
-            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '0001'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = @('0001', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018', '0019', '001A') }) }
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '03E9'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x03E9 0x07D1 10) }) }
         }
         'Uncoupling10' {
-            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '0002'; Expected = 11; Detected = 10; Result = 'UncouplingAlarm'; WarningContains = @('脱节报警'); Rfids = @('0002', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018', '0019') }) }
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '03E9'; Expected = 11; Detected = 10; Result = 'UncouplingAlarm'; WarningContains = @('脱节报警'); Rfids = (Get-StandardTagSequence 0x03E9 0x07D1 9) }) }
         }
         'TwoConsecutiveTrains' {
             return [pscustomobject]@{ Records = @(
-                [pscustomobject]@{ StationAddress = 1; HeadRfid = '0003'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = @('0003', '0021', '0022', '0023', '0024', '0025', '0026', '0027', '0028', '0029', '002A') },
-                [pscustomobject]@{ StationAddress = 1; HeadRfid = '0004'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = @('0004', '0031', '0032', '0033', '0034', '0035', '0036', '0037', '0038', '0039', '003A') }
+                [pscustomobject]@{ StationAddress = 1; HeadRfid = '03E9'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x03E9 0x07D1 10) },
+                [pscustomobject]@{ StationAddress = 1; HeadRfid = '03EA'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x03EA 0x07DB 10) }
             ) }
         }
         'TwoStationsConcurrent' {
             return [pscustomobject]@{ Records = @(
-                [pscustomobject]@{ StationAddress = 1; HeadRfid = '0001'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = @('0001', '0041', '0042', '0043', '0044', '0045', '0046', '0047', '0048', '0049', '004A') },
-                [pscustomobject]@{ StationAddress = 4; HeadRfid = '0002'; Expected = 11; Detected = 10; Result = 'UncouplingAlarm'; WarningContains = @('脱节报警'); Rfids = @('0002', '0051', '0052', '0053', '0054', '0055', '0056', '0057', '0058', '0059') }
+                [pscustomobject]@{ StationAddress = 1; HeadRfid = '03E9'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x03E9 0x07D1 10) },
+                [pscustomobject]@{ StationAddress = 4; HeadRfid = '03EB'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x03EB 0x07E5 10) }
             ) }
         }
         'ClearReappearingTags' {
-            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '0001'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = @('0001', '0061', '0062', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '006A') }) }
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '03E9'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x03E9 0x07D1 10) }) }
         }
         'SparseSlots' {
-            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = $null; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @('未检测到车头标签'); Rfids = @('001D', '0021', '0022', '0023', '0024', '0025', '0026', '0027', '0028', '0029', '002A') }) }
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = $null; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @('未检测到车头槽位(Position 0)'); Rfids = (Get-StandardTagSequence 0x03E9 0x07D1 10) }) }
         }
         'MultipleHeads' {
-            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '0001'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @('多个车头标签'); Rfids = @('0001', '0003', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018', '0019') }) }
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '03E9'; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @(); Rfids = @('03E9', '03EA', '07D1', '07D2', '07D3', '07D4', '07D5', '07D6', '07D7', '07D8', '07D9') }) }
         }
         'NoHead' {
-            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = $null; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @('未检测到车头标签'); Rfids = @('000B', '000C', '000D', '000E', '000F', '0010', '0011', '0012', '0013', '0014', '0015') }) }
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = $null; Expected = 11; Detected = 11; Result = 'Completed'; WarningContains = @('未检测到车头槽位(Position 0)'); Rfids = (Get-StandardTagSequence 0x07D1 0x07D2 10) }) }
+        }
+        'UdpU01Normal11' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '1001'; VehicleHeadRfid = '1001'; VehicleNo = 'K001'; VehicleName = '11节验收车辆001'; Expected = 11; Detected = 11; Result = 'Completed'; AlarmStatus = $null; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x1001 0x1101 10) }) }
+        }
+        'UdpU02Uncoupling10Of11' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '1001'; VehicleHeadRfid = '1001'; VehicleNo = 'K001'; VehicleName = '11节验收车辆001'; Expected = 11; Detected = 10; Result = 'UncouplingAlarm'; AlarmStatus = 'Unconfirmed'; WarningContains = @('脱节报警'); Rfids = (Get-StandardTagSequence 0x1001 0x1101 9) }) }
+        }
+        'UdpU03LateEleventhCompletes' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '1001'; VehicleHeadRfid = '1001'; VehicleNo = 'K001'; VehicleName = '11节验收车辆001'; Expected = 11; Detected = 11; Result = 'Completed'; AlarmStatus = $null; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x1001 0x1101 10) }) }
+        }
+        'UdpU04RepeatedTagsTimeout' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '1001'; VehicleHeadRfid = '1001'; VehicleNo = 'K001'; VehicleName = '11节验收车辆001'; Expected = 11; Detected = 10; Result = 'UncouplingAlarm'; AlarmStatus = 'Unconfirmed'; WarningContains = @('脱节报警'); Rfids = (Get-StandardTagSequence 0x1001 0x1101 9) }) }
+        }
+        'UdpU05HeadAppearsLate' {
+            $rfids = @((Get-StandardTagSequence 0 0x1101 10) | Select-Object -Skip 1) + @('1001')
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '1001'; VehicleHeadRfid = '1001'; VehicleNo = 'K001'; VehicleName = '11节验收车辆001'; Expected = 11; Detected = 11; Result = 'Completed'; AlarmStatus = $null; WarningContains = @(); Rfids = $rfids }) }
+        }
+        'UdpU06UnknownHeadFallback' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '2001'; VehicleHeadRfid = $null; VehicleNo = $null; VehicleName = $null; Expected = 11; Detected = 11; Result = 'Completed'; AlarmStatus = $null; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x2001 0x2101 10) }) }
+        }
+        'UdpU07ConsecutiveAfterClear' {
+            return [pscustomobject]@{ Records = @(
+                [pscustomobject]@{ StationAddress = 1; HeadRfid = '1001'; VehicleHeadRfid = '1001'; VehicleNo = 'K001'; VehicleName = '11节验收车辆001'; Expected = 11; Detected = 11; Result = 'Completed'; AlarmStatus = $null; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x1001 0x1101 10) },
+                [pscustomobject]@{ StationAddress = 1; HeadRfid = '1002'; VehicleHeadRfid = '1002'; VehicleNo = 'K002'; VehicleName = '11节验收车辆002'; Expected = 11; Detected = 11; Result = 'Completed'; AlarmStatus = $null; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x1002 0x1201 10) }
+            ) }
+        }
+        'UdpU08ImmediateConsecutive' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '1001'; VehicleHeadRfid = '1001'; VehicleNo = 'K001'; VehicleName = '11节验收车辆001'; Expected = 11; Detected = 11; Result = 'Completed'; AlarmStatus = $null; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x1001 0x1101 10) }) }
         }
         default {
             throw "未知验收场景：$Name"
@@ -410,10 +514,13 @@ function Test-ScenarioResult {
     if (-not $SimulatorResult.Pass) {
         throw "Simulator场景失败：$($SimulatorResult.FailureReason)"
     }
-
     $responses = @($SimulatorResult.Responses)
+    $requests = @($SimulatorResult.Requests)
     if ($responses.Count -eq 0 -or @($responses | Where-Object { [int]$_.FrameLength -ne 40 }).Count -gt 0) {
         throw 'Simulator未提供完整40 Byte响应日志。'
+    }
+    if ($requests.Count -eq 0 -or @($requests | Where-Object { [int]$_.FrameLength -ne 40 }).Count -gt 0) {
+        throw 'Simulator未提供完整40 Byte请求日志。'
     }
     foreach ($response in $responses) {
         $nonEmptyCount = @($response.Slots | Where-Object { [int]$_ -ne 0 }).Count
@@ -431,11 +538,22 @@ function Test-ScenarioResult {
 
     $actualRecords = @(Get-DatabaseSnapshot -DatabasePath $DatabasePath)
     $expectation = Get-ScenarioExpectation -Name $Name
+    $passageEvents = @(Get-PassageEvents -LogDirectory $LogDirectory)
+    $lifecycleLogLines = @(Get-RfidLifecycleLogLines -LogDirectory $LogDirectory)
+    $statistics = Get-StatisticsSnapshot -DatabasePath $DatabasePath
     if ($actualRecords.Count -ne @($expectation.Records).Count) {
         throw "SQLite记录数不符：expected=$(@($expectation.Records).Count), actual=$($actualRecords.Count)。"
     }
-    if (($Name -eq 'TwoConsecutiveTrains') -and (@($actualRecords.PassageId | Select-Object -Unique).Count -ne 2)) {
-        throw 'TwoConsecutiveTrains未生成两个不同的 PassageId。'
+    if (($Name -in @('TwoConsecutiveTrains', 'UdpU07ConsecutiveAfterClear')) -and (@($actualRecords.PassageId | Select-Object -Unique).Count -ne 2)) {
+        throw "$Name 未生成两个不同的 PassageId。"
+    }
+    if ($statistics.TotalCount -ne $actualRecords.Count -or
+        $statistics.NormalCount -ne @($actualRecords | Where-Object Result -eq 'Completed').Count -or
+        $statistics.AlarmCount -ne @($actualRecords | Where-Object Result -eq 'UncouplingAlarm').Count) {
+        throw "统计服务结果与SQLite Passage记录不一致：$Name。"
+    }
+    if ($Name -eq 'UdpU08ImmediateConsecutive' -and $actualRecords.Count -ne 1) {
+        throw "U08应保留A09当前边界结果（一条A车Passage）；实际记录数=$($actualRecords.Count)。"
     }
 
     $resultRows = New-Object System.Collections.ArrayList
@@ -459,6 +577,11 @@ function Test-ScenarioResult {
             (@($actual.Rfids) -join ',') -ne (@($expected.Rfids) -join ',')) {
             throw "SQLite记录内容不符：$Name index=$index。"
         }
+        foreach ($identityField in @('VehicleHeadRfid', 'VehicleNo', 'VehicleName', 'AlarmStatus')) {
+            if ($expected.PSObject.Properties.Match($identityField).Count -gt 0 -and $actual.$identityField -ne $expected.$identityField) {
+                throw "SQLite车辆/报警快照不符：$Name index=$index field=$identityField expected=$($expected.$identityField) actual=$($actual.$identityField)。"
+            }
+        }
         foreach ($warningPart in @($expected.WarningContains)) {
             if ([string]::IsNullOrWhiteSpace($warningPart)) { continue }
             if ($null -eq $actual.Warning -or $actual.Warning.IndexOf($warningPart, [System.StringComparison]::Ordinal) -lt 0) {
@@ -473,23 +596,105 @@ function Test-ScenarioResult {
         $history = @(Get-RuntimeStationHistory -Runtime $Runtime -StationAddress $actual.StationAddress)
         $states = @($history | ForEach-Object { $_.LifecycleState })
         $lifecycleSequence = @(Get-CompactLifecycleSequence -States $states)
+        $passageLifecycleLines = @($lifecycleLogLines | Where-Object {
+            $_.Contains("StationId=$expectedStationId") -and $_.Contains("PassageId=$($actual.PassageId)")
+        })
+        $diagnosticStates = @($passageLifecycleLines | ForEach-Object {
+            if ($_ -match 'Event=STATE_TRANSITION\s+State=([A-Za-z]+)') { $Matches[1] }
+        } | Select-Object -Unique)
         # A fast UDP response can make the persisted snapshot observe the
         # intermediate Clearing state as WaitForEmpty. The Clear request and
         # the subsequent empty-read confirmation are validated below.
         if ($states -notcontains 'Recognizing' -or $states -notcontains 'WaitForEmpty') {
             throw "Runtime生命周期缺少 Recognizing/WaitForEmpty：$Name station=$($actual.StationAddress)。"
         }
-        if ($actual.Result -eq 'Completed' -and $states -notcontains 'Completed') {
+        if ($actual.Result -eq 'Completed' -and $states -notcontains 'Completed' -and $diagnosticStates -notcontains 'Completed') {
             throw "Runtime生命周期缺少Completed：$Name station=$($actual.StationAddress)。"
         }
-        if ($actual.Result -eq 'UncouplingAlarm' -and $states -notcontains 'Alarm') {
+        if ($actual.Result -eq 'UncouplingAlarm' -and $states -notcontains 'Alarm' -and $diagnosticStates -notcontains 'Alarm') {
             throw "Runtime生命周期缺少Alarm：$Name station=$($actual.StationAddress)。"
         }
 
-        $clearCount = @($SimulatorResult.Requests | Where-Object {
+        $passageEventRows = @($passageEvents | Where-Object { [string]$_.PassageId -eq $actual.PassageId })
+        $passageEventTypes = @($passageEventRows | ForEach-Object { [string]$_.EventType })
+        $terminalEvent = if ($actual.Result -eq 'Completed') { 'PASSAGE_COMPLETE' } else { 'PASSAGE_ALARM' }
+        if (@($passageEventTypes | Where-Object { $_ -eq 'PASSAGE_START' }).Count -ne 1 -or
+            @($passageEventTypes | Where-Object { $_ -eq 'PASSAGE_PROGRESS' }).Count -ne $actual.Detected -or
+            @($passageEventTypes | Where-Object { $_ -eq $terminalEvent }).Count -ne 1 -or
+            @($passageEventTypes | Where-Object { $_ -eq 'PASSAGE_CLEAR' }).Count -ne 1) {
+            throw "PassageEvent生命周期事件与SQLite记录不一致：$Name passage=$($actual.PassageId) events=$($passageEventTypes -join ',')。"
+        }
+
+        $terminalEventRow = @($passageEventRows | Where-Object { $_.EventType -eq $terminalEvent })[0]
+        $clearEventRow = @($passageEventRows | Where-Object { $_.EventType -eq 'PASSAGE_CLEAR' })[0]
+        $completedToIdleMs = ([DateTimeOffset]::Parse([string]$clearEventRow.OccurredAt) - [DateTimeOffset]::Parse([string]$terminalEventRow.OccurredAt)).TotalMilliseconds
+        $lastProgressEvent = @($passageEventRows | Where-Object { $_.EventType -eq 'PASSAGE_PROGRESS' } | Sort-Object OccurredAt | Select-Object -Last 1)
+        $noNewRfidTimeoutSeconds = $null
+        if ($actual.Result -eq 'UncouplingAlarm' -and $lastProgressEvent.Count -gt 0) {
+            $noNewRfidTimeoutSeconds = ([DateTimeOffset]::Parse([string]$terminalEventRow.OccurredAt) - [DateTimeOffset]::Parse([string]$lastProgressEvent[0].OccurredAt)).TotalSeconds
+        }
+        $passageClearRequests = @($requests | Where-Object {
+            [int]$_.StationAddress -eq $actual.StationAddress -and
+            [int]$_.Command -eq 1 -and
+            [DateTimeOffset]::Parse([string]$_.ReceivedAt) -ge [DateTimeOffset]::Parse([string]$terminalEventRow.OccurredAt)
+        })
+        $firstPassageClearRequest = if ($passageClearRequests.Count -gt 0) { $passageClearRequests[0] } else { $null }
+        $emptyResponsesAfterClear = @()
+        $clearToFirstEmptyMs = $null
+        $emptyConfirmationGapMs = $null
+        $nextTrainFirstNonEmptyAt = $null
+        if ($null -ne $firstPassageClearRequest) {
+            $clearRequestAt = [DateTimeOffset]::Parse([string]$firstPassageClearRequest.ReceivedAt)
+            $responsesAfterClear = @($responses | Where-Object {
+                [int]$_.StationAddress -eq $actual.StationAddress -and
+                [DateTimeOffset]::Parse([string]$_.SentAt) -ge $clearRequestAt
+            } | Sort-Object { [DateTimeOffset]::Parse([string]$_.SentAt) })
+            $emptyResponsesAfterClear = @($responsesAfterClear | Where-Object { $_.IsEmpty })
+            $nextTrainFirstNonEmptyAt = @($responsesAfterClear | Where-Object { -not $_.IsEmpty } | Select-Object -First 1 | ForEach-Object { [string]$_.SentAt }) | Select-Object -First 1
+        }
+
+        $oneOfTwoConfirmationLines = @($passageLifecycleLines | Where-Object {
+            $_.Contains('Event=EMPTY_CONFIRMATION ') -and $_.Contains('Detail=Count=1/2')
+        })
+        $twoOfTwoConfirmationLines = @($passageLifecycleLines | Where-Object {
+            $_.Contains('Event=EMPTY_CONFIRMATION ') -and $_.Contains('Detail=Count=2/2')
+        })
+        if ($oneOfTwoConfirmationLines.Count -eq 0 -or $twoOfTwoConfirmationLines.Count -eq 0) {
+            throw "生命周期日志缺少连续空帧确认1/2、2/2：$Name passage=$($actual.PassageId)。"
+        }
+        $secondConfirmationLine = $twoOfTwoConfirmationLines[-1]
+        $secondConfirmationAt = [DateTimeOffset]::Parse([regex]::Match($secondConfirmationLine, 'Time=(\S+)').Groups[1].Value)
+        $firstConfirmationLine = @($oneOfTwoConfirmationLines | Where-Object {
+            [DateTimeOffset]::Parse([regex]::Match($_, 'Time=(\S+)').Groups[1].Value) -lt $secondConfirmationAt
+        })[-1]
+        $firstConfirmationAt = [DateTimeOffset]::Parse([regex]::Match($firstConfirmationLine, 'Time=(\S+)').Groups[1].Value)
+        $emptyConfirmationGapMs = ($secondConfirmationAt - $firstConfirmationAt).TotalMilliseconds
+        $successfulClearRequest = @($passageClearRequests | Where-Object {
+            [DateTimeOffset]::Parse([string]$_.ReceivedAt) -le $firstConfirmationAt
+        } | Select-Object -Last 1)
+        if ($successfulClearRequest.Count -gt 0) {
+            $clearToFirstEmptyMs = ($firstConfirmationAt - [DateTimeOffset]::Parse([string]$successfulClearRequest[0].ReceivedAt)).TotalMilliseconds
+        }
+
+        if ($Name -in @('UdpU02Uncoupling10Of11', 'UdpU04RepeatedTagsTimeout') -and
+            ($null -eq $noNewRfidTimeoutSeconds -or $noNewRfidTimeoutSeconds -lt 29.5 -or $noNewRfidTimeoutSeconds -gt 32.5)) {
+            throw "无新唯一RFID后的报警时间不符合30秒超时：$Name elapsed=$noNewRfidTimeoutSeconds 秒。"
+        }
+        if ($Name -eq 'UdpU03LateEleventhCompletes') {
+            $progressEvents = @($passageEventRows | Where-Object { $_.EventType -eq 'PASSAGE_PROGRESS' } | Sort-Object OccurredAt)
+            if ($progressEvents.Count -ne 11) {
+                throw "S03补扫场景没有11次唯一标签进度：count=$($progressEvents.Count)。"
+            }
+            $lastTagDelay = ([DateTimeOffset]::Parse([string]$progressEvents[10].OccurredAt) - [DateTimeOffset]::Parse([string]$progressEvents[9].OccurredAt)).TotalSeconds
+            if ($lastTagDelay -lt 25 -or $lastTagDelay -ge 30) {
+                throw "S03第11个标签没有在30秒超时前补到：delay=$lastTagDelay 秒。"
+            }
+        }
+
+        $clearCount = @($requests | Where-Object {
             [int]$_.StationAddress -eq $actual.StationAddress -and [int]$_.Command -eq 1
         }).Count
-        $readCount = @($SimulatorResult.Requests | Where-Object {
+        $readCount = @($requests | Where-Object {
             [int]$_.StationAddress -eq $actual.StationAddress -and [int]$_.Command -eq 0
         }).Count
         $responseCount = @($SimulatorResult.Responses | Where-Object {
@@ -501,6 +706,33 @@ function Test-ScenarioResult {
         if ($Name -eq 'ClearReappearingTags' -and $clearCount -lt 2) {
             throw 'ClearReappearingTags未证明旧标签出现后再次Clear。'
         }
+        if ($Name -eq 'UdpU08ImmediateConsecutive') {
+            $secondVehicleSeen = @($responses | Where-Object {
+                [int]$_.StationAddress -eq $actual.StationAddress -and
+                @($_.Slots | Where-Object { [int]$_ -eq 0x1002 }).Count -gt 0
+            }).Count -gt 0
+            $candidateFrameLogged = @($passageLifecycleLines | Where-Object { $_.Contains('Event=NON_EMPTY_FRAME_AFTER_TERMINAL_STATE') }).Count -gt 0
+            if (-not $secondVehicleSeen -or -not $candidateFrameLogged -or $clearCount -lt 2 -or $passageEventRows.Count -ne 14) {
+                throw "U08未复现并记录清场期间B车候选帧被读取后清除的边界：BSeen=$secondVehicleSeen CandidateFrameLogged=$candidateFrameLogged Clear=$clearCount Events=$($passageEventRows.Count)。"
+            }
+        }
+
+        if ($Name -eq 'UdpU04RepeatedTagsTimeout') {
+            $steadySnapshots = @($history | Where-Object { $_.LifecycleState -eq 'Recognizing' -and [int]$_.Detected -eq 10 })
+            $lastNewTimes = @($steadySnapshots | ForEach-Object { [string]$_.LastNewVehicleAt } | Select-Object -Unique)
+            if ($steadySnapshots.Count -eq 0 -or $lastNewTimes.Count -ne 1) {
+                throw "U04重复读取期间LastNewVehicleAt发生变化或快照缺失：$Name。"
+            }
+            $lastNewAt = [DateTimeOffset]::Parse($lastNewTimes[0])
+            $alarmEvent = @($passageEventRows | Where-Object { $_.EventType -eq 'PASSAGE_ALARM' })[0]
+            $timeoutElapsed = ([DateTimeOffset]::Parse([string]$alarmEvent.OccurredAt) - $lastNewAt).TotalSeconds
+            if ($timeoutElapsed -lt 29.5 -or $timeoutElapsed -gt 32.5) {
+                throw "U04报警耗时不在30秒超时边界：elapsed=$timeoutElapsed 秒。"
+            }
+        }
+        if ($Name -eq 'UdpU05HeadAppearsLate' -and @($passageEventTypes | Where-Object { $_ -eq 'VEHICLE_MATCH_LATE_RESOLVED' }).Count -ne 1) {
+            throw 'U05未记录后续Position 0车头匹配事件。'
+        }
 
         [void]$resultRows.Add([pscustomobject]@{
             Scenario = $Name
@@ -509,9 +741,16 @@ function Test-ScenarioResult {
             StationAddress = $actual.StationAddress
             PassageId = $actual.PassageId
             HeadRfid = $actual.HeadRfid
+            VehicleNo = $actual.VehicleNo
+            VehicleName = $actual.VehicleName
             Expected = $actual.Expected
             Detected = $actual.Detected
             Result = $actual.Result
+            AlarmStatus = $actual.AlarmStatus
+            PassageEvents = $passageEventTypes
+            LifecycleDiagnostics = $passageLifecycleLines
+            DiagnosticTransitions = $diagnosticStates
+            Statistics = $statistics
             Warning = $actual.Warning
             ClearState = $actual.ClearState
             ReadRequestCount = $readCount
@@ -519,6 +758,14 @@ function Test-ScenarioResult {
             LifecycleSequence = $lifecycleSequence
             FinalRuntimeState = $finalRuntime.LifecycleState
             ResponseCount = $responseCount
+            TerminalEventAt = $terminalEventRow.OccurredAt
+            ClearCompletedAt = $clearEventRow.OccurredAt
+            CompletedToIdleMs = [long][Math]::Max(0, $completedToIdleMs)
+            ClearToFirstEmptyMs = if ($null -eq $clearToFirstEmptyMs) { $null } else { [long][Math]::Max(0, $clearToFirstEmptyMs) }
+            EmptyConfirmationGapMs = if ($null -eq $emptyConfirmationGapMs) { $null } else { [long][Math]::Max(0, $emptyConfirmationGapMs) }
+            NoNewRfidTimeoutSeconds = if ($null -eq $noNewRfidTimeoutSeconds) { $null } else { [Math]::Round($noNewRfidTimeoutSeconds, 3) }
+            NextTrainFirstNonEmptyAt = $nextTrainFirstNonEmptyAt
+            EmptyResponsesAfterFirstClear = $emptyResponsesAfterClear.Count
             DurationMs = [long]$SimulatorResult.DurationMs
             FailureReason = $null
             Pass = $true
@@ -529,6 +776,8 @@ function Test-ScenarioResult {
         Records = $resultRows.ToArray()
         FinalRuntime = $Runtime
         Simulator = $SimulatorResult
+        PassageEvents = $passageEvents
+        Statistics = $statistics
     }
 }
 
@@ -696,6 +945,7 @@ function Invoke-Scenario {
     $failureDiagnosticsPath = $null
     if (-not $passed) {
         try {
+            $diagnosticFailureReason = if ([string]::IsNullOrWhiteSpace($failureReason)) { '场景验证失败。' } else { $failureReason }
             $failureDiagnosticsPath = Write-FailureDiagnostics `
                 -Name $Name `
                 -ScenarioRoot $ScenarioRoot `
@@ -703,7 +953,7 @@ function Invoke-Scenario {
                 -RuntimeStatePath $runtimeStatePath `
                 -SimulatorResultPath $simulatorResultPath `
                 -LogDirectory $logDirectory `
-                -FailureReason (if ([string]::IsNullOrWhiteSpace($failureReason)) { '场景验证失败。' } else { $failureReason })
+                -FailureReason $diagnosticFailureReason
         }
         catch {
             Write-Warning "失败诊断快照写入失败：$($_.Exception.Message)"
@@ -752,6 +1002,10 @@ if (-not [System.IO.File]::Exists($sqliteAssembly)) {
     throw "未找到System.Data.SQLite程序集：$sqliteAssembly"
 }
 Add-Type -Path $sqliteAssembly
+$coreAssembly = Join-Path $mainBinaryDirectory 'MineRailMonitor.Core.dll'
+$infrastructureAssembly = Join-Path $mainBinaryDirectory 'MineRailMonitor.Infrastructure.dll'
+Add-Type -Path $coreAssembly
+Add-Type -Path $infrastructureAssembly
 
 $coreCheck = Invoke-DotnetCheck -Label 'Core Tests' -Arguments @('test', 'tests/MineRailMonitor.Core.Tests/MineRailMonitor.Core.Tests.csproj', '-c', $Configuration, '--no-build') -OutputPath (Join-Path $verificationDirectory 'core-tests.log')
 $infrastructureCheck = Invoke-DotnetCheck -Label 'Infrastructure Tests' -Arguments @('test', 'tests/MineRailMonitor.Infrastructure.Tests/MineRailMonitor.Infrastructure.Tests.csproj', '-c', $Configuration, '--no-build') -OutputPath (Join-Path $verificationDirectory 'infrastructure-tests.log')

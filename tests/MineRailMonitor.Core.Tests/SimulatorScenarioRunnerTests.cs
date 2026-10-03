@@ -47,13 +47,71 @@ public sealed class SimulatorScenarioRunnerTests
     }
 
     [Fact]
-    public void Canonical_scenario_list_contains_eight_names()
+    public void Canonical_scenario_list_contains_fourteen_names()
     {
         Assert.Equal(new[]
         {
             "Normal11", "Uncoupling10", "TwoConsecutiveTrains", "TwoStationsConcurrent",
-            "ClearReappearingTags", "SparseSlots", "MultipleHeads", "NoHead"
+            "ClearReappearingTags", "SparseSlots", "MultipleHeads", "NoHead",
+            "VehicleNormal7", "VehicleUncoupling7Of6", "VehicleUnconfiguredFallback",
+            "VehicleLateSeventh7", "VehicleRepeatedTagReads", "VehicleHeadAppearsLate7",
+            "UdpU01Normal11", "UdpU02Uncoupling10Of11", "UdpU03LateEleventhCompletes",
+            "UdpU04RepeatedTagsTimeout", "UdpU05HeadAppearsLate", "UdpU06UnknownHeadFallback",
+            "UdpU07ConsecutiveAfterClear", "UdpU08ImmediateConsecutive"
         }, AcceptanceScenario.All.Select(item => item.Name));
+    }
+
+    [Fact]
+    public void Udp_acceptance_scenarios_use_the_confirmed_eleven_tag_inputs()
+    {
+        var normal = AcceptanceScenario.Parse("UdpU01Normal11").Trains.Single();
+        var uncoupling = AcceptanceScenario.Parse("UdpU02Uncoupling10Of11").Trains.Single();
+        var lateTag = AcceptanceScenario.Parse("UdpU03LateEleventhCompletes").Trains.Single();
+        var repeated = AcceptanceScenario.Parse("UdpU04RepeatedTagsTimeout").Trains.Single();
+        var lateHead = AcceptanceScenario.Parse("UdpU05HeadAppearsLate").Trains.Single();
+        var unknownHead = AcceptanceScenario.Parse("UdpU06UnknownHeadFallback").Trains.Single();
+
+        Assert.Equal(11, normal.VehicleRfids.Count);
+        Assert.Equal(10, uncoupling.VehicleRfids.Count);
+        Assert.Equal(11, lateTag.VehicleRfids.Count);
+        Assert.Equal(TimeSpan.FromSeconds(27), lateTag.DelayBeforeFinalRfid);
+        Assert.Equal(10, repeated.VehicleRfids.Count);
+        Assert.Equal(11, lateHead.VehicleRfids.Count);
+        Assert.Equal(11, unknownHead.VehicleRfids.Count);
+        Assert.Equal(0, lateHead.OccupiedSlotIndexes[lateHead.OccupiedSlotIndexes.Count - 1]);
+        Assert.Equal(1, lateHead.OccupiedSlotIndexes[0]);
+        Assert.Equal((ushort)0x2001, unknownHead.VehicleRfids[0]);
+
+        var immediateConsecutive = AcceptanceScenario.Parse("UdpU08ImmediateConsecutive");
+        Assert.True(immediateConsecutive.SendNextTrainImmediatelyAfterClear);
+        Assert.Equal(2, immediateConsecutive.Trains.Count);
+    }
+
+    [Fact]
+    public void Vehicle_scenario_inputs_use_a_known_seven_tag_train_and_an_unknown_head()
+    {
+        var normal = AcceptanceScenario.Parse("VehicleNormal7").Trains.Single();
+        var uncoupling = AcceptanceScenario.Parse("VehicleUncoupling7Of6").Trains.Single();
+        var unconfigured = AcceptanceScenario.Parse("VehicleUnconfiguredFallback").Trains.Single();
+
+        Assert.Equal(new ushort[] { 1, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16 }, normal.VehicleRfids);
+        Assert.Equal(new ushort[] { 1, 0x11, 0x12, 0x13, 0x14, 0x15 }, uncoupling.VehicleRfids);
+        Assert.Equal(new ushort[] { 2, 0x21, 0x22, 0x23, 0x24, 0x25 }, unconfigured.VehicleRfids);
+    }
+
+    [Fact]
+    public void Vehicle_integrity_scenarios_cover_late_tag_duplicate_reads_and_late_head_slot()
+    {
+        var lateTag = AcceptanceScenario.Parse("VehicleLateSeventh7").Trains.Single();
+        var repeatedReads = AcceptanceScenario.Parse("VehicleRepeatedTagReads").Trains.Single();
+        var lateHead = AcceptanceScenario.Parse("VehicleHeadAppearsLate7").Trains.Single();
+
+        Assert.Equal(7, lateTag.VehicleRfids.Count);
+        Assert.Single(repeatedReads.VehicleRfids);
+        Assert.Equal(lateHead.VehicleRfids.Count, lateHead.OccupiedSlotIndexes.Count);
+        Assert.Equal((ushort)0x1001, lateHead.VehicleRfids[6]);
+        Assert.Equal(0, lateHead.OccupiedSlotIndexes[6]);
+        Assert.Equal(new[] { 1, 2, 3, 4, 5, 6, 0 }, lateHead.OccupiedSlotIndexes);
     }
 
     [Fact]
@@ -63,8 +121,8 @@ public sealed class SimulatorScenarioRunnerTests
         var noHead = AcceptanceScenario.All.Single(item => item.Name == "NoHead");
         var sparse = AcceptanceScenario.All.Single(item => item.Name == "SparseSlots");
 
-        Assert.Contains((ushort)0x0001, multipleHeads.Trains.Single().VehicleRfids);
-        Assert.Contains((ushort)0x0003, multipleHeads.Trains.Single().VehicleRfids);
+        Assert.Contains((ushort)0x03E9, multipleHeads.Trains.Single().VehicleRfids);
+        Assert.Contains((ushort)0x03EA, multipleHeads.Trains.Single().VehicleRfids);
         Assert.All(noHead.Trains.Single().VehicleRfids, value => Assert.True(value > 0x000A));
         Assert.Equal(new[] { 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 }, sparse.Trains.Single().OccupiedSlotIndexes);
     }

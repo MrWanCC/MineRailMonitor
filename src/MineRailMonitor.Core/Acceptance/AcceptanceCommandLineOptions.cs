@@ -9,7 +9,7 @@ public sealed class AcceptanceCommandLineOptions
     private const int DefaultListenPort620 = 62112;
     private const int DefaultSimulatorPort = 62101;
     private const int DefaultSimulatorPort620 = 62111;
-    private const int AcceptanceInterVehicleTimeoutSeconds = 2;
+    private const int AcceptanceInterVehicleTimeoutSeconds = 30;
 
     private AcceptanceCommandLineOptions(
         bool enabled,

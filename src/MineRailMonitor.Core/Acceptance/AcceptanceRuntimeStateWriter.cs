@@ -78,10 +78,12 @@ public sealed class AcceptanceRuntimeStateWriter : IDisposable
                 LifecycleState = state.LifecycleState,
                 CommunicationState = state.CommunicationState,
                 VisualState = state.VisualState,
-                PassageId = state.LastPassageRecord?.PassageId.ToString("D"),
+                PassageId = (state.RecognitionSession?.PassageId ?? state.LastPassageRecord?.PassageId)?.ToString("D"),
                 HeadRfid = state.CurrentHeadRfid?.ToString("X4"),
                 Expected = state.ExpectedVehicleCount,
                 Detected = state.DetectedVehicleCount,
+                LastNewVehicleAt = state.LastNewVehicleAt,
+                ClearAttempts = state.ClearAttempts,
                 Result = state.LastPassageRecord?.Outcome,
                 ClearState = state.LastPassageRecord?.ClearState,
                 PendingClear = state.PendingClear,
@@ -130,9 +132,13 @@ public sealed class AcceptanceRuntimeStationSnapshot
 
     public string? HeadRfid { get; set; }
 
-    public int Expected { get; set; }
+    public int? Expected { get; set; }
 
     public int Detected { get; set; }
+
+    public DateTimeOffset? LastNewVehicleAt { get; set; }
+
+    public int ClearAttempts { get; set; }
 
     public PassageOutcome? Result { get; set; }
 

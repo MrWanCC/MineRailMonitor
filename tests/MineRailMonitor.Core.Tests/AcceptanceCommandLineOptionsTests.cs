@@ -25,7 +25,7 @@ public sealed class AcceptanceCommandLineOptionsTests
         Assert.Equal(62112, options.ListenPort620);
         Assert.Equal(62101, options.SimulatorPort);
         Assert.Equal(62111, options.SimulatorPort620);
-        Assert.Equal(2, options.InterVehicleTimeoutSeconds);
+        Assert.Equal(30, options.InterVehicleTimeoutSeconds);
     }
 
     [Fact]

@@ -2,7 +2,11 @@ namespace MineRailMonitor.Simulator.Acceptance;
 
 public sealed class AcceptanceScenarioDefinition
 {
-    public AcceptanceScenarioDefinition(string name, IEnumerable<AcceptanceTrainPlan> trains, bool reappearsOldTags = false)
+    public AcceptanceScenarioDefinition(
+        string name,
+        IEnumerable<AcceptanceTrainPlan> trains,
+        bool reappearsOldTags = false,
+        bool sendNextTrainImmediatelyAfterClear = false)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Scenario name must not be empty.", nameof(name));
         if (trains is null) throw new ArgumentNullException(nameof(trains));
@@ -15,6 +19,7 @@ public sealed class AcceptanceScenarioDefinition
         }
 
         ReappearsOldTags = reappearsOldTags;
+        SendNextTrainImmediatelyAfterClear = sendNextTrainImmediatelyAfterClear;
     }
 
     public string Name { get; }
@@ -22,16 +27,27 @@ public sealed class AcceptanceScenarioDefinition
     public IReadOnlyList<AcceptanceTrainPlan> Trains { get; }
 
     public bool ReappearsOldTags { get; }
+
+    public bool SendNextTrainImmediatelyAfterClear { get; }
 }
 
 public sealed class AcceptanceTrainPlan
 {
-    public AcceptanceTrainPlan(byte stationAddress, IEnumerable<ushort> vehicleRfids, IEnumerable<int>? occupiedSlotIndexes = null)
+    public AcceptanceTrainPlan(
+        byte stationAddress,
+        IEnumerable<ushort> vehicleRfids,
+        IEnumerable<int>? occupiedSlotIndexes = null,
+        TimeSpan? delayBeforeFinalRfid = null)
     {
         if (vehicleRfids is null) throw new ArgumentNullException(nameof(vehicleRfids));
 
         StationAddress = stationAddress;
         VehicleRfids = vehicleRfids.ToArray();
+        DelayBeforeFinalRfid = delayBeforeFinalRfid ?? TimeSpan.Zero;
+        if (DelayBeforeFinalRfid < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(delayBeforeFinalRfid));
+        }
         if (VehicleRfids.Count == 0 || VehicleRfids.Count > 14)
         {
             throw new ArgumentException("A train must contain from 1 to 14 RFID values.", nameof(vehicleRfids));
@@ -56,6 +72,8 @@ public sealed class AcceptanceTrainPlan
     public IReadOnlyList<ushort> VehicleRfids { get; }
 
     public IReadOnlyList<int> OccupiedSlotIndexes { get; }
+
+    public TimeSpan DelayBeforeFinalRfid { get; }
 }
 
 public static class AcceptanceScenario
@@ -64,27 +82,27 @@ public static class AcceptanceScenario
     {
         new AcceptanceScenarioDefinition(
             "Normal11",
-            new[] { Train(0x01, new ushort[] { 0x0001, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x0019, 0x001A }) }),
+            new[] { Train(0x01, new ushort[] { 0x03E9, 0x07D1, 0x07D2, 0x07D3, 0x07D4, 0x07D5, 0x07D6, 0x07D7, 0x07D8, 0x07D9, 0x07DA }) }),
         new AcceptanceScenarioDefinition(
             "Uncoupling10",
-            new[] { Train(0x01, new ushort[] { 0x0002, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x0019 }) }),
+            new[] { Train(0x01, new ushort[] { 0x03E9, 0x07D1, 0x07D2, 0x07D3, 0x07D4, 0x07D5, 0x07D6, 0x07D7, 0x07D8, 0x07D9 }) }),
         new AcceptanceScenarioDefinition(
             "TwoConsecutiveTrains",
             new[]
             {
-                Train(0x01, new ushort[] { 0x0003, 0x0021, 0x0022, 0x0023, 0x0024, 0x0025, 0x0026, 0x0027, 0x0028, 0x0029, 0x002A }),
-                Train(0x01, new ushort[] { 0x0004, 0x0031, 0x0032, 0x0033, 0x0034, 0x0035, 0x0036, 0x0037, 0x0038, 0x0039, 0x003A })
+                Train(0x01, new ushort[] { 0x03E9, 0x07D1, 0x07D2, 0x07D3, 0x07D4, 0x07D5, 0x07D6, 0x07D7, 0x07D8, 0x07D9, 0x07DA }),
+                Train(0x01, new ushort[] { 0x03EA, 0x07DB, 0x07DC, 0x07DD, 0x07DE, 0x07DF, 0x07E0, 0x07E1, 0x07E2, 0x07E3, 0x07E4 })
             }),
         new AcceptanceScenarioDefinition(
             "TwoStationsConcurrent",
             new[]
             {
-                Train(0x01, new ushort[] { 0x0001, 0x0041, 0x0042, 0x0043, 0x0044, 0x0045, 0x0046, 0x0047, 0x0048, 0x0049, 0x004A }),
-                Train(0x04, new ushort[] { 0x0002, 0x0051, 0x0052, 0x0053, 0x0054, 0x0055, 0x0056, 0x0057, 0x0058, 0x0059 })
+                Train(0x01, new ushort[] { 0x03E9, 0x07D1, 0x07D2, 0x07D3, 0x07D4, 0x07D5, 0x07D6, 0x07D7, 0x07D8, 0x07D9, 0x07DA }),
+                Train(0x04, new ushort[] { 0x03EB, 0x07E5, 0x07E6, 0x07E7, 0x07E8, 0x07E9, 0x07EA, 0x07EB, 0x07EC, 0x07ED, 0x07EE })
             }),
         new AcceptanceScenarioDefinition(
             "ClearReappearingTags",
-            new[] { Train(0x01, new ushort[] { 0x0001, 0x0061, 0x0062, 0x0063, 0x0064, 0x0065, 0x0066, 0x0067, 0x0068, 0x0069, 0x006A }) },
+            new[] { Train(0x01, new ushort[] { 0x03E9, 0x07D1, 0x07D2, 0x07D3, 0x07D4, 0x07D5, 0x07D6, 0x07D7, 0x07D8, 0x07D9, 0x07DA }) },
             reappearsOldTags: true),
         new AcceptanceScenarioDefinition(
             "SparseSlots",
@@ -92,15 +110,78 @@ public static class AcceptanceScenario
             {
                 Train(
                     0x01,
-                    new ushort[] { 0x001D, 0x0021, 0x0022, 0x0023, 0x0024, 0x0025, 0x0026, 0x0027, 0x0028, 0x0029, 0x002A },
+                    new ushort[] { 0x03E9, 0x07D1, 0x07D2, 0x07D3, 0x07D4, 0x07D5, 0x07D6, 0x07D7, 0x07D8, 0x07D9, 0x07DA },
                     new[] { 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 })
             }),
         new AcceptanceScenarioDefinition(
             "MultipleHeads",
-            new[] { Train(0x01, new ushort[] { 0x0001, 0x0003, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x0019 }) }),
+            new[] { Train(0x01, new ushort[] { 0x03E9, 0x03EA, 0x07D1, 0x07D2, 0x07D3, 0x07D4, 0x07D5, 0x07D6, 0x07D7, 0x07D8, 0x07D9 }) }),
         new AcceptanceScenarioDefinition(
             "NoHead",
-            new[] { Train(0x01, new ushort[] { 0x000B, 0x000C, 0x000D, 0x000E, 0x000F, 0x0010, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015 }) })
+            new[] { Train(0x01, new ushort[] { 0x07D1, 0x07D2, 0x07D3, 0x07D4, 0x07D5, 0x07D6, 0x07D7, 0x07D8, 0x07D9, 0x07DA, 0x07DB }, Enumerable.Range(1, 11)) }),
+        new AcceptanceScenarioDefinition(
+            "VehicleNormal7",
+            new[] { Train(0x01, new ushort[] { 0x0001, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016 }) }),
+        new AcceptanceScenarioDefinition(
+            "VehicleUncoupling7Of6",
+            new[] { Train(0x01, new ushort[] { 0x0001, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015 }) }),
+        new AcceptanceScenarioDefinition(
+            "VehicleUnconfiguredFallback",
+            new[] { Train(0x01, new ushort[] { 0x0002, 0x0021, 0x0022, 0x0023, 0x0024, 0x0025 }) }),
+        new AcceptanceScenarioDefinition(
+            "VehicleLateSeventh7",
+            new[] { Train(0x01, new ushort[] { 0x1001, 0x1101, 0x1102, 0x1103, 0x1104, 0x1105, 0x1106 }) }),
+        new AcceptanceScenarioDefinition(
+            "VehicleRepeatedTagReads",
+            new[] { Train(0x01, new ushort[] { 0x1001 }) }),
+        new AcceptanceScenarioDefinition(
+            "VehicleHeadAppearsLate7",
+            new[]
+            {
+                Train(
+                    0x01,
+                    new ushort[] { 0x1101, 0x1102, 0x1103, 0x1104, 0x1105, 0x1106, 0x1001 },
+                    new[] { 1, 2, 3, 4, 5, 6, 0 })
+            }),
+        new AcceptanceScenarioDefinition(
+            "UdpU01Normal11",
+            new[] { Train(0x01, StandardVehicle(0x1001, 0x1101)) }),
+        new AcceptanceScenarioDefinition(
+            "UdpU02Uncoupling10Of11",
+            new[] { Train(0x01, StandardVehicle(0x1001, 0x1101).Take(10)) }),
+        new AcceptanceScenarioDefinition(
+            "UdpU03LateEleventhCompletes",
+            new[] { Train(0x01, StandardVehicle(0x1001, 0x1101), delayBeforeFinalRfid: TimeSpan.FromSeconds(27)) }),
+        new AcceptanceScenarioDefinition(
+            "UdpU04RepeatedTagsTimeout",
+            new[] { Train(0x01, StandardVehicle(0x1001, 0x1101).Take(10)) }),
+        new AcceptanceScenarioDefinition(
+            "UdpU05HeadAppearsLate",
+            new[]
+            {
+                Train(
+                    0x01,
+                    StandardVehicle(0x1001, 0x1101).Skip(1).Concat(new ushort[] { 0x1001 }),
+                    Enumerable.Range(1, 10).Concat(new[] { 0 }))
+            }),
+        new AcceptanceScenarioDefinition(
+            "UdpU06UnknownHeadFallback",
+            new[] { Train(0x01, StandardVehicle(0x2001, 0x2101)) }),
+        new AcceptanceScenarioDefinition(
+            "UdpU07ConsecutiveAfterClear",
+            new[]
+            {
+                Train(0x01, StandardVehicle(0x1001, 0x1101)),
+                Train(0x01, StandardVehicle(0x1002, 0x1201))
+            }),
+        new AcceptanceScenarioDefinition(
+            "UdpU08ImmediateConsecutive",
+            new[]
+            {
+                Train(0x01, StandardVehicle(0x1001, 0x1101)),
+                Train(0x01, StandardVehicle(0x1002, 0x1201))
+            },
+            sendNextTrainImmediatelyAfterClear: true)
     };
 
     public static AcceptanceScenarioDefinition Parse(string name)
@@ -114,6 +195,13 @@ public static class AcceptanceScenario
         return scenario ?? throw new ArgumentException($"Unknown acceptance scenario: {name}", nameof(name));
     }
 
-    private static AcceptanceTrainPlan Train(byte stationAddress, IEnumerable<ushort> values, IEnumerable<int>? slots = null) =>
-        new(stationAddress, values, slots);
+    private static AcceptanceTrainPlan Train(
+        byte stationAddress,
+        IEnumerable<ushort> values,
+        IEnumerable<int>? slots = null,
+        TimeSpan? delayBeforeFinalRfid = null) =>
+        new(stationAddress, values, slots, delayBeforeFinalRfid);
+
+    private static ushort[] StandardVehicle(ushort headRfid, ushort firstWagonRfid) =>
+        new[] { headRfid }.Concat(Enumerable.Range(0, 10).Select(index => (ushort)(firstWagonRfid + index))).ToArray();
 }

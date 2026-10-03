@@ -155,6 +155,25 @@ public sealed class PassageLifecycleTests
     }
 
     [Fact]
+    public void Session_passage_id_is_created_at_start_and_reused_by_frozen_passage()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var coordinator = CreateCoordinator(store);
+        var session = coordinator.ProcessFrame(CreateFrame(0x01, Start, new ushort[] { 0x0001 }));
+
+        Assert.NotNull(session);
+        var passageId = session!.PassageId;
+        Assert.NotEqual(Guid.Empty, passageId);
+
+        coordinator.ProcessFrame(CreateFrame(
+            0x01,
+            Start.AddSeconds(1),
+            Enumerable.Range(1, 11).Select(value => (ushort)value).ToArray()));
+
+        Assert.Equal(passageId, Assert.Single(store.Records).PassageId);
+    }
+
+    [Fact]
     public void Two_stations_keep_independent_sessions_and_alarm_states()
     {
         var store = new InMemoryPassageRecordStore();

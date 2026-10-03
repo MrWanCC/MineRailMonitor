@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using MineRailMonitor.Core.Communication;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -610,7 +611,7 @@ public partial class MonitorPage : UserControl
                 record.IsWarningOnly ? "警告" : record.AlarmMessage ?? "报警",
                 record.IsWarningOnly
                     ? $"{string.Join("；", record.WarningMessages)}；已识别 {record.DetectedVehicleCount}/{record.ExpectedVehicleCount} 节"
-                    : $"已识别 {record.DetectedVehicleCount}/{record.ExpectedVehicleCount} 节，缺少 {Math.Max(record.ExpectedVehicleCount - record.DetectedVehicleCount, 0)} 节",
+                    : PassageAlarmDisplayFormatter.FormatSummary(record),
                 record.CompletedAt,
                 record.PassageId)));
         alarms.AddRange(_runtimeEvents
@@ -654,12 +655,15 @@ public partial class MonitorPage : UserControl
     {
         var isAlarm = IsUncouplingAlarm(state);
         var warningText = string.Join("；", state.WarningMessages);
+        var passageAlarmSummary = state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm
+            ? PassageAlarmDisplayFormatter.FormatSummary(state.LastPassageRecord)
+            : null;
         return new RfidAlarmDisplayItem(
             state.LastResponseAt?.ToLocalTime().ToString("HH:mm:ss") ?? "-",
             state.StationName,
-            isAlarm ? state.AlarmMessage ?? "报警" : "警告",
+            isAlarm ? "脱节报警" : "警告",
             isAlarm
-                ? string.IsNullOrWhiteSpace(state.AlarmMessage) ? "状态进入报警" : state.AlarmMessage!
+                ? passageAlarmSummary ?? (string.IsNullOrWhiteSpace(state.AlarmMessage) ? "状态进入报警" : state.AlarmMessage!)
                 : warningText,
             state.LastResponseAt ?? state.SessionStartedAt ?? DateTimeOffset.MinValue,
             state.LastPassageRecord?.PassageId);

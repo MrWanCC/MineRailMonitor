@@ -126,13 +126,12 @@ public sealed class HistoryPageMarkupTests
         var dialogMarkup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "PassageDetailsDialog.xaml"));
         var dialogCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "PassageDetailsDialog.xaml.cs"));
 
-        Assert.Contains("报警状态", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"状态\"", markup, StringComparison.Ordinal);
         Assert.Contains("AcknowledgeButtonVisibility", markup, StringComparison.Ordinal);
         Assert.Contains("OnAlarmAcknowledgeClick", markup, StringComparison.Ordinal);
         Assert.Contains("AlarmStatusText", code, StringComparison.Ordinal);
-        Assert.Contains("无需确认", code, StringComparison.Ordinal);
-        Assert.Contains("AlarmAcknowledgedAt", code, StringComparison.Ordinal);
-        Assert.Contains("AlarmRecoveredAt", code, StringComparison.Ordinal);
+        Assert.Contains("AlarmStatusDisplayFormatter.Format(record.AlarmStatus)", code, StringComparison.Ordinal);
+        Assert.Contains("record.AlarmStatus == AlarmStatus.Unconfirmed", code, StringComparison.Ordinal);
         Assert.Contains("AlarmStatusValue", dialogMarkup, StringComparison.Ordinal);
         Assert.Contains("AlarmAcknowledgedAtValue", dialogMarkup, StringComparison.Ordinal);
         Assert.Contains("AlarmRecoveredAtValue", dialogMarkup, StringComparison.Ordinal);

@@ -124,7 +124,7 @@ UPDATE passage_record
 SET clear_state = $clear_state,
     cleared_at = $cleared_at,
     alarm_recovered_at = CASE
-        WHEN result = $alarm_result THEN $cleared_at
+        WHEN result = $alarm_result AND alarm_acknowledged_at IS NOT NULL THEN $cleared_at
         ELSE alarm_recovered_at
     END
 WHERE passage_id = $passage_id AND clear_state <> $clear_state;";
@@ -152,11 +152,16 @@ WHERE passage_id = $passage_id AND clear_state <> $clear_state;";
         using var command = connection.CreateCommand();
         command.CommandText = @"
 UPDATE passage_record
-SET alarm_acknowledged_at = $acknowledged_at
+SET alarm_acknowledged_at = $acknowledged_at,
+    alarm_recovered_at = CASE
+        WHEN clear_state = $cleared_state THEN COALESCE(alarm_recovered_at, cleared_at)
+        ELSE alarm_recovered_at
+    END
 WHERE passage_id = $passage_id
   AND result = $alarm_result
   AND alarm_acknowledged_at IS NULL;";
         command.Parameters.AddWithValue("$acknowledged_at", ToUnixMilliseconds(acknowledgedAt));
+        command.Parameters.AddWithValue("$cleared_state", (int)PassageClearState.Cleared);
         command.Parameters.AddWithValue("$passage_id", passageId.ToString("D"));
         command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
         if (command.ExecuteNonQuery() > 0)

@@ -24,12 +24,15 @@ public partial class App : Application
             ? AcceptanceOptions.LogDirectory!
             : Paths.LogsDirectory;
         Logger = new FileLogger(logDirectory);
+        PassageEventLogger = new PassageEventJsonlLogger(logDirectory);
         AdminModeService = new AdminModeService(ReadAdminPassword());
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
     }
 
     public ILogger Logger { get; }
+
+    public PassageEventJsonlLogger PassageEventLogger { get; }
 
     public AcceptanceCommandLineOptions AcceptanceOptions { get; }
 

@@ -15,7 +15,9 @@ public sealed class YardCommunicationManager : IDisposable
 
     private readonly Dictionary<string, YardCommunicationContext> _contexts;
     private readonly IReadOnlyList<RfidStationConfig> _stations;
+    private IReadOnlyList<VehicleConfig> _vehicleConfigurations;
     private readonly IPassageRecordStore _recordStore;
+    private readonly IPassageEventLogger? _passageEventLogger;
     private readonly IRfidTimeProvider? _timeProvider;
     private IReadOnlyDictionary<string, IExternalDataInterface> _alarmForwardSenders;
     private IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator> _externalAlarmStatusCoordinators;
@@ -31,7 +33,9 @@ public sealed class YardCommunicationManager : IDisposable
         IPassageRecordStore recordStore,
         IRfidTimeProvider? timeProvider = null,
         IReadOnlyDictionary<string, IExternalDataInterface>? alarmForwardSenders = null,
-        IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator>? externalAlarmStatusCoordinators = null)
+        IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator>? externalAlarmStatusCoordinators = null,
+        IEnumerable<VehicleConfig>? vehicleConfigurations = null,
+        IPassageEventLogger? passageEventLogger = null)
     {
         if (configurations is null) throw new ArgumentNullException(nameof(configurations));
         if (stations is null) throw new ArgumentNullException(nameof(stations));
@@ -40,10 +44,12 @@ public sealed class YardCommunicationManager : IDisposable
 
         _settings = settings;
         _recordStore = recordStore;
+        _passageEventLogger = passageEventLogger;
         _timeProvider = timeProvider;
         _alarmForwardSenders = CopyAlarmForwardSenders(alarmForwardSenders);
         _externalAlarmStatusCoordinators = CopyExternalAlarmStatusCoordinators(externalAlarmStatusCoordinators);
         _stations = stations.Where(item => item is not null).ToArray();
+        _vehicleConfigurations = (vehicleConfigurations ?? Array.Empty<VehicleConfig>()).ToArray();
 
         var diagnostics = new List<string>();
         AddDuplicateStationAddressDiagnostics(_stations, diagnostics);
@@ -231,6 +237,19 @@ public sealed class YardCommunicationManager : IDisposable
         }
     }
 
+    public void UpdateVehicleConfigurations(IEnumerable<VehicleConfig> vehicleConfigurations)
+    {
+        if (vehicleConfigurations is null) throw new ArgumentNullException(nameof(vehicleConfigurations));
+        ThrowIfDisposed();
+
+        var configurations = vehicleConfigurations.ToArray();
+        _vehicleConfigurations = configurations;
+        foreach (var context in _contexts.Values)
+        {
+            context.UpdateVehicleConfigurations(configurations);
+        }
+    }
+
     public void ApplyAlarmForwardSenders(
         IReadOnlyDictionary<string, IExternalDataInterface> alarmForwardSenders)
     {
@@ -380,7 +399,9 @@ public sealed class YardCommunicationManager : IDisposable
                     : null,
             externalAlarmStatusCoordinator,
             externalAlarmUdpReceiver,
-            externalAlarmUdpChannel);
+            externalAlarmUdpChannel,
+            _vehicleConfigurations,
+            _passageEventLogger);
     }
 
     private async Task ReplaceContextAsync(
@@ -527,7 +548,9 @@ public sealed class YardCommunicationManager : IDisposable
         IPAddress listenAddress,
         int listenPort,
         IRfidTimeProvider? timeProvider = null,
-        IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator>? externalAlarmStatusCoordinators = null)
+        IReadOnlyDictionary<string, ExternalAlarmStatusCoordinator>? externalAlarmStatusCoordinators = null,
+        IEnumerable<VehicleConfig>? vehicleConfigurations = null,
+        IPassageEventLogger? passageEventLogger = null)
     {
         return new YardCommunicationManager(
             new[]
@@ -545,7 +568,9 @@ public sealed class YardCommunicationManager : IDisposable
             settings,
             recordStore,
             timeProvider,
-            externalAlarmStatusCoordinators: externalAlarmStatusCoordinators);
+            externalAlarmStatusCoordinators: externalAlarmStatusCoordinators,
+            vehicleConfigurations: vehicleConfigurations,
+            passageEventLogger: passageEventLogger);
     }
 
     private YardCommunicationContext GetRequiredContext(string yardId)

@@ -71,6 +71,8 @@
                             <RowDefinition Height="30" />
                             <RowDefinition Height="30" />
                             <RowDefinition Height="30" />
+                            <RowDefinition Height="30" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
@@ -79,36 +81,47 @@
                         <TextBlock Text="基站" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
                         <TextBlock x:Name="StationValue" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
 
-                        <TextBlock Text="车头RFID" Grid.Row="1" Style="{StaticResource DialogFieldLabelStyle}" />
-                        <TextBlock x:Name="HeadRfidValue" Grid.Row="1" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
-                        <TextBlock Text="开始时间" Grid.Row="1" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
-                        <TextBlock x:Name="StartedAtValue" Grid.Row="1" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="车辆编号" Grid.Row="1" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="VehicleNoValue" Grid.Row="1" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="车辆名称" Grid.Row="1" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="VehicleNameValue" Grid.Row="1" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
 
-                        <TextBlock Text="完成时间" Grid.Row="2" Style="{StaticResource DialogFieldLabelStyle}" />
-                        <TextBlock x:Name="CompletedAtValue" Grid.Row="2" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
-                        <TextBlock Text="标准节数" Grid.Row="2" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
-                        <TextBlock x:Name="ExpectedCountValue" Grid.Row="2" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="车头标签" Grid.Row="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="HeadRfidValue" Grid.Row="2" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="报警时间" Grid.Row="2" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="AlarmTimeValue" Grid.Row="2" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
 
-                        <TextBlock Text="实际节数" Grid.Row="3" Style="{StaticResource DialogFieldLabelStyle}" />
-                        <TextBlock x:Name="DetectedCountValue" Grid.Row="3" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
-                        <TextBlock Text="结果" Grid.Row="3" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
-                        <TextBlock x:Name="OutcomeValue" Grid.Row="3" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="理论节数" Grid.Row="3" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="ExpectedCountValue" Grid.Row="3" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="实际节数" Grid.Row="3" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="DetectedCountValue" Grid.Row="3" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
 
-                        <TextBlock Text="清除状态" Grid.Row="4" Style="{StaticResource DialogFieldLabelStyle}" />
-                        <TextBlock x:Name="ClearStateValue" Grid.Row="4" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
-                        <TextBlock Text="报警说明" Grid.Row="4" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
-                        <TextBlock x:Name="AlarmValue" Grid.Row="4" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="缺少节数" Grid.Row="4" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="MissingCountValue" Grid.Row="4" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="当前状态" Grid.Row="4" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="AlarmStatusValue" Grid.Row="4" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
 
-                        <TextBlock Text="报警状态" Grid.Row="5" Style="{StaticResource DialogFieldLabelStyle}" />
-                        <TextBlock x:Name="AlarmStatusValue" Grid.Row="5" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
-                        <TextBlock Text="确认时间" Grid.Row="5" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
-                        <TextBlock x:Name="AlarmAcknowledgedAtValue" Grid.Row="5" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="确认时间" Grid.Row="5" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="AlarmAcknowledgedAtValue" Grid.Row="5" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="恢复时间" Grid.Row="5" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="AlarmRecoveredAtValue" Grid.Row="5" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
 
-                        <TextBlock Text="恢复时间" Grid.Row="6" Style="{StaticResource DialogFieldLabelStyle}" />
-                        <TextBlock x:Name="AlarmRecoveredAtValue" Grid.Row="6" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="开始时间" Grid.Row="6" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="StartedAtValue" Grid.Row="6" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="完成时间" Grid.Row="6" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="CompletedAtValue" Grid.Row="6" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
 
-                        <TextBlock Text="识别告警" Grid.Row="7" Style="{StaticResource DialogFieldLabelStyle}" Margin="0,7,8,0" />
-                        <TextBlock x:Name="WarningValue" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="3" Style="{StaticResource DialogFieldValueStyle}"
+                        <TextBlock Text="清除状态" Grid.Row="7" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="ClearStateValue" Grid.Row="7" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
+                        <TextBlock Text="结果" Grid.Row="7" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock x:Name="OutcomeValue" Grid.Row="7" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />
+
+                        <TextBlock x:Name="AlarmLabel" Text="报警说明" Grid.Row="8" Style="{StaticResource DialogFieldLabelStyle}" Margin="0,7,8,0" />
+                        <TextBlock x:Name="AlarmValue" Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="3" Style="{StaticResource DialogFieldValueStyle}"
+                                   Margin="0,7,0,0" TextWrapping="Wrap" />
+
+                        <TextBlock Text="识别告警" Grid.Row="9" Style="{StaticResource DialogFieldLabelStyle}" Margin="0,7,8,0" />
+                        <TextBlock x:Name="WarningValue" Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="3" Style="{StaticResource DialogFieldValueStyle}"
                                    Margin="0,7,0,0" TextWrapping="Wrap" />
                     </Grid>
 
@@ -136,7 +149,17 @@
             </ScrollViewer>
 
             <Border Grid.Row="2" Background="#051A2C" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,1,0,0">
-                <Button Content="关闭" Width="76" Height="28" MinHeight="28" HorizontalAlignment="Right" Margin="0,0,16,0" Click="OnCloseClick" />
+                <Grid Margin="16,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="ConfirmErrorText" Foreground="{StaticResource AlarmBrush}" FontSize="11" VerticalAlignment="Center" />
+                    <Button x:Name="ConfirmAlarmButton" Grid.Column="1" Content="确认报警" Width="94" Height="28" MinHeight="28"
+                            Margin="0,0,8,0" Style="{StaticResource AlarmActionButtonStyle}" Click="OnConfirmAlarmClick" />
+                    <Button Grid.Column="2" Content="关闭" Width="76" Height="28" MinHeight="28" Click="OnCloseClick" />
+                </Grid>
             </Border>
         </Grid>
     </Border>

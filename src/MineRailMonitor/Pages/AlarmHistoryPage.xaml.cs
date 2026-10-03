@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using MineRailMonitor.Core.Communication;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -210,11 +211,14 @@ public partial class AlarmHistoryPage : UserControl
         }
 
         var record = _recordStore.GetDetails(row.Record.PassageId) ?? row.Record;
-        var dialog = new PassageDetailsDialog(record, FormatStation(record.StationId), alarmMode: true)
+        var dialog = new PassageDetailsDialog(record, FormatStation(record.StationId), alarmMode: true, _acknowledgeAlarmRequested)
         {
             Owner = Window.GetWindow(this)
         };
-        dialog.ShowDialog();
+        if (dialog.ShowDialog() == true)
+        {
+            Refresh();
+        }
     }
 
     private void OnAlarmAcknowledgeClick(object sender, RoutedEventArgs e)
@@ -384,57 +388,34 @@ public partial class AlarmHistoryPage : UserControl
 
     private static string FormatTime(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
 
-    private static string FormatRfid(ushort? value) => value.HasValue ? value.Value.ToString("X4") : "-";
-
-    private static string FormatClearState(PassageClearState value) => value == PassageClearState.Cleared ? "已清除" : "待清除";
-
     private sealed class AlarmRow
     {
         public AlarmRow(PassageRecord record, string stationText)
         {
             Record = record;
             AlarmTimeText = FormatTime(record.CompletedAt);
+            VehicleNoText = string.IsNullOrWhiteSpace(record.VehicleNo) ? "未配置车辆" : record.VehicleNo!;
+            AlarmTypeText = record.Outcome == PassageOutcome.UncouplingAlarm ? "脱节报警" : "识别告警";
+            ExpectedCountText = $"{record.ExpectedVehicleCount?.ToString(CultureInfo.InvariantCulture) ?? "未配置"}节";
+            ActualCountText = $"{record.DetectedVehicleCount}节";
+            MissingCountText = Math.Max(record.ExpectedVehicleCount.GetValueOrDefault() - record.DetectedVehicleCount, 0).ToString(CultureInfo.InvariantCulture);
             StationText = stationText;
-            HeadRfidText = FormatRfid(record.HeadRfid);
-            ProgressText = $"{record.DetectedVehicleCount} / {record.ExpectedVehicleCount}";
-            MissingCountText = Math.Max(record.ExpectedVehicleCount - record.DetectedVehicleCount, 0).ToString(CultureInfo.InvariantCulture);
-            AlertLevelText = record.IsWarningOnly ? "警告" : "报警";
-            AlarmReasonText = record.AlarmMessage ??
-                (record.WarningMessages.Count == 0 ? "识别告警" : string.Join("；", record.WarningMessages));
-            ClearStateText = FormatClearState(record.ClearState);
-            AlarmStatusText = FormatAlarmStatus(record);
-            CanAcknowledge = record.RequiresAlarmAcknowledgement && !record.AlarmAcknowledgedAt.HasValue;
+            AlarmStatusText = AlarmStatusDisplayFormatter.Format(record.AlarmStatus);
+            CanAcknowledge = record.AlarmStatus == AlarmStatus.Unconfirmed;
             AcknowledgeButtonVisibility = CanAcknowledge ? Visibility.Visible : Visibility.Collapsed;
         }
 
         public PassageRecord Record { get; }
         public string AlarmTimeText { get; }
+        public string VehicleNoText { get; }
+        public string AlarmTypeText { get; }
+        public string ExpectedCountText { get; }
+        public string ActualCountText { get; }
         public string StationText { get; }
-        public string HeadRfidText { get; }
-        public string ProgressText { get; }
         public string MissingCountText { get; }
-        public string AlertLevelText { get; }
-        public string AlarmReasonText { get; }
-        public string ClearStateText { get; }
         public string AlarmStatusText { get; }
         public bool CanAcknowledge { get; }
         public Visibility AcknowledgeButtonVisibility { get; }
-
-        private static string FormatAlarmStatus(PassageRecord record)
-        {
-            if (!record.RequiresAlarmAcknowledgement)
-            {
-                return "无需确认";
-            }
-
-            return (record.AlarmAcknowledgedAt.HasValue, record.AlarmRecoveredAt.HasValue) switch
-            {
-                (false, false) => "待确认 · 报警中",
-                (true, false) => "已确认 · 报警中",
-                (false, true) => "待确认 · 已恢复",
-                _ => "已确认 · 已恢复"
-            };
-        }
     }
 
 }

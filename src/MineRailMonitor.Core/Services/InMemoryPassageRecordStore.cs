@@ -60,7 +60,9 @@ public sealed class InMemoryPassageRecordStore : IPassageRecordStore
                 PassageClearState.Cleared,
                 clearedAt,
                 record.AlarmAcknowledgedAt,
-                record.RequiresAlarmAcknowledgement ? clearedAt : null);
+                record.RequiresAlarmAcknowledgement && record.AlarmAcknowledgedAt.HasValue
+                    ? clearedAt
+                    : record.AlarmRecoveredAt);
         }
     }
 
@@ -90,7 +92,9 @@ public sealed class InMemoryPassageRecordStore : IPassageRecordStore
                 record.ClearState,
                 record.ClearedAt,
                 acknowledgedAt,
-                record.AlarmRecoveredAt);
+                record.RequiresAlarmAcknowledgement && record.ClearState == PassageClearState.Cleared
+                    ? record.AlarmRecoveredAt ?? record.ClearedAt
+                    : record.AlarmRecoveredAt);
         }
     }
 

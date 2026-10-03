@@ -208,6 +208,30 @@ public sealed class PassageRecordStoreTests
     }
 
     [Fact]
+    public void Alarm_status_is_derived_from_timestamps_and_legacy_records_remain_compatible()
+    {
+        var unconfirmed = CreateRecord(Guid.NewGuid(), 0x01, Today, PassageOutcome.UncouplingAlarm);
+        var acknowledged = new PassageRecord(
+            Guid.NewGuid(), "RFID-01", 0x01, 0x0003, new ushort[] { 0x0003 }, 7,
+            PassageOutcome.UncouplingAlarm, Today, Today,
+            alarmAcknowledgedAt: Today.AddMinutes(1));
+        var recovered = new PassageRecord(
+            Guid.NewGuid(), "RFID-01", 0x01, 0x0003, new ushort[] { 0x0003 }, 7,
+            PassageOutcome.UncouplingAlarm, Today, Today,
+            alarmAcknowledgedAt: Today.AddMinutes(1),
+            alarmRecoveredAt: Today.AddMinutes(2));
+        var legacyRecoveredWithoutAck = new PassageRecord(
+            Guid.NewGuid(), "RFID-01", 0x01, 0x0003, new ushort[] { 0x0003 }, 7,
+            PassageOutcome.UncouplingAlarm, Today, Today,
+            alarmRecoveredAt: Today.AddMinutes(2));
+
+        Assert.Equal(AlarmStatus.Unconfirmed, unconfirmed.AlarmStatus);
+        Assert.Equal(AlarmStatus.Acknowledged, acknowledged.AlarmStatus);
+        Assert.Equal(AlarmStatus.Recovered, recovered.AlarmStatus);
+        Assert.Equal(AlarmStatus.Unconfirmed, legacyRecoveredWithoutAck.AlarmStatus);
+    }
+
+    [Fact]
     public void In_memory_alarm_acknowledgement_is_idempotent_and_excludes_warnings()
     {
         var store = new InMemoryPassageRecordStore();
@@ -233,12 +257,13 @@ public sealed class PassageRecordStoreTests
 
         var savedAlarm = store.GetDetails(alarm.PassageId)!;
         Assert.Equal(firstAcknowledgedAt, savedAlarm.AlarmAcknowledgedAt);
+        Assert.Equal(AlarmStatus.Acknowledged, savedAlarm.AlarmStatus);
         Assert.Empty(store.GetUnacknowledgedAlarms());
         Assert.Throws<InvalidOperationException>(() => store.MarkAlarmAcknowledged(warning.PassageId, firstAcknowledgedAt));
     }
 
     [Fact]
-    public void In_memory_uncoupling_alarm_recovery_is_recorded_when_clear_completes()
+    public void In_memory_uncoupling_alarm_recovers_only_after_acknowledgement_and_clear()
     {
         var store = new InMemoryPassageRecordStore();
         var alarm = CreateRecord(
@@ -253,8 +278,15 @@ public sealed class PassageRecordStoreTests
 
         var saved = store.GetDetails(alarm.PassageId)!;
         Assert.Equal(PassageClearState.Cleared, saved.ClearState);
-        Assert.Equal(recoveredAt, saved.AlarmRecoveredAt);
+        Assert.Null(saved.AlarmRecoveredAt);
         Assert.Null(saved.AlarmAcknowledgedAt);
+
+        var acknowledgedAt = Today.AddMinutes(4);
+        store.MarkAlarmAcknowledged(alarm.PassageId, acknowledgedAt);
+        saved = store.GetDetails(alarm.PassageId)!;
+        Assert.Equal(acknowledgedAt, saved.AlarmAcknowledgedAt);
+        Assert.Equal(recoveredAt, saved.AlarmRecoveredAt);
+        Assert.Equal(AlarmStatus.Recovered, saved.AlarmStatus);
     }
 
     private static PassageRecord CreateRecord(

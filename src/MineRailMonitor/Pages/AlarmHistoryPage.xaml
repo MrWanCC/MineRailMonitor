@@ -187,15 +187,13 @@
                               AutoGenerateColumns="False"
                               HeadersVisibility="Column" IsReadOnly="True">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="报警时间" Binding="{Binding AlarmTimeText}" Width="1.25*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="基站" Binding="{Binding StationText}" Width="1.35*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="车头RFID" Binding="{Binding HeadRfidText}" Width="0.8*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="识别进度" Binding="{Binding ProgressText}" Width="0.85*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTextColumn Header="时间" Binding="{Binding AlarmTimeText}" Width="1.25*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTextColumn Header="车辆编号" Binding="{Binding VehicleNoText}" Width="1.0*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTextColumn Header="报警类型" Binding="{Binding AlarmTypeText}" Width="1.0*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTextColumn Header="理论节数" Binding="{Binding ExpectedCountText}" Width="0.75*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTextColumn Header="实际节数" Binding="{Binding ActualCountText}" Width="0.75*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                             <DataGridTextColumn Header="缺少节数" Binding="{Binding MissingCountText}" Width="0.75*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="告警级别" Binding="{Binding AlertLevelText}" Width="0.75*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="报警原因" Binding="{Binding AlarmReasonText}" Width="1.15*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="报警状态" Binding="{Binding AlarmStatusText}" Width="1.15*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                            <DataGridTextColumn Header="清除状态" Binding="{Binding ClearStateText}" Width="0.9*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            <DataGridTextColumn Header="状态" Binding="{Binding AlarmStatusText}" Width="0.75*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                             <DataGridTemplateColumn Header="确认" Width="0.65*">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>

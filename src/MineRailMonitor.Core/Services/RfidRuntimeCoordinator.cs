@@ -13,15 +13,20 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
     private readonly IReadOnlyDictionary<byte, IReadOnlyList<StationRuntimeState>> _statesByProtocol;
     private readonly RfidProtocolAddressCollectionView<StationRuntimeState> _states;
     private readonly IPassageRecordStore _recordStore;
+    private readonly IPassageEventLogger? _passageEventLogger;
     private readonly RfidRuntimePolicy _policy;
+    private readonly ProjectConfig _vehicleMatchProject;
+    private readonly VehicleMatchResolver _vehicleMatchResolver;
     private RfidSettings _defaults;
 
     public RfidRuntimeCoordinator(
         IEnumerable<byte> stationAddresses,
         RfidSettings settings,
         IPassageRecordStore recordStore,
-        RfidRuntimePolicy? policy = null)
-        : this(CreateCompatibilityStations(stationAddresses), settings, recordStore, policy)
+        RfidRuntimePolicy? policy = null,
+        IEnumerable<VehicleConfig>? vehicleConfigurations = null,
+        IPassageEventLogger? passageEventLogger = null)
+        : this(CreateCompatibilityStations(stationAddresses), settings, recordStore, policy, vehicleConfigurations, passageEventLogger)
     {
     }
 
@@ -29,7 +34,9 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         IEnumerable<RfidStationConfig> stations,
         RfidSettings settings,
         IPassageRecordStore recordStore,
-        RfidRuntimePolicy? policy = null)
+        RfidRuntimePolicy? policy = null,
+        IEnumerable<VehicleConfig>? vehicleConfigurations = null,
+        IPassageEventLogger? passageEventLogger = null)
     {
         if (stations is null) throw new ArgumentNullException(nameof(stations));
         _defaults = CopySettings(settings ?? throw new ArgumentNullException(nameof(settings)));
@@ -40,6 +47,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         }
 
         _recordStore = recordStore ?? throw new ArgumentNullException(nameof(recordStore));
+        _passageEventLogger = passageEventLogger;
         _policy = policy ?? RfidRuntimePolicy.Default;
         var enabledStations = stations.Where(station => station.Enabled).ToArray();
         if (enabledStations.Length == 0)
@@ -51,6 +59,16 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         {
             throw new ArgumentException(string.Join(Environment.NewLine, duplicateCommunicationKeys), nameof(stations));
         }
+        var invalidVehicleCountStations = enabledStations
+            .Where(station => station.ExpectedVehicleCount is < 1 or > 14)
+            .Select(station => station.StationId)
+            .ToArray();
+        if (invalidVehicleCountStations.Length > 0)
+        {
+            throw new ArgumentException(
+                $"Expected vehicle count must be between 1 and 14 for: {string.Join(", ", invalidVehicleCountStations)}.",
+                nameof(stations));
+        }
 
         _bindings = enabledStations
             .Select((station, index) => new RfidStationBinding(
@@ -60,9 +78,16 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
                     station.StationId,
                     station.Name,
                     station.ProtocolAddress,
-                    _defaults.ExpectedVehicleCount,
+                    station.ExpectedVehicleCount ?? _defaults.ExpectedVehicleCount,
                     _defaults.EmptyRfidValue)))
             .ToArray();
+        _vehicleMatchProject = new ProjectConfig
+        {
+            RfidSettings = CopySettings(_defaults),
+            RfidStations = enabledStations,
+            Vehicles = (vehicleConfigurations ?? Array.Empty<VehicleConfig>()).ToArray()
+        };
+        _vehicleMatchResolver = new VehicleMatchResolver(_vehicleMatchProject);
         _statesByEndpoint = _bindings.ToDictionary(binding => binding.Key, binding => binding.State);
         _statesByProtocol = _bindings
             .GroupBy(binding => binding.Config.ProtocolAddress)
@@ -86,6 +111,10 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
     public event Action<AlarmForwardRequest>? AlarmForwardRequested;
 
+    public event Action<VehicleMatchResult>? VehicleMatchResolved;
+
+    public event Action<PassageRecord>? AlarmRecovered;
+
     public void UpdateDefaults(RfidSettings settings)
     {
         lock (_syncRoot)
@@ -96,6 +125,19 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             {
                 throw new ArgumentException(string.Join(Environment.NewLine, errors), nameof(settings));
             }
+
+            _vehicleMatchProject.RfidSettings = CopySettings(_defaults);
+        }
+    }
+
+    public void UpdateVehicleConfigurations(IEnumerable<VehicleConfig> vehicleConfigurations)
+    {
+        if (vehicleConfigurations is null) throw new ArgumentNullException(nameof(vehicleConfigurations));
+
+        var configurations = vehicleConfigurations.ToArray();
+        lock (_syncRoot)
+        {
+            _vehicleMatchProject.Vehicles = configurations;
         }
     }
 
@@ -103,21 +145,28 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
     {
         if (frame is null) throw new ArgumentNullException(nameof(frame));
         AlarmForwardRequest? alarmForwardRequest;
+        VehicleMatchResult? vehicleMatchResult;
         StationRecognitionSession? result;
         lock (_syncRoot)
         {
-            result = ProcessFrameCore(frame, out alarmForwardRequest);
+            result = ProcessFrameCore(frame, out alarmForwardRequest, out vehicleMatchResult);
         }
 
         PublishAlarmForwardRequest(alarmForwardRequest);
+        if (vehicleMatchResult is not null)
+        {
+            VehicleMatchResolved?.Invoke(vehicleMatchResult);
+        }
         return result;
     }
 
     private StationRecognitionSession? ProcessFrameCore(
         RfidStationFrame frame,
-        out AlarmForwardRequest? alarmForwardRequest)
+        out AlarmForwardRequest? alarmForwardRequest,
+        out VehicleMatchResult? vehicleMatchResult)
     {
         alarmForwardRequest = null;
+        vehicleMatchResult = null;
         var state = FindState(frame);
         if (state is null)
         {
@@ -155,6 +204,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             return state.RecognitionSession;
         }
 
+        var sessionCreated = false;
         if (state.RecognitionSession is null)
         {
             if (!HasNonEmptySlot(frame, _defaults.EmptyRfidValue))
@@ -163,13 +213,17 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
                 return null;
             }
 
+            var resolvedVehicle = _vehicleMatchResolver.Resolve(frame, state);
+            vehicleMatchResult = resolvedVehicle;
             state.RecognitionSession = new StationRecognitionSession(
                 frame.StationAddress,
-                _defaults.ExpectedVehicleCount,
+                vehicleMatchResult.ExpectedCount,
                 TimeSpan.FromSeconds(_defaults.InterVehicleTimeoutSeconds),
-                _defaults.EmptyRfidValue);
+                _defaults.EmptyRfidValue,
+                vehicleMatchResult);
+            sessionCreated = true;
             state.SessionStartedAt = frame.ReceivedAt;
-            state.ExpectedVehicleCount = _defaults.ExpectedVehicleCount;
+            state.ExpectedVehicleCount = state.RecognitionSession.ExpectedVehicleCount;
             state.LastPassageRecord = null;
             state.AlarmMessage = null;
             state.LastNewVehicleRawPacket = null;
@@ -178,20 +232,48 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             state.EmptyRfidValue = _defaults.EmptyRfidValue;
             state.ClearAttempts = 0;
             state.ConsecutiveEmptyReads = 0;
+            WritePassageEvent(CreatePassageEvent(
+                PassageEventTypes.Start,
+                state,
+                state.RecognitionSession,
+                frame.ReceivedAt,
+                frame.HeadRfid));
         }
 
-        var detectedVehicleCountBeforeApply = state.RecognitionSession.DetectedVehicleCount;
-        state.RecognitionSession.Apply(frame);
-        if (state.RecognitionSession.DetectedVehicleCount > detectedVehicleCountBeforeApply)
+        var session = state.RecognitionSession;
+        if (!sessionCreated &&
+            session.VehicleMatchResult is null &&
+            frame.RawRfidSlots is { Count: > 0 } &&
+            frame.RawRfidSlots[0] != state.EmptyRfidValue)
+        {
+            var lateMatch = _vehicleMatchResolver.Resolve(frame, state);
+            if (session.TrySupplementVehicleIdentity(lateMatch))
+            {
+                WritePassageEvent(CreatePassageEvent(
+                    PassageEventTypes.VehicleMatchLateResolved,
+                    state,
+                    session,
+                    frame.ReceivedAt));
+            }
+        }
+
+        var detectedVehicleCountBeforeApply = session.DetectedVehicleCount;
+        session.Apply(frame);
+        if (session.DetectedVehicleCount > detectedVehicleCountBeforeApply)
         {
             state.LastNewVehicleRawPacket = frame.RawData is { Length: > 0 }
                 ? (byte[])frame.RawData.Clone()
                 : Array.Empty<byte>();
             state.LastNewVehicleRawPacketAt = frame.ReceivedAt;
+            WritePassageEvent(CreatePassageEvent(
+                PassageEventTypes.Progress,
+                state,
+                session,
+                frame.ReceivedAt));
         }
         UpdateFromRecognition(state);
         state.LifecycleState = PassageLifecycleState.Recognizing;
-        if (state.RecognitionSession.State == StationRecognitionState.Completed)
+        if (session.State == StationRecognitionState.Completed)
         {
             FreezePassage(state, PassageOutcome.Completed, frame.ReceivedAt);
         }
@@ -228,7 +310,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
     private bool TryGetFirstState(byte stationAddress, out StationRuntimeState state)
     {
-        if (_statesByProtocol.TryGetValue(stationAddress, out var states) && states.Count > 0)
+        if (_statesByProtocol.TryGetValue(stationAddress, out var states) && states.Count == 1)
         {
             state = states[0];
             return true;
@@ -356,6 +438,10 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
                     alarmForwardRequests.Add(alarmRequest);
                 }
             }
+            else if (state.RecognitionSession.State == StationRecognitionState.Unverified)
+            {
+                FreezePassage(state, PassageOutcome.Unverified, now);
+            }
             UpdateVisualState(state);
         }
     }
@@ -399,12 +485,14 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
                 {
                     state.AddUnacknowledgedAlarm(record.PassageId);
                 }
-                state.CurrentHeadRfid = record.HeadRfid;
+                state.CurrentHeadRfid = record.VehicleHeadRfid ?? record.HeadRfid;
                 state.ObservedVehicleSequence = record.ObservedRfids.ToArray();
                 state.SeenRfids = record.ObservedRfids.ToArray();
                 state.DetectedVehicleCount = record.DetectedVehicleCount;
                 state.ExpectedVehicleCount = record.ExpectedVehicleCount;
-                state.HeadTagRfids = record.ObservedRfids.Where(RfidRecognitionRules.IsHeadRfid).ToArray();
+                state.HeadTagRfids = state.CurrentHeadRfid.HasValue
+                    ? new[] { state.CurrentHeadRfid.Value }
+                    : Array.Empty<ushort>();
                 state.HeadTagCount = state.HeadTagRfids.Count;
                 state.WarningMessages = record.WarningMessages.ToArray();
                 state.AlarmMessage = record.AlarmMessage;
@@ -459,6 +547,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
     public void AcknowledgeAlarm(Guid passageId, DateTimeOffset acknowledgedAt)
     {
+        PassageRecord? recoveredRecord = null;
         lock (_syncRoot)
         {
             var state = _statesByEndpoint.Values.FirstOrDefault(item => item.ContainsUnacknowledgedAlarm(passageId));
@@ -467,38 +556,72 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
                 throw new InvalidOperationException($"未找到待确认的脱节报警：{passageId}");
             }
 
+            var before = _recordStore.GetDetails(passageId);
             _recordStore.MarkAlarmAcknowledged(passageId, acknowledgedAt);
+            var after = _recordStore.GetDetails(passageId);
+            if (before?.AlarmStatus != AlarmStatus.Recovered && after?.AlarmStatus == AlarmStatus.Recovered)
+            {
+                recoveredRecord = after;
+            }
+            if (after is not null && state.LastPassageRecord?.PassageId == passageId)
+            {
+                state.LastPassageRecord = after;
+            }
             state.RemoveUnacknowledgedAlarm(passageId);
             UpdateVisualState(state);
+        }
+
+        if (recoveredRecord is not null)
+        {
+            PublishAlarmRecovered(recoveredRecord);
         }
     }
 
     public bool TryAcknowledgeAlarm(byte stationAddress, DateTimeOffset acknowledgedAt)
     {
+        PassageRecord? recoveredRecord = null;
         lock (_syncRoot)
         {
+            var unacknowledgedRecords = _recordStore.GetUnacknowledgedAlarms()
+                .Where(record => record.StationAddress == stationAddress && record.RequiresAlarmAcknowledgement)
+                .ToArray();
             var matches = _statesByEndpoint.Values
                 .Where(state => state.StationAddress == stationAddress)
-                .Where(state => state.LifecycleState is
-                    PassageLifecycleState.Alarm or
-                    PassageLifecycleState.Clearing or
-                    PassageLifecycleState.WaitForEmpty)
-                .Where(state => state.LastPassageRecord is not null &&
-                                state.LastPassageRecord.RequiresAlarmAcknowledgement &&
-                                state.ContainsUnacknowledgedAlarm(state.LastPassageRecord.PassageId))
+                .SelectMany(state => unacknowledgedRecords
+                    .Where(record => string.Equals(
+                                        record.StationId,
+                                        state.StationId,
+                                        StringComparison.OrdinalIgnoreCase) &&
+                                    state.ContainsUnacknowledgedAlarm(record.PassageId))
+                    .Select(record => new { State = state, Record = record }))
                 .ToArray();
             if (matches.Length != 1)
             {
                 return false;
             }
 
-            var state = matches[0];
-            var passageId = state.LastPassageRecord!.PassageId;
+            var state = matches[0].State;
+            var passageId = matches[0].Record.PassageId;
+            var before = _recordStore.GetDetails(passageId);
             _recordStore.MarkAlarmAcknowledged(passageId, acknowledgedAt);
+            var after = _recordStore.GetDetails(passageId);
+            if (before?.AlarmStatus != AlarmStatus.Recovered && after?.AlarmStatus == AlarmStatus.Recovered)
+            {
+                recoveredRecord = after;
+            }
+            if (after is not null && state.LastPassageRecord?.PassageId == passageId)
+            {
+                state.LastPassageRecord = after;
+            }
             state.RemoveUnacknowledgedAlarm(passageId);
             UpdateVisualState(state);
-            return true;
         }
+
+        if (recoveredRecord is not null)
+        {
+            PublishAlarmRecovered(recoveredRecord);
+        }
+        return true;
     }
 
     public void MarkCommandSent(byte stationAddress, RfidPollCommand command, DateTimeOffset sentAt)
@@ -581,7 +704,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             UpdateFromRecognition(state);
             state.AlarmMessage = outcome == PassageOutcome.UncouplingAlarm ? "脱节报警" : null;
             state.LastPassageRecord = new PassageRecord(
-                Guid.NewGuid(),
+                state.RecognitionSession.PassageId,
                 state.StationId,
                 state.StationAddress,
                 state.CurrentHeadRfid,
@@ -592,7 +715,42 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
                 completedAt,
                 state.WarningMessages,
                 state.AlarmMessage,
-                state.RecognitionSession.RfidObservations);
+                state.RecognitionSession.RfidObservations,
+                vehicleName: state.RecognitionSession.VehicleName,
+                vehicleHeadRfid: state.RecognitionSession.VehicleHeadRfid,
+                vehicleNo: state.RecognitionSession.VehicleNo);
+
+            var session = state.RecognitionSession;
+            if (outcome == PassageOutcome.Completed)
+            {
+                var startedAt = session.FirstVehicleAt ?? state.SessionStartedAt ?? completedAt;
+                WritePassageEvent(CreatePassageEvent(
+                    PassageEventTypes.Complete,
+                    state,
+                    session,
+                    completedAt,
+                    durationMilliseconds: Math.Max(0, (long)(completedAt - startedAt).TotalMilliseconds)));
+            }
+            else if (outcome == PassageOutcome.UncouplingAlarm)
+            {
+                WritePassageEvent(CreatePassageEvent(
+                    PassageEventTypes.Alarm,
+                    state,
+                    session,
+                    completedAt,
+                    missingCount: Math.Max(0, session.ExpectedVehicleCount!.Value - session.DetectedVehicleCount),
+                    timeoutSeconds: (int)Math.Ceiling(session.InterVehicleTimeout.TotalSeconds),
+                    reason: state.AlarmMessage));
+            }
+            else if (outcome == PassageOutcome.Unverified)
+            {
+                WritePassageEvent(CreatePassageEvent(
+                    PassageEventTypes.Unverified,
+                    state,
+                    session,
+                    completedAt,
+                    reason: "车辆未匹配，且未配置完整性判断回退节数"));
+            }
         }
 
         return TryPersistPendingPassage(state);
@@ -666,8 +824,18 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         state.ClearPersistenceAttemptCount++;
         try
         {
+            var before = _recordStore.GetDetails(state.LastPassageRecord.PassageId);
             _recordStore.MarkCleared(state.LastPassageRecord.PassageId, clearedAt);
+            var after = _recordStore.GetDetails(state.LastPassageRecord.PassageId);
+            WritePassageEvent(CreatePassageEvent(state.LastPassageRecord, clearedAt));
+            var recovered = before?.AlarmStatus != AlarmStatus.Recovered && after?.AlarmStatus == AlarmStatus.Recovered
+                ? after
+                : null;
             ResetToIdle(state);
+            if (recovered is not null)
+            {
+                PublishAlarmRecovered(recovered);
+            }
         }
         catch (Exception exception)
         {
@@ -675,6 +843,27 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             state.PersistenceErrorMessage = $"清除状态保存失败：{exception.Message}";
             state.LifecycleState = PassageLifecycleState.WaitForEmpty;
             AddWarning(state, state.PersistenceErrorMessage);
+        }
+    }
+
+    private void PublishAlarmRecovered(PassageRecord record)
+    {
+        var handlers = AlarmRecovered;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (Action<PassageRecord> handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(record);
+            }
+            catch
+            {
+                // Recovery logging is best-effort and must not interrupt passage handling.
+            }
         }
     }
 
@@ -699,16 +888,16 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         }
         if (session.HeadTagWarnings.Contains(RfidHeadWarning.MissingHeadTag))
         {
-            warnings.Add("未检测到车头标签");
+            warnings.Add("未检测到车头槽位(Position 0)");
         }
         if (session.HeadTagWarnings.Contains(RfidHeadWarning.FirstTagIsNotHead))
         {
-            warnings.Add("首个识别标签不是有效车头标签");
+            warnings.Add("首个识别RFID未出现在车头槽位(Position 0)");
         }
         if (session.HeadTagWarnings.Contains(RfidHeadWarning.MultipleHeadTags))
         {
             var tags = string.Join(", ", session.HeadTagRfids.Select(rfid => rfid.ToString("X4")));
-            warnings.Add($"检测到多个车头标签（{tags}）");
+            warnings.Add($"检测到多个车头槽位RFID（{tags}）");
         }
 
         state.WarningMessages = warnings.AsReadOnly();
@@ -748,6 +937,60 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         }
 
         state.WarningMessages = state.WarningMessages.Concat(new[] { warning }).ToArray();
+    }
+
+    private static PassageEvent CreatePassageEvent(
+        string eventType,
+        StationRuntimeState state,
+        StationRecognitionSession session,
+        DateTimeOffset occurredAt,
+        ushort? fallbackHeadRfid = null,
+        long? durationMilliseconds = null,
+        int? missingCount = null,
+        int? timeoutSeconds = null,
+        string? reason = null) => new()
+        {
+            PassageId = session.PassageId,
+            EventType = eventType,
+            OccurredAt = occurredAt,
+            StationId = state.StationId,
+            StationAddress = state.StationAddress,
+            VehicleName = session.VehicleName,
+            VehicleNo = session.VehicleNo,
+            VehicleHeadRfid = session.VehicleHeadRfid ??
+                (session.HeadRfid != 0 ? session.HeadRfid : session.FirstValidRfid ?? fallbackHeadRfid),
+            ExpectedCount = session.ExpectedVehicleCount,
+            DetectedCount = session.DetectedVehicleCount,
+            DurationMilliseconds = durationMilliseconds,
+            MissingCount = missingCount,
+            TimeoutSeconds = timeoutSeconds,
+            Reason = reason
+        };
+
+    private static PassageEvent CreatePassageEvent(PassageRecord record, DateTimeOffset occurredAt) => new()
+    {
+        PassageId = record.PassageId,
+        EventType = PassageEventTypes.Clear,
+        OccurredAt = occurredAt,
+        StationId = record.StationId,
+        StationAddress = record.StationAddress,
+        VehicleName = record.VehicleName,
+        VehicleNo = record.VehicleNo,
+        VehicleHeadRfid = record.VehicleHeadRfid ?? record.HeadRfid,
+        ExpectedCount = record.ExpectedVehicleCount,
+        DetectedCount = record.DetectedVehicleCount
+    };
+
+    private void WritePassageEvent(PassageEvent passageEvent)
+    {
+        try
+        {
+            _passageEventLogger?.Write(passageEvent);
+        }
+        catch
+        {
+            // Logging must not change passage recognition behavior.
+        }
     }
 
     private static bool HasNonEmptySlot(RfidStationFrame frame, ushort emptyRfidValue) =>

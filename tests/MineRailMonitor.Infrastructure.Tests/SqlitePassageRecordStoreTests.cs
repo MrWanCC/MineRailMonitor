@@ -269,7 +269,36 @@ PRAGMA user_version=5;";
         Assert.Equal(pending.PassageId, Assert.Single(pendingRows).PassageId);
         Assert.Equal(PassageClearState.Cleared, database.Store.GetDetails(cleared.PassageId)!.ClearState);
         Assert.Equal(clearedAt, database.Store.GetDetails(cleared.PassageId)!.ClearedAt);
-        Assert.Equal(clearedAt, database.Store.GetDetails(alarm.PassageId)!.AlarmRecoveredAt);
+        Assert.Null(database.Store.GetDetails(alarm.PassageId)!.AlarmRecoveredAt);
+    }
+
+    [Fact]
+    public void Mark_cleared_recovers_confirmed_alarm_and_ack_after_clear_uses_original_clear_time()
+    {
+        using var database = new TemporaryDatabase();
+        var confirmedAlarm = CreateRecord(
+            Guid.Parse("f1eeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+            0x03,
+            Today,
+            PassageOutcome.UncouplingAlarm,
+            Today.AddSeconds(1));
+        var clearFirstAlarm = CreateRecord(
+            Guid.Parse("f2eeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+            0x04,
+            Today,
+            PassageOutcome.UncouplingAlarm);
+        database.Store.Save(confirmedAlarm);
+        database.Store.Save(clearFirstAlarm);
+        var clearedAt = Today.AddMinutes(1);
+
+        database.Store.MarkCleared(confirmedAlarm.PassageId, clearedAt);
+        database.Store.MarkCleared(clearFirstAlarm.PassageId, clearedAt);
+        database.Store.MarkAlarmAcknowledged(clearFirstAlarm.PassageId, Today.AddMinutes(2));
+
+        Assert.Equal(clearedAt, database.Store.GetDetails(confirmedAlarm.PassageId)!.AlarmRecoveredAt);
+        var recoveredAfterAck = database.Store.GetDetails(clearFirstAlarm.PassageId)!;
+        Assert.Equal(Today.AddMinutes(2), recoveredAfterAck.AlarmAcknowledgedAt);
+        Assert.Equal(clearedAt, recoveredAfterAck.AlarmRecoveredAt);
     }
 
     [Fact]

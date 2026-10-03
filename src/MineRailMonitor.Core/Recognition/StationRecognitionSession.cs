@@ -29,6 +29,7 @@ public sealed class StationRecognitionSession
             throw new ArgumentOutOfRangeException(nameof(interVehicleTimeout));
         }
         StationAddress = stationAddress;
+        PassageId = Guid.NewGuid();
         ExpectedVehicleCount = expectedVehicleCount;
         VehicleMatchResult = vehicleMatchResult?.IsMatched == true ? vehicleMatchResult : null;
         _interVehicleTimeout = interVehicleTimeout;
@@ -36,6 +37,8 @@ public sealed class StationRecognitionSession
     }
 
     public byte StationAddress { get; }
+
+    public Guid PassageId { get; }
 
     public ushort HeadRfid { get; private set; }
 

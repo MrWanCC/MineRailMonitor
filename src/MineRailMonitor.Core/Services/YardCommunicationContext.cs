@@ -16,8 +16,10 @@ public sealed class YardCommunicationContext : IDisposable
 {
     private readonly object _syncRoot = new();
     private readonly IReadOnlyList<RfidStationConfig> _stations;
+    private IReadOnlyList<VehicleConfig> _vehicleConfigurations;
     private RfidSettings _settings;
     private readonly IPassageRecordStore _recordStore;
+    private readonly IPassageEventLogger? _passageEventLogger;
     private readonly IRfidTimeProvider _timeProvider;
     private ExternalAlarmStatusCoordinator? _externalAlarmStatusCoordinator;
     private readonly ExternalAlarmUdpReceiver? _externalAlarmUdpReceiver;
@@ -47,13 +49,17 @@ public sealed class YardCommunicationContext : IDisposable
         IExternalDataInterface? alarmForwardSender = null,
         ExternalAlarmStatusCoordinator? externalAlarmStatusCoordinator = null,
         ExternalAlarmUdpReceiver? externalAlarmUdpReceiver = null,
-        ExternalAlarmUdpChannel? externalAlarmUdpChannel = null)
+        ExternalAlarmUdpChannel? externalAlarmUdpChannel = null,
+        IEnumerable<VehicleConfig>? vehicleConfigurations = null,
+        IPassageEventLogger? passageEventLogger = null)
     {
         Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         if (stations is null) throw new ArgumentNullException(nameof(stations));
         _stations = stations.ToArray();
+        _vehicleConfigurations = (vehicleConfigurations ?? Array.Empty<VehicleConfig>()).ToArray();
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _recordStore = recordStore ?? throw new ArgumentNullException(nameof(recordStore));
+        _passageEventLogger = passageEventLogger;
         _timeProvider = timeProvider ?? new SystemRfidTimeProvider();
         _externalAlarmStatusCoordinator = externalAlarmStatusCoordinator;
         _externalAlarmUdpReceiver = externalAlarmUdpReceiver;
@@ -429,6 +435,19 @@ public sealed class YardCommunicationContext : IDisposable
         }
     }
 
+    public void UpdateVehicleConfigurations(IEnumerable<VehicleConfig> vehicleConfigurations)
+    {
+        if (vehicleConfigurations is null) throw new ArgumentNullException(nameof(vehicleConfigurations));
+        ThrowIfDisposed();
+
+        var configurations = vehicleConfigurations.ToArray();
+        lock (_syncRoot)
+        {
+            _vehicleConfigurations = configurations;
+            _runtimeCoordinator?.UpdateVehicleConfigurations(configurations);
+        }
+    }
+
     public void UpdateAlarmForwardSender(IExternalDataInterface? sender)
     {
         ThrowIfDisposed();
@@ -692,7 +711,12 @@ public sealed class YardCommunicationContext : IDisposable
 
     private RfidRuntimeCoordinator? CreateRuntimeCoordinator() =>
         _stations.Any(station => station.Enabled)
-            ? new RfidRuntimeCoordinator(_stations, _settings, _recordStore)
+            ? new RfidRuntimeCoordinator(
+                _stations,
+                _settings,
+                _recordStore,
+                vehicleConfigurations: _vehicleConfigurations,
+                passageEventLogger: _passageEventLogger)
             : null;
 
     private IEnumerable<PassageRecord> FilterRecordsForContext(IEnumerable<PassageRecord> records)

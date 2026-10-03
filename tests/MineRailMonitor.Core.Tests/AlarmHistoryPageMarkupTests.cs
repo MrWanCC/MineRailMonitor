@@ -19,11 +19,21 @@ public sealed class AlarmHistoryPageMarkupTests
         Assert.Contains("ResetButton", markup, StringComparison.Ordinal);
         Assert.Contains("PreviousPageButton", markup, StringComparison.Ordinal);
         Assert.Contains("NextPageButton", markup, StringComparison.Ordinal);
-        Assert.Contains("报警时间", markup, StringComparison.Ordinal);
-        Assert.Contains("识别进度", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"时间\"", markup, StringComparison.Ordinal);
+        Assert.Contains("车辆编号", markup, StringComparison.Ordinal);
+        Assert.Contains("报警类型", markup, StringComparison.Ordinal);
+        Assert.Contains("理论节数", markup, StringComparison.Ordinal);
+        Assert.Contains("实际节数", markup, StringComparison.Ordinal);
         Assert.Contains("缺少节数", markup, StringComparison.Ordinal);
-        Assert.Contains("报警原因", markup, StringComparison.Ordinal);
-        Assert.Contains("清除状态", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"状态\"", markup, StringComparison.Ordinal);
+        var detailsMarkup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "PassageDetailsDialog.xaml"));
+        var detailsCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "PassageDetailsDialog.xaml.cs"));
+        Assert.Contains("确认报警", detailsMarkup, StringComparison.Ordinal);
+        Assert.Contains("AlarmAcknowledgedAtValue", detailsMarkup, StringComparison.Ordinal);
+        Assert.Contains("AlarmRecoveredAtValue", detailsMarkup, StringComparison.Ordinal);
+        Assert.Contains("VehicleNoValue", detailsMarkup, StringComparison.Ordinal);
+        Assert.Contains("VehicleNameValue", detailsMarkup, StringComparison.Ordinal);
+        Assert.Contains("OnConfirmAlarmClick", detailsCode, StringComparison.Ordinal);
         Assert.DoesNotContain("Legacy / 历史未识别基站", File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "AlarmHistoryPage.xaml.cs")), StringComparison.Ordinal);
     }
 
@@ -35,8 +45,8 @@ public sealed class AlarmHistoryPageMarkupTests
         Assert.Contains("IncludeWarnings = true", code, StringComparison.Ordinal);
         Assert.DoesNotContain("Outcome = PassageOutcome.UncouplingAlarm", code, StringComparison.Ordinal);
         Assert.Contains("Math.Max", code, StringComparison.Ordinal);
-        Assert.Contains("record.ExpectedVehicleCount - record.DetectedVehicleCount", code, StringComparison.Ordinal);
-        Assert.Contains("ToString(\"X4\")", code, StringComparison.Ordinal);
+        Assert.Contains("record.ExpectedVehicleCount.GetValueOrDefault() - record.DetectedVehicleCount", code, StringComparison.Ordinal);
+        Assert.Contains("VehicleNoText", code, StringComparison.Ordinal);
         Assert.DoesNotContain("已处理", code, StringComparison.Ordinal);
         Assert.DoesNotContain("未处理", code, StringComparison.Ordinal);
         Assert.Contains("FromDatePicker.SelectedDate", code, StringComparison.Ordinal);

@@ -56,6 +56,32 @@ public sealed class AlarmAcknowledgementTests
     }
 
     [Fact]
+    public void Recovery_event_is_published_only_when_acknowledged_alarm_clear_completes()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var coordinator = CreateCoordinator(store);
+        PassageRecord? recoveredRecord = null;
+        coordinator.AlarmRecovered += record => recoveredRecord = record;
+        var alarmValues = AlarmValues();
+
+        coordinator.ProcessFrame(CreateFrame(0x01, Start, alarmValues));
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(29.9), alarmValues));
+        coordinator.Evaluate(Start.AddSeconds(30));
+        var passage = Assert.Single(store.Records);
+        coordinator.AcknowledgeAlarm(passage.PassageId, Start.AddSeconds(30.1));
+
+        Assert.Null(recoveredRecord);
+        coordinator.MarkCommandSent(0x01, RfidPollCommand.Clear, Start.AddSeconds(30.2));
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(30.3), Array.Empty<ushort>()));
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(30.4), Array.Empty<ushort>()));
+
+        Assert.NotNull(recoveredRecord);
+        Assert.Equal(passage.PassageId, recoveredRecord!.PassageId);
+        Assert.Equal(Start.AddSeconds(30.4), recoveredRecord.AlarmRecoveredAt);
+        Assert.Equal(AlarmStatus.Recovered, recoveredRecord.AlarmStatus);
+    }
+
+    [Fact]
     public void Acknowledged_alarm_stays_red_during_clear_and_wait_for_empty()
     {
         var store = new InMemoryPassageRecordStore();
@@ -210,7 +236,7 @@ public sealed class AlarmAcknowledgementTests
         CreateAndClearAlarm(original);
 
         var passage = Assert.Single(store.Records);
-        Assert.NotNull(passage.AlarmRecoveredAt);
+        Assert.Null(passage.AlarmRecoveredAt);
 
         var restored = CreateCoordinator(store);
         restored.RestorePendingClear(store.GetPendingClear());
@@ -228,7 +254,8 @@ public sealed class AlarmAcknowledgementTests
         var updated = store.GetDetails(passage.PassageId);
         Assert.NotNull(updated);
         Assert.Equal(Start.AddMinutes(1), updated.AlarmAcknowledgedAt);
-        Assert.Equal(passage.AlarmRecoveredAt, updated.AlarmRecoveredAt);
+        Assert.Equal(Start.AddSeconds(30.4), updated.AlarmRecoveredAt);
+        Assert.Equal(AlarmStatus.Recovered, updated.AlarmStatus);
     }
 
     [Fact]

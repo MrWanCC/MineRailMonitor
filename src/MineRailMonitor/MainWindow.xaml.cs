@@ -700,7 +700,9 @@ public partial class MainWindow : Window
                 stations,
                 runtimeSettings,
                 _passageRecordStore,
-                externalAlarmStatusCoordinators: externalAlarmStatusCoordinators);
+                externalAlarmStatusCoordinators: externalAlarmStatusCoordinators,
+                vehicleConfigurations: project.Vehicles,
+                passageEventLogger: ((App)Application.Current).PassageEventLogger);
         }
         else if (project.UsesLegacySharedListener || project.YardCommunications.Count == 0)
         {
@@ -711,7 +713,9 @@ public partial class MainWindow : Window
                 _passageRecordStore,
                 listenAddress,
                 listenPort,
-                externalAlarmStatusCoordinators: externalAlarmStatusCoordinators);
+                externalAlarmStatusCoordinators: externalAlarmStatusCoordinators,
+                vehicleConfigurations: project.Vehicles,
+                passageEventLogger: ((App)Application.Current).PassageEventLogger);
         }
         else
         {
@@ -720,7 +724,9 @@ public partial class MainWindow : Window
                 stations,
                 runtimeSettings,
                 _passageRecordStore,
-                externalAlarmStatusCoordinators: externalAlarmStatusCoordinators);
+                externalAlarmStatusCoordinators: externalAlarmStatusCoordinators,
+                vehicleConfigurations: project.Vehicles,
+                passageEventLogger: ((App)Application.Current).PassageEventLogger);
         }
 
         manager.DatagramReceived += OnYardDatagramReceived;

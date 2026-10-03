@@ -1423,7 +1423,6 @@ public partial class MainWindow : Window
     {
         if (command == RfidPollCommand.Clear)
         {
-            _acceptanceRuntimeStateWriter?.Write("clear-command-sent");
         }
     }
 

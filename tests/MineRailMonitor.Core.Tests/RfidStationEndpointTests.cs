@@ -207,6 +207,79 @@ public sealed class RfidStationEndpointTests
     }
 
     [Fact]
+    public void Runtime_drops_endpointless_frame_when_protocol_address_matches_multiple_stations()
+    {
+        var stations = new[]
+        {
+            CreateStation("RFID-01", "一号站", 0x41, 62301),
+            CreateStation("RFID-02", "二号站", 0x41, 62302)
+        };
+        var coordinator = new RfidRuntimeCoordinator(
+            stations,
+            new RfidSettings { ExpectedVehicleCount = 11, InterVehicleTimeoutSeconds = 30 },
+            new InMemoryPassageRecordStore());
+        var frame = new RfidStationFrame
+        {
+            StationAddress = 0x41,
+            ReceivedAt = DateTimeOffset.UtcNow,
+            RawRfidSlots = new ushort[] { 0x0001 },
+            ValidRfids = new ushort[] { 0x0001 },
+            ActualNonZeroSlotCount = 1,
+            ReportedCardCount = 1
+        };
+
+        var result = coordinator.ProcessFrame(frame);
+
+        Assert.Null(result);
+        Assert.All(coordinator.EndpointStates.Values, state => Assert.Equal(0, state.DetectedVehicleCount));
+    }
+
+    [Fact]
+    public void Byte_only_command_apis_ignore_ambiguous_protocol_address()
+    {
+        var stations = new[]
+        {
+            CreateStation("RFID-01", "一号站", 0x41, 62301),
+            CreateStation("RFID-02", "二号站", 0x41, 62302)
+        };
+        var coordinator = new RfidRuntimeCoordinator(
+            stations,
+            new RfidSettings { ExpectedVehicleCount = 1, InterVehicleTimeoutSeconds = 30 },
+            new InMemoryPassageRecordStore());
+        var now = DateTimeOffset.UtcNow;
+
+        coordinator.ProcessFrame(CreateFrame(stations[0], now, 0x0001));
+        coordinator.ProcessFrame(CreateFrame(stations[1], now, 0x0002));
+
+        Assert.All(coordinator.EndpointStates.Values, state => Assert.True(state.PendingClear));
+        Assert.Equal(RfidPollCommand.Read, coordinator.GetCommand(0x41));
+
+        coordinator.MarkCommandSent(0x41, RfidPollCommand.Clear, now.AddMilliseconds(10));
+
+        Assert.All(coordinator.EndpointStates.Values, state =>
+        {
+            Assert.True(state.PendingClear);
+            Assert.Equal(PassageLifecycleState.Completed, state.LifecycleState);
+        });
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(15)]
+    public void Runtime_rejects_out_of_range_station_expected_vehicle_count(int count)
+    {
+        var station = CreateStation("RFID-01", "一号站", 0x01, 62301);
+        station.ExpectedVehicleCount = count;
+
+        var error = Assert.Throws<ArgumentException>(() => new RfidRuntimeCoordinator(
+            new[] { station },
+            new RfidSettings { ExpectedVehicleCount = 11, InterVehicleTimeoutSeconds = 30 },
+            new InMemoryPassageRecordStore()));
+
+        Assert.Contains("between 1 and 14", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void One_offline_station_does_not_mark_the_other_five_offline()
     {
         var stations = CreateSixStations();

@@ -195,6 +195,24 @@ public sealed class SettingsPageMarkupTests
     }
 
     [Fact]
+    public void Binding_summary_card_icons_are_centered_inside_their_containers()
+    {
+        var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
+
+        var boundIconStart = markup.IndexOf("x:Name=\"BindingBoundSummaryIcon\"", StringComparison.Ordinal);
+        var boundIconEnd = markup.IndexOf(" />", boundIconStart, StringComparison.Ordinal);
+        var pendingIconStart = markup.IndexOf("x:Name=\"BindingPendingSummaryIcon\"", StringComparison.Ordinal);
+        var pendingIconEnd = markup.IndexOf(" />", pendingIconStart, StringComparison.Ordinal);
+
+        Assert.True(boundIconStart >= 0);
+        Assert.True(boundIconEnd > boundIconStart);
+        Assert.True(pendingIconStart >= 0);
+        Assert.True(pendingIconEnd > pendingIconStart);
+        Assert.Contains("Margin=\"0\"", markup.Substring(boundIconStart, boundIconEnd - boundIconStart), StringComparison.Ordinal);
+        Assert.Contains("Margin=\"0\"", markup.Substring(pendingIconStart, pendingIconEnd - pendingIconStart), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Settings_communication_configuration_is_collapsed_until_requested()
     {
         var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
@@ -259,8 +277,8 @@ public sealed class SettingsPageMarkupTests
 
         Assert.Contains("<ColumnDefinition Width=\"52\" />", markup, StringComparison.Ordinal);
         Assert.Contains("<ColumnDefinition Width=\"48\" />", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"&#xE713;\" Style=\"{StaticResource SegoeFluentIconStyle}\" Foreground=\"{StaticResource PrimaryBlueBrush}\" FontSize=\"30\" Width=\"34\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"&#xE701;\" Style=\"{StaticResource SegoeFluentIconStyle}\" Foreground=\"{StaticResource PrimaryBlueBrush}\" FontSize=\"35\" Width=\"40\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Data=\"{StaticResource SettingsIconGeometry}\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Data=\"{StaticResource CommunicationIconGeometry}\"", markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -417,9 +435,9 @@ public sealed class SettingsPageMarkupTests
         Assert.Contains("x:Name=\"BindingPendingSummaryCard\"", markup, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"BindingPendingSummaryIcon\"", markup, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"BindingBoundSummaryIcon\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"&#xE701;\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"&#xE7BA;\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"&#xE70F;\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Data=\"{StaticResource CommunicationIconGeometry}\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Data=\"{StaticResource AlarmIconGeometry}\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Data=\"{StaticResource LinkIconGeometry}\"", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("Text=\"正常绑定\"", markup, StringComparison.Ordinal);
         Assert.Contains("BindingDiagnosticWarningPanel.BorderBrush", code, StringComparison.Ordinal);
         Assert.Contains("BindingDiagnosticWarningPanel.Background", code, StringComparison.Ordinal);
@@ -429,8 +447,8 @@ public sealed class SettingsPageMarkupTests
         Assert.Contains("!row.HasBinding || row.HasDuplicateBinding || row.HasYardBindingConflict);", code, StringComparison.Ordinal);
         Assert.Contains("BindingPendingDetailsText.Text", code, StringComparison.Ordinal);
         Assert.Contains("BindingPendingSummaryCard.Background", code, StringComparison.Ordinal);
-        Assert.Contains("BindingPendingSummaryIcon.Text = \"\\uE7BA\";", code, StringComparison.Ordinal);
-        Assert.DoesNotContain("BindingPendingSummaryIcon.Text = \"\\uE7BA;\";", code, StringComparison.Ordinal);
+        Assert.Contains("BindingPendingSummaryIcon.Stroke = statusBrush;", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("BindingPendingSummaryIcon.Text", code, StringComparison.Ordinal);
         Assert.Contains("var statusBrush = warningBrush;", code, StringComparison.Ordinal);
         Assert.Contains("BindingDiagnosticWarningPanel.Visibility = hasPending ? Visibility.Visible : Visibility.Collapsed", code, StringComparison.Ordinal);
         Assert.Contains("当前配置无待处理项", code, StringComparison.Ordinal);

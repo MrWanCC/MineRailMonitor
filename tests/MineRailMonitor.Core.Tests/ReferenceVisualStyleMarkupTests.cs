@@ -3,16 +3,24 @@ namespace MineRailMonitor.Core.Tests;
 public sealed class ReferenceVisualStyleMarkupTests
 {
     [Fact]
-    public void Navigation_and_dashboard_headers_use_the_windows_icon_font()
+    public void Application_icons_are_project_owned_vector_resources()
     {
+        var icons = File.ReadAllText(Locate("src", "MineRailMonitor", "Styles", "Icons.xaml"));
         var navigation = File.ReadAllText(Locate("src", "MineRailMonitor", "Styles", "Navigation.xaml"));
         var mainWindow = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml"));
         var monitor = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml"));
+        var settings = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
 
-        Assert.Contains("SegoeFluentIconStyle", navigation);
-        Assert.Contains("Property=\"FontFamily\" Value=\"Segoe Fluent Icons\"", navigation);
-        Assert.Contains("Style=\"{StaticResource SegoeFluentIconStyle}\"", mainWindow);
-        Assert.Contains("Style=\"{StaticResource SegoeFluentIconStyle}\"", monitor);
+        Assert.Contains("<Style x:Key=\"ProjectIconPathStyle\" TargetType=\"Path\">", navigation);
+        Assert.Contains("<Geometry x:Key=\"MonitorIconGeometry\">", icons);
+        Assert.Contains("<Geometry x:Key=\"SettingsIconGeometry\">", icons);
+        Assert.Contains("Data=\"{StaticResource MonitorIconGeometry}\"", mainWindow);
+        Assert.Contains("Data=\"{StaticResource SettingsIconGeometry}\"", settings);
+
+        Assert.DoesNotContain("Segoe Fluent Icons", navigation);
+        Assert.DoesNotContain("Segoe Fluent Icons", mainWindow);
+        Assert.DoesNotContain("Segoe Fluent Icons", monitor);
+        Assert.DoesNotContain("Segoe Fluent Icons", settings);
     }
 
     [Fact]

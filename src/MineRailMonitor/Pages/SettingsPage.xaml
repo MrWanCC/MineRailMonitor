@@ -398,7 +398,8 @@
                                 <ColumnDefinition Width="52" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="&#xE713;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource PrimaryBlueBrush}" FontSize="30" Width="34" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <Path Data="{StaticResource SettingsIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                  Width="34" Height="30" Stroke="{StaticResource PrimaryBlueBrush}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,8,0" />
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <TextBlock Text="RFID识别参数" Style="{StaticResource SettingsSectionTitleStyle}" FontSize="16" />
                                 <TextBlock Text="轮询、标准节数、车辆超时。" Style="{StaticResource SettingsHelperStyle}" Margin="0,1,0,0" />
@@ -477,7 +478,8 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="&#xE73E;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource SuccessBrush}" FontSize="18" Margin="0,0,8,0" />
+                                            <Path Data="{StaticResource CheckIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                                  Width="18" Height="18" Stroke="{StaticResource SuccessBrush}" Margin="0,0,8,0" />
                                             <StackPanel Grid.Column="1">
                                                 <TextBlock Text="当前配置可用" Foreground="{StaticResource SuccessBrush}" FontSize="12" FontWeight="SemiBold" />
                                                 <TextBlock Text="保存后参数立即生效。" Style="{StaticResource SettingsHelperStyle}" Margin="0,2,0,0" />
@@ -514,7 +516,8 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="&#xE701;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource PrimaryBlueBrush}" FontSize="35" Width="40" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <Path Data="{StaticResource CommunicationIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                  Width="40" Height="35" Stroke="{StaticResource PrimaryBlueBrush}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,8,0" />
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <TextBlock Text="RFID基站配置" Style="{StaticResource SettingsSectionTitleStyle}" />
                                 <TextBlock Text="网络、归属、绑定。" Style="{StaticResource SettingsHelperStyle}" Margin="0,1,0,0" />
@@ -601,7 +604,8 @@
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
                                         <Border Width="38" Height="38" CornerRadius="19" Background="#0B3555" VerticalAlignment="Center" Margin="0,0,10,0">
-                                            <TextBlock x:Name="BindingBoundSummaryIcon" Text="&#xE70F;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource PrimaryBlueBrush}" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Path x:Name="BindingBoundSummaryIcon" Data="{StaticResource LinkIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                                  Width="22" Height="22" Margin="0" Stroke="{StaticResource PrimaryBlueBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                             <TextBlock Text="地图绑定" Style="{StaticResource SettingsHelperStyle}" />
@@ -627,7 +631,8 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <Border x:Name="BindingPendingSummaryIconContainer" Width="38" Height="38" CornerRadius="19" Background="#0B3555" VerticalAlignment="Center" Margin="0,0,10,0">
-                                            <TextBlock x:Name="BindingPendingSummaryIcon" Text="&#xE7BA;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource WarningBrush}" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Path x:Name="BindingPendingSummaryIcon" Data="{StaticResource AlarmIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                                  Width="21" Height="21" Margin="0" Stroke="{StaticResource WarningBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                             <TextBlock Text="待处理项" Style="{StaticResource SettingsHelperStyle}" />

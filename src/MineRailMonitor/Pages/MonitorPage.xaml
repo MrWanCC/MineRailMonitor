@@ -311,7 +311,8 @@
                         <Border Style="{StaticResource RightCardHeaderStyle}" Padding="12,0">
                             <DockPanel LastChildFill="False">
                                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-                                    <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Margin="0,0,9,0" Foreground="#39CEFF" FontSize="23" />
+                                    <Path Data="{StaticResource TrainIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Width="23" Height="23" Margin="0,0,9,0" Stroke="#39CEFF" />
                                     <TextBlock Text="RFID运行总览" Style="{StaticResource SectionTitleStyle}" FontSize="18" VerticalAlignment="Center" />
                                 </StackPanel>
                             </DockPanel>
@@ -326,7 +327,8 @@
                             <Border Style="{StaticResource OverviewMetricCardStyle}">
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="30" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <TextBlock Text="&#xE8B5;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource AccentBrush}" FontSize="21" VerticalAlignment="Center" />
+                                    <Path Data="{StaticResource MonitorIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Width="21" Height="21" Stroke="{StaticResource AccentBrush}" />
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock x:Name="OverviewTotalCountText" Text="0" Style="{StaticResource OverviewMetricValueStyle}" HorizontalAlignment="Left" />
                                         <TextBlock Text="基站总数" Style="{StaticResource OverviewMetricLabelStyle}" HorizontalAlignment="Left" />
@@ -336,7 +338,8 @@
                             <Border Style="{StaticResource OverviewMetricCardStyle}">
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="30" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <TextBlock Text="&#xE701;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource SuccessBrush}" FontSize="21" VerticalAlignment="Center" />
+                                    <Path Data="{StaticResource CommunicationIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Width="21" Height="21" Stroke="{StaticResource SuccessBrush}" />
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock x:Name="OverviewOnlineCountText" Text="0" Style="{StaticResource OverviewMetricValueStyle}" Foreground="{StaticResource SuccessBrush}" HorizontalAlignment="Left" />
                                         <TextBlock Text="在线" Style="{StaticResource OverviewMetricLabelStyle}" HorizontalAlignment="Left" />
@@ -346,7 +349,8 @@
                             <Border Style="{StaticResource OverviewMetricCardStyle}">
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="30" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <TextBlock Text="&#xE8C8;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource OfflineBrush}" FontSize="21" VerticalAlignment="Center" />
+                                    <Path Data="{StaticResource OfflineIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Width="21" Height="21" Stroke="{StaticResource OfflineBrush}" />
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock x:Name="OverviewOfflineCountText" Text="0" Style="{StaticResource OverviewMetricValueStyle}" Foreground="{StaticResource OfflineBrush}" HorizontalAlignment="Left" />
                                         <TextBlock Text="离线" Style="{StaticResource OverviewMetricLabelStyle}" HorizontalAlignment="Left" />
@@ -356,7 +360,8 @@
                             <Border Style="{StaticResource OverviewMetricCardStyle}">
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="30" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <TextBlock Text="&#xE7BA;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource AlarmBrush}" FontSize="21" VerticalAlignment="Center" />
+                                    <Path Data="{StaticResource AlarmIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Width="21" Height="21" Stroke="{StaticResource AlarmBrush}" />
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock x:Name="OverviewAlarmCountText" Text="0" Style="{StaticResource OverviewMetricValueStyle}" Foreground="{StaticResource AlarmBrush}" HorizontalAlignment="Left" />
                                         <TextBlock Text="报警" Style="{StaticResource OverviewMetricLabelStyle}" HorizontalAlignment="Left" />
@@ -409,12 +414,14 @@
                             </Grid.RowDefinitions>
                             <Border Grid.Row="0" Height="42" Style="{StaticResource RightCardHeaderStyle}" Padding="12,0">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Margin="0,0,8,0" Foreground="#39CEFF" FontSize="20" />
+                                    <Path Data="{StaticResource TrainIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Width="20" Height="20" Margin="0,0,8,0" Stroke="#39CEFF" />
                                     <TextBlock Text="RFID基站详情" Style="{StaticResource SectionTitleStyle}" FontSize="16" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Border>
                             <StackPanel x:Name="OverviewEmptyState" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="8,0">
-                                <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource AccentBrush}" FontSize="38" HorizontalAlignment="Center" />
+                                <Path Data="{StaticResource TrainIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                      Width="38" Height="38" Stroke="{StaticResource AccentBrush}" HorizontalAlignment="Center" />
                                 <TextBlock Text="未选择基站" Foreground="{StaticResource TextPrimaryBrush}" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,8,0,0" />
                                 <TextBlock Text="点击地图中的RFID基站" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,7,0,0" HorizontalAlignment="Center" />
                                 <TextBlock Text="或下方任务卡查看详情" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" HorizontalAlignment="Center" />
@@ -439,7 +446,8 @@
                         <Border Grid.Row="0" Height="42" Style="{StaticResource RightCardHeaderStyle}" Padding="12,0">
                             <DockPanel LastChildFill="False">
                                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-                                    <TextBlock Text="&#xE8A5;" Style="{StaticResource SegoeFluentIconStyle}" Margin="0,0,8,0" Foreground="#39CEFF" FontSize="20" />
+                                    <Path Data="{StaticResource TrainIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Width="20" Height="20" Margin="0,0,8,0" Stroke="#39CEFF" />
                                     <TextBlock x:Name="RfidDetailHeaderText" Text="RFID基站详情" Style="{StaticResource SectionTitleStyle}" FontSize="16" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <Border x:Name="RfidDetailStationBadge"
@@ -542,11 +550,11 @@
                                     VerticalAlignment="Center"
                                     Margin="18"
                                     Visibility="Collapsed">
-                            <TextBlock Text="&#xE70F;"
-                                       Style="{StaticResource SegoeFluentIconStyle}"
-                                       Foreground="{StaticResource AccentBrush}"
-                                       FontSize="34"
-                                       HorizontalAlignment="Center" />
+                            <Path Data="{StaticResource EditIconGeometry}"
+                                  Style="{StaticResource ProjectIconPathStyle}"
+                                  Width="34" Height="34"
+                                  Stroke="{StaticResource AccentBrush}"
+                                  HorizontalAlignment="Center" />
                             <TextBlock Text="地图标注编辑"
                                        Foreground="{StaticResource TextPrimaryBrush}"
                                        FontSize="16"
@@ -635,7 +643,8 @@
                         <Grid.RowDefinitions><RowDefinition Height="36" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                         <Border Style="{StaticResource RightCardHeaderStyle}">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBlock Text="&#xE713;" Style="{StaticResource SegoeFluentIconStyle}" Width="Auto" Margin="0,0,10,0" Foreground="#39CEFF" />
+                                <Path Data="{StaticResource SettingsIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                      Width="20" Height="20" Margin="0,0,10,0" Stroke="#39CEFF" />
                                 <TextBlock Text="系统状态" Style="{StaticResource SectionTitleStyle}" FontSize="17" VerticalAlignment="Center" />
                             </StackPanel>
                         </Border>
@@ -693,7 +702,8 @@
                         <Border Style="{StaticResource RightCardHeaderStyle}">
                             <DockPanel LastChildFill="False">
                                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-                                    <TextBlock Text="&#xE7BA;" Style="{StaticResource SegoeFluentIconStyle}" Margin="0,0,9,0" Foreground="{StaticResource AlarmBrush}" FontSize="20" />
+                                    <Path Data="{StaticResource AlarmIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                          Width="20" Height="20" Margin="0,0,9,0" Stroke="{StaticResource AlarmBrush}" />
                                     <TextBlock Text="报警信息" Style="{StaticResource SectionTitleStyle}" FontSize="17" VerticalAlignment="Center" />
                                     <Border Background="{StaticResource AlarmBrush}" CornerRadius="8" Width="17" Height="17" Margin="8,1,0,0">
                                         <TextBlock x:Name="RfidAlarmCountText" Text="0" Foreground="{StaticResource TextPrimaryBrush}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />

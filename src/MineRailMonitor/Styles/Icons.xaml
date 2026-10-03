@@ -6,6 +6,10 @@
     <Geometry x:Key="AlarmIconGeometry">M11,3 L20,19 H2 Z M11,8 V13 M11,16 V16.1</Geometry>
     <Geometry x:Key="CommunicationIconGeometry">M11,7 A3,3 0 1 0 11,13 A3,3 0 1 0 11,7 M6,5 A8,8 0 0 0 6,15 M16,5 A8,8 0 0 1 16,15 M3,2 A12,12 0 0 0 3,18 M19,2 A12,12 0 0 1 19,18</Geometry>
     <Geometry x:Key="SettingsIconGeometry">M11,3 A8,8 0 1 0 11,19 A8,8 0 1 0 11,3 M11,8 A3,3 0 1 0 11,14 A3,3 0 1 0 11,8</Geometry>
+    <Geometry x:Key="CheckIconGeometry">M3,11 L8,16 L19,5</Geometry>
+    <Geometry x:Key="LinkIconGeometry">M3,9 H9 M15,9 H21 M7,12 H17</Geometry>
+    <Geometry x:Key="EditIconGeometry">M4,17 L5,13 L15,3 L19,7 L9,17 Z M13,5 L17,9</Geometry>
+    <Geometry x:Key="OfflineIconGeometry">M4,4 L18,18 M18,4 L4,18</Geometry>
     <Geometry x:Key="MinimizeIconGeometry">M3,12 H19</Geometry>
     <Geometry x:Key="MaximizeIconGeometry">M4,4 H18 V18 H4 Z</Geometry>
     <Geometry x:Key="RestoreIconGeometry">M6,3 H18 V15 H6 Z M3,6 H15 V18 H3 Z</Geometry>

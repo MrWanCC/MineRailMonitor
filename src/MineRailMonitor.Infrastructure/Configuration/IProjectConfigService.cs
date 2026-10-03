@@ -32,6 +32,11 @@ public interface IProjectConfigService
         string projectDirectory,
         IEnumerable<RfidStationConfig> stations,
         CancellationToken cancellationToken = default);
+
+    Task<ProjectConfigSaveResult> SaveVehiclesAsync(
+        string projectDirectory,
+        IEnumerable<VehicleConfig> vehicles,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class ProjectConfigLoadResult

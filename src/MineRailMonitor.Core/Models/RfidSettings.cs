@@ -4,7 +4,7 @@ public sealed class RfidSettings
 {
     public int PollIntervalMs { get; set; } = 200;
 
-    public int ExpectedVehicleCount { get; set; } = 11;
+    public int? ExpectedVehicleCount { get; set; }
 
     public int InterVehicleTimeoutSeconds { get; set; } = 30;
 
@@ -17,9 +17,9 @@ public sealed class RfidSettings
         {
             errors.Add("RFID轮询间隔必须大于0。");
         }
-        if (ExpectedVehicleCount < 1 || ExpectedVehicleCount > 14)
+        if (ExpectedVehicleCount is < 1 or > 14)
         {
-            errors.Add("标准列车节数必须在1到14之间。");
+            errors.Add("全局回退节数必须在1到14之间；留空表示不启用全局回退。");
         }
         if (InterVehicleTimeoutSeconds <= 0)
         {

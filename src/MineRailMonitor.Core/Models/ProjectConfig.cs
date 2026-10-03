@@ -18,6 +18,8 @@ public sealed class ProjectConfig
 
     public IReadOnlyList<YardAlarmForwardConfig> YardAlarmForwards { get; set; } = new List<YardAlarmForwardConfig>();
 
+    public IReadOnlyList<VehicleConfig> Vehicles { get; set; } = new List<VehicleConfig>();
+
     /// <summary>
     /// True when the project manifest predates per-yard communication interfaces.
     /// </summary>

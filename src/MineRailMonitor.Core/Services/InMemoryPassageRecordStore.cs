@@ -216,5 +216,8 @@ public sealed class InMemoryPassageRecordStore : IPassageRecordStore
             clearedAt,
             record.CreatedAt,
             alarmAcknowledgedAt,
-            alarmRecoveredAt);
+            alarmRecoveredAt,
+            record.VehicleName,
+            record.VehicleHeadRfid,
+            record.VehicleNo);
 }

@@ -4,6 +4,89 @@
              xmlns:local="clr-namespace:MineRailMonitor.Pages"
              Background="{StaticResource AppBackgroundBrush}">
     <UserControl.Resources>
+        <Style x:Key="SettingsTabItemStyle" TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="MinWidth" Value="112" />
+            <Setter Property="Padding" Value="18,0" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="0,0,0,2"
+                                CornerRadius="4,4,0,0"
+                                Padding="{TemplateBinding Padding}">
+                            <Grid>
+                                <ContentPresenter ContentSource="Header"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}" />
+                                <Border x:Name="SelectedIndicator"
+                                        Height="2"
+                                        Background="{StaticResource PrimaryBlueBrush}"
+                                        CornerRadius="1"
+                                        VerticalAlignment="Bottom"
+                                        Opacity="0" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#0B314C" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}" />
+                                <Setter TargetName="SelectedIndicator" Property="Opacity" Value="1" />
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#09263D" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsTabControlStyle" TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource SettingsTabItemStyle}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid KeyboardNavigation.TabNavigation="Local"
+                              KeyboardNavigation.DirectionalNavigation="Contained">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="42" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0"
+                                    Background="#041B2E"
+                                    BorderBrush="{StaticResource GridLineBrush}"
+                                    BorderThickness="0,0,0,1"
+                                    CornerRadius="4,4,0,0"
+                                    Padding="4,2">
+                                <TabPanel IsItemsHost="True" />
+                            </Border>
+                            <Border Grid.Row="1"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter ContentSource="SelectedContent" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="SettingsPanelStyle" TargetType="Border" BasedOn="{StaticResource PanelBorderStyle}">
             <Setter Property="Background" Value="#041B30" />
             <Setter Property="BorderBrush" Value="#0B7EBA" />
@@ -279,22 +362,30 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="&#xE713;" Style="{StaticResource SegoeFluentIconStyle}" Foreground="{StaticResource PrimaryBlueBrush}" FontSize="28" VerticalAlignment="Center" Margin="0,0,12,0" />
+            <Path Data="{StaticResource SettingsIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                  Width="28" Height="28" Stroke="{StaticResource PrimaryBlueBrush}" VerticalAlignment="Center" Margin="0,0,12,0" />
             <TextBlock Grid.Column="1" Text="系统设置" Style="{StaticResource SettingsPageTitleStyle}" VerticalAlignment="Center" />
             <TextBlock Grid.Column="2" Text="›" Foreground="{StaticResource MutedTextBrush}" FontSize="24" VerticalAlignment="Center" Margin="18,0,18,0" />
             <TextBlock Grid.Column="3" Text="系统参数配置" Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" VerticalAlignment="Center" />
-            <Button x:Name="AboutButton" Grid.Column="4" Content="ⓘ  关于" Style="{StaticResource SettingsToolbarButtonStyle}"
+            <TextBlock x:Name="AdminModeStatusText" Grid.Column="4" Text="管理员模式未开启" Foreground="{StaticResource TextSecondaryBrush}"
+                       FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" />
+            <Button x:Name="AdminModeButton" Grid.Column="5" Content="进入管理员模式" Style="{StaticResource SettingsActionButtonStyle}"
+                    Width="148" Margin="0,0,10,0" Click="OnAdminModeButtonClick" />
+            <Button x:Name="AboutButton" Grid.Column="6" Content="ⓘ  关于" Style="{StaticResource SettingsToolbarButtonStyle}"
                     Width="82" Margin="16,0,0,0" Click="OnAboutClick" />
         </Grid>
 
-        <Grid Grid.Row="1">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
-
-                <Border Grid.Row="0" Style="{StaticResource SettingsPanelStyle}" Padding="12" Margin="0,0,0,12">
+        <TabControl Grid.Row="1" x:Name="SettingsTabs" Style="{StaticResource SettingsTabControlStyle}">
+            <TabItem Header="RFID配置">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" Style="{StaticResource SettingsPanelStyle}" Padding="12" Margin="0,0,0,8">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -343,8 +434,8 @@
 
                             <Border Grid.Column="1" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,0,1,0" Padding="0,0,22,0" Margin="0,0,22,0">
                                 <StackPanel>
-                                    <TextBlock Text="标准列车节数（含车头）" Style="{StaticResource SettingsFieldLabelStyle}"
-                                               ToolTip="提示：包含车头，标准节数计算。" />
+                                    <TextBlock Text="全局回退节数（含车头，可选）" Style="{StaticResource SettingsFieldLabelStyle}"
+                                               ToolTip="仅用于未匹配车辆且基站未配置回退节数时；留空表示不做完整性判断。" />
                                     <Grid Margin="0,6,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="280" />
@@ -355,7 +446,7 @@
                                                  IsEnabled="{Binding RfidSettingsEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}" />
                                         <TextBlock Grid.Column="1" Text="节" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" Margin="10,0,0,0" />
                                     </Grid>
-                                    <TextBlock Text="包含车头，标准节数计算。" Style="{StaticResource SettingsHelperStyle}" Margin="0,4,0,0" />
+                                    <TextBlock Text="车辆配置优先，其次基站回退、全局回退；留空且基站未配置时，未知车辆不做完整性报警。" Style="{StaticResource SettingsHelperStyle}" Margin="0,4,0,0" />
                                 </StackPanel>
                             </Border>
 
@@ -400,8 +491,7 @@
                             </Border>
                         </Grid>
                     </Grid>
-                </Border>
-
+                    </Border>
                 <Border x:Name="StationEditorPanel" Grid.Row="1" Style="{StaticResource SettingsPanelStyle}" Padding="12" Margin="0,0,0,10" VerticalAlignment="Stretch">
                     <Grid>
                         <Grid.RowDefinitions>
@@ -631,6 +721,7 @@
                                                             <StackPanel>
                                                                 <TextBlock Text="{Binding DisplayStationId}" Style="{StaticResource SettingsReadOnlyFieldStyle}" FontWeight="SemiBold" />
                                                                 <TextBlock Text="{Binding Name}" Style="{StaticResource SettingsReadOnlyFieldStyle}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,1,0,0" />
+                                                                <TextBlock Text="{Binding ExpectedVehicleCountDisplay}" Style="{StaticResource SettingsReadOnlyFieldStyle}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,1,0,0" />
                                                             </StackPanel>
                                                             <StackPanel Style="{StaticResource SettingsEditableFieldStyle}">
                                                                 <TextBox Style="{StaticResource SettingsTableTextBoxStyle}"
@@ -640,6 +731,10 @@
                                                                 <TextBox Style="{StaticResource SettingsTableTextBoxStyle}" Margin="0,1,0,0"
                                                                          IsEnabled="{Binding StationEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                                                          Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" ToolTip="基站名称" />
+                                                                <TextBox Style="{StaticResource SettingsTableTextBoxStyle}" Margin="0,1,0,0"
+                                                                         IsEnabled="{Binding StationEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
+                                                                         Text="{Binding ExpectedVehicleCount, UpdateSourceTrigger=PropertyChanged}"
+                                                                         ToolTip="本站标准列车节数，范围1到14；留空使用全局标准值" />
                                                             </StackPanel>
                                                         </StackPanel>
                                                     </Grid>
@@ -832,14 +927,236 @@
                                     <TextBlock x:Name="ValidationText" Foreground="#FF8795" TextWrapping="Wrap" />
                                     <TextBlock Text="修改后请保存；仅启用基站参与采集。" Style="{StaticResource SettingsHelperStyle}" Margin="0,2,0,0" />
                                 </StackPanel>
-                                <Button Grid.Column="1" Content="进入管理员模式" Style="{StaticResource SettingsActionButtonStyle}" Width="160" Margin="12,0,0,0" Click="OnEnterAdminModeClick" />
-                                <Button Grid.Column="2" Content="保存设置" Style="{StaticResource SettingsPrimaryButtonStyle}" Width="142" Margin="12,0,0,0" Click="OnSaveClick"
+                                <Button Grid.Column="1" Content="保存设置" Style="{StaticResource SettingsPrimaryButtonStyle}" Width="142" Margin="12,0,0,0" Click="OnSaveClick"
                                         IsEnabled="{Binding RfidSettingsEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                         ToolTip="进入管理员模式后可保存设置" />
                             </Grid>
                         </Border>
                     </Grid>
                 </Border>
-        </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="车辆配置">
+                <Border Style="{StaticResource SettingsPanelStyle}" Padding="12" Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="48" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Path Data="{StaticResource CommunicationIconGeometry}" Style="{StaticResource ProjectIconPathStyle}"
+                                  Width="36" Height="32" Stroke="{StaticResource PrimaryBlueBrush}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="车辆编组配置" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                <TextBlock Text="按协议槽位维护车头和车节 RFID 标签；总节数包含车头并自动计算。"
+                                           Style="{StaticResource SettingsHelperStyle}" Margin="0,1,0,0" />
+                            </StackPanel>
+                            <Button Grid.Column="2" Content="＋  新增车辆" Style="{StaticResource SettingsPrimaryButtonStyle}" Width="132"
+                                    IsEnabled="{Binding VehicleEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
+                                    Click="OnAddVehicleClick" />
+                        </Grid>
+
+                        <Grid Grid.Row="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.15*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="1.4*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" CornerRadius="4" Padding="8">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="车辆列表" Style="{StaticResource SettingsFieldLabelStyle}" Margin="4,2,0,8" />
+                                    <DataGrid x:Name="VehicleListDataGrid" Grid.Row="1" Style="{StaticResource IndustrialDataGridStyle}"
+                                              AutoGenerateColumns="False" HeadersVisibility="Column" IsReadOnly="True"
+                                              SelectionMode="Single" SelectionChanged="OnVehicleSelectionChanged">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="车辆编号" Binding="{Binding VehicleNo}" Width="0.95*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                            <DataGridTextColumn Header="车辆名称" Binding="{Binding VehicleName}" Width="1.1*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                            <DataGridTextColumn Header="车头标签" Binding="{Binding HeadRfidText}" Width="0.85*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                            <DataGridTextColumn Header="总节数" Binding="{Binding TotalSectionCountText}" Width="0.75*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                            <DataGridTextColumn Header="状态" Binding="{Binding StatusText}" Width="0.7*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <Button Grid.Row="2" Content="删除车辆" Style="{StaticResource SettingsDangerButtonStyle}" Width="110" HorizontalAlignment="Right" Margin="0,8,0,0"
+                                            IsEnabled="{Binding VehicleEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
+                                            Click="OnDeleteVehicleClick" />
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Column="2" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
+                                <Grid>
+                                    <Grid x:Name="VehicleEditorPanel">
+                                        <Grid.Style>
+                                            <Style TargetType="Grid">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding VehicleEditorHasSelection, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}" Value="False">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Grid.Style>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+
+                                        <Grid Margin="0,0,0,10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="车辆信息" Style="{StaticResource SettingsFieldLabelStyle}" VerticalAlignment="Center" />
+                                            <Border Grid.Column="1" Background="#0A2B46" BorderBrush="#1B5B7E" BorderThickness="1" CornerRadius="12" Padding="12,4">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="总节数" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding SelectedItem.TotalSectionCountText, ElementName=VehicleListDataGrid}"
+                                                               Foreground="{StaticResource PrimaryBlueBrush}" FontSize="13" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+
+                                        <Grid Grid.Row="1" Margin="0,0,0,14">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="0.85*" />
+                                                <ColumnDefinition Width="1.25*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="车辆编号 *" Style="{StaticResource SettingsHelperStyle}" Margin="0,0,0,4" />
+                                                <TextBox x:Name="VehicleNoTextBox" Style="{StaticResource SettingsTextBoxStyle}" Height="36"
+                                                         Text="{Binding SelectedItem.VehicleNo, ElementName=VehicleListDataGrid, UpdateSourceTrigger=PropertyChanged}"
+                                                         IsEnabled="{Binding CanEditSelectedVehicle, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                                <TextBlock Text="车辆名称 / 备注" Style="{StaticResource SettingsHelperStyle}" Margin="0,0,0,4" />
+                                                <TextBox x:Name="VehicleNameTextBox" Style="{StaticResource SettingsTextBoxStyle}" Height="36"
+                                                         Text="{Binding SelectedItem.VehicleName, ElementName=VehicleListDataGrid, UpdateSourceTrigger=PropertyChanged}"
+                                                         IsEnabled="{Binding CanEditSelectedVehicle, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}" />
+                                            </StackPanel>
+                                            <CheckBox x:Name="VehicleEnabledCheckBox" Grid.Column="2" Content="启用" VerticalAlignment="Bottom" Margin="14,0,0,8"
+                                                      IsChecked="{Binding SelectedItem.Enabled, ElementName=VehicleListDataGrid, UpdateSourceTrigger=PropertyChanged}"
+                                                      IsEnabled="{Binding CanEditSelectedVehicle, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}" />
+                                        </Grid>
+
+                                        <Grid Grid.Row="2" Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="标签编组" Style="{StaticResource SettingsFieldLabelStyle}" />
+                                                <TextBlock Text="位置0为车头；其余位置为车节，位置自动排列。"
+                                                           Style="{StaticResource SettingsHelperStyle}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <Button Grid.Column="1" Content="＋ 添加车节" Style="{StaticResource SettingsTableBindButtonStyle}" Width="112"
+                                                    IsEnabled="{Binding CanEditSelectedVehicle, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
+                                                    Click="OnAddVehicleTagClick" />
+                                        </Grid>
+
+                                        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                            <ItemsControl x:Name="VehicleTagsItemsControl">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Background="#071F34" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1"
+                                                                CornerRadius="4" Padding="8" Margin="0,0,0,6">
+                                                            <Grid MinHeight="44">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="76" />
+                                                                    <ColumnDefinition Width="68" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="{Binding PositionText}" Foreground="{StaticResource TextPrimaryBrush}"
+                                                                           FontSize="12" VerticalAlignment="Center" />
+                                                                <TextBlock Grid.Column="1" Text="{Binding TypeText}" Foreground="{StaticResource TextSecondaryBrush}"
+                                                                           FontSize="12" VerticalAlignment="Center" />
+                                                                <TextBox Grid.Column="2" Style="{StaticResource SettingsTableTextBoxStyle}" Height="32" MaxLength="5"
+                                                                         Text="{Binding RfidText, UpdateSourceTrigger=PropertyChanged}"
+                                                                         IsEnabled="{Binding CanEditSelectedVehicle, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
+                                                                         ToolTip="输入十进制RFID值，范围1到65535" />
+                                                                <Button Grid.Column="3" Content="删除" Width="60" Height="30" Margin="8,0,0,0"
+                                                                        IsEnabled="{Binding CanEditSelectedVehicle, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
+                                                                        Click="OnDeleteVehicleTagClick">
+                                                                    <Button.Style>
+                                                                        <Style TargetType="Button" BasedOn="{StaticResource SettingsTableRemoveButtonStyle}">
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding Position}" Value="0">
+                                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </Button.Style>
+                                                                </Button>
+                                                            </Grid>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </Grid>
+
+                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360">
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding VehicleEditorHasSelection, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}" Value="False">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <TextBlock Text="尚未选择车辆" Foreground="{StaticResource TextPrimaryBrush}" FontSize="16" FontWeight="SemiBold" TextAlignment="Center" />
+                                        <TextBlock Text="从左侧选择车辆，或新增一辆矿车开始配置。" Foreground="{StaticResource TextSecondaryBrush}"
+                                                   TextWrapping="Wrap" TextAlignment="Center" Margin="0,6,0,14" />
+                                        <Button Content="＋ 新增车辆" Style="{StaticResource SettingsPrimaryButtonStyle}" Width="132" HorizontalAlignment="Center"
+                                                IsEnabled="{Binding VehicleEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
+                                                Click="OnAddVehicleClick" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+                        <Border Grid.Row="2" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,8,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock x:Name="VehicleValidationText" Foreground="#FF8795" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="VehicleAccessText" Text="请先在页头开启管理员模式，车辆信息为只读。"
+                                               Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="撤销未保存" Style="{StaticResource SettingsToolbarButtonStyle}" Width="112" Margin="0,0,8,0"
+                                        IsEnabled="{Binding VehicleEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
+                                        ToolTip="恢复上次保存的车辆配置，放弃本页所有未保存修改"
+                                        Click="OnDiscardVehicleChangesClick" />
+                                <Button Grid.Column="2" Content="保存车辆配置" Style="{StaticResource SettingsPrimaryButtonStyle}" Width="150"
+                                        IsEnabled="{Binding VehicleEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
+                                        Click="OnSaveVehiclesClick" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </TabItem>
+        </TabControl>
     </Grid>
 </UserControl>

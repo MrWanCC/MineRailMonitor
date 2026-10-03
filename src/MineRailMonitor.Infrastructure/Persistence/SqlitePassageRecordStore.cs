@@ -6,7 +6,7 @@ namespace MineRailMonitor.Infrastructure.Persistence;
 
 public sealed class SqlitePassageRecordStore : IPassageRecordStore, IDisposable
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 6;
     private const string ConnectionPragmas =
         "PRAGMA journal_mode=WAL;" +
         "PRAGMA synchronous=FULL;" +
@@ -47,14 +47,14 @@ public sealed class SqlitePassageRecordStore : IPassageRecordStore, IDisposable
         command.CommandText = @"
 INSERT OR IGNORE INTO passage_record
 (
-    passage_id, station_id, station_address, head_rfid,
+    passage_id, station_id, station_address, head_rfid, vehicle_name, vehicle_head_rfid, vehicle_no,
     expected_vehicle_count, detected_vehicle_count, result,
     started_at, completed_at, warning_message, alarm_message,
     clear_state, created_at, cleared_at, alarm_acknowledged_at, alarm_recovered_at
 )
 VALUES
 (
-    $passage_id, $station_id, $station_address, $head_rfid,
+    $passage_id, $station_id, $station_address, $head_rfid, $vehicle_name, $vehicle_head_rfid, $vehicle_no,
     $expected_vehicle_count, $detected_vehicle_count, $result,
     $started_at, $completed_at, $warning_message, $alarm_message,
     $clear_state, $created_at, $cleared_at, $alarm_acknowledged_at, $alarm_recovered_at
@@ -332,7 +332,10 @@ CREATE TABLE IF NOT EXISTS passage_record
     station_id TEXT NULL,
     station_address INTEGER NOT NULL,
     head_rfid INTEGER NULL,
-    expected_vehicle_count INTEGER NOT NULL,
+    vehicle_name TEXT NULL,
+    vehicle_head_rfid INTEGER NULL,
+    vehicle_no TEXT NULL,
+    expected_vehicle_count INTEGER NULL,
     detected_vehicle_count INTEGER NOT NULL,
     result INTEGER NOT NULL,
     started_at INTEGER NOT NULL,
@@ -364,7 +367,7 @@ CREATE INDEX IF NOT EXISTS ix_passage_record_head_completed ON passage_record(he
 CREATE INDEX IF NOT EXISTS ix_passage_record_result_completed ON passage_record(result, completed_at);
 CREATE INDEX IF NOT EXISTS ix_passage_rfid_passage_id ON passage_rfid(passage_id);
 CREATE INDEX IF NOT EXISTS ix_passage_rfid_value ON passage_rfid(rfid_value);
-PRAGMA user_version=3;";
+PRAGMA user_version=6;";
             command.ExecuteNonQuery();
             transaction.Commit();
         }
@@ -411,6 +414,116 @@ WHERE result = $alarm_result AND clear_state = $cleared_state;");
             command.Parameters.AddWithValue("$cleared_state", (int)PassageClearState.Cleared);
             command.ExecuteNonQuery();
             transaction.Commit();
+            version = 3;
+        }
+
+        if (version == 3)
+        {
+            using var transaction = connection.BeginTransaction();
+            var statements = new List<string>();
+            if (!HasColumn(connection, "passage_record", "vehicle_name"))
+            {
+                statements.Add("ALTER TABLE passage_record ADD COLUMN vehicle_name TEXT NULL;");
+            }
+
+            if (!HasColumn(connection, "passage_record", "vehicle_head_rfid"))
+            {
+                statements.Add("ALTER TABLE passage_record ADD COLUMN vehicle_head_rfid INTEGER NULL;");
+            }
+
+            statements.Add("PRAGMA user_version=4;");
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = string.Join(Environment.NewLine, statements);
+            command.ExecuteNonQuery();
+            transaction.Commit();
+            version = 4;
+        }
+
+        if (version == 4)
+        {
+            using var transaction = connection.BeginTransaction();
+            var statements = new List<string>();
+            if (!HasColumn(connection, "passage_record", "vehicle_no"))
+            {
+                statements.Add("ALTER TABLE passage_record ADD COLUMN vehicle_no TEXT NULL;");
+            }
+
+            statements.Add("PRAGMA user_version=5;");
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = string.Join(Environment.NewLine, statements);
+            command.ExecuteNonQuery();
+            transaction.Commit();
+            version = 5;
+        }
+
+        if (version == 5)
+        {
+            using (var foreignKeysCommand = connection.CreateCommand())
+            {
+                foreignKeysCommand.CommandText = "PRAGMA foreign_keys=OFF;";
+                foreignKeysCommand.ExecuteNonQuery();
+            }
+
+            using (var transaction = connection.BeginTransaction())
+            using (var command = connection.CreateCommand())
+            {
+                command.Transaction = transaction;
+                command.CommandText = @"
+CREATE TABLE passage_record_v6
+(
+    passage_id TEXT NOT NULL PRIMARY KEY,
+    station_id TEXT NULL,
+    station_address INTEGER NOT NULL,
+    head_rfid INTEGER NULL,
+    vehicle_name TEXT NULL,
+    vehicle_head_rfid INTEGER NULL,
+    vehicle_no TEXT NULL,
+    expected_vehicle_count INTEGER NULL,
+    detected_vehicle_count INTEGER NOT NULL,
+    result INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    completed_at INTEGER NOT NULL,
+    warning_message TEXT NULL,
+    alarm_message TEXT NULL,
+    clear_state INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    cleared_at INTEGER NULL,
+    alarm_acknowledged_at INTEGER NULL,
+    alarm_recovered_at INTEGER NULL
+);
+
+INSERT INTO passage_record_v6
+(
+    passage_id, station_id, station_address, head_rfid, vehicle_name, vehicle_head_rfid, vehicle_no,
+    expected_vehicle_count, detected_vehicle_count, result, started_at, completed_at,
+    warning_message, alarm_message, clear_state, created_at, cleared_at,
+    alarm_acknowledged_at, alarm_recovered_at
+)
+SELECT
+    passage_id, station_id, station_address, head_rfid, vehicle_name, vehicle_head_rfid, vehicle_no,
+    expected_vehicle_count, detected_vehicle_count, result, started_at, completed_at,
+    warning_message, alarm_message, clear_state, created_at, cleared_at,
+    alarm_acknowledged_at, alarm_recovered_at
+FROM passage_record;
+
+DROP TABLE passage_record;
+ALTER TABLE passage_record_v6 RENAME TO passage_record;
+
+CREATE INDEX IF NOT EXISTS ix_passage_record_completed_at ON passage_record(completed_at);
+CREATE INDEX IF NOT EXISTS ix_passage_record_station_completed ON passage_record(station_address, completed_at);
+CREATE INDEX IF NOT EXISTS ix_passage_record_station_id_completed ON passage_record(station_id, completed_at);
+CREATE INDEX IF NOT EXISTS ix_passage_record_head_completed ON passage_record(head_rfid, completed_at);
+CREATE INDEX IF NOT EXISTS ix_passage_record_result_completed ON passage_record(result, completed_at);
+PRAGMA user_version=6;";
+                command.ExecuteNonQuery();
+                transaction.Commit();
+            }
+
+            using var enableForeignKeysCommand = connection.CreateCommand();
+            enableForeignKeysCommand.CommandText = "PRAGMA foreign_keys=ON;";
+            enableForeignKeysCommand.ExecuteNonQuery();
         }
     }
 
@@ -427,7 +540,10 @@ WHERE result = $alarm_result AND clear_state = $cleared_state;");
         command.Parameters.AddWithValue("$station_id", NormalizeStationId(record.StationId));
         command.Parameters.AddWithValue("$station_address", record.StationAddress);
         command.Parameters.AddWithValue("$head_rfid", record.HeadRfid.HasValue ? record.HeadRfid.Value : DBNull.Value);
-        command.Parameters.AddWithValue("$expected_vehicle_count", record.ExpectedVehicleCount);
+        command.Parameters.AddWithValue("$vehicle_name", (object?)record.VehicleName ?? DBNull.Value);
+        command.Parameters.AddWithValue("$vehicle_head_rfid", record.VehicleHeadRfid.HasValue ? record.VehicleHeadRfid.Value : DBNull.Value);
+        command.Parameters.AddWithValue("$vehicle_no", (object?)record.VehicleNo ?? DBNull.Value);
+        command.Parameters.AddWithValue("$expected_vehicle_count", (object?)record.ExpectedVehicleCount ?? DBNull.Value);
         command.Parameters.AddWithValue("$detected_vehicle_count", record.DetectedVehicleCount);
         command.Parameters.AddWithValue("$result", (int)record.Outcome);
         command.Parameters.AddWithValue("$started_at", ToUnixMilliseconds(record.StartedAt));
@@ -516,8 +632,9 @@ WHERE result = $alarm_result AND clear_state = $cleared_state;");
         }
         if (query.IncludeWarnings)
         {
-            clauses.Add("(result = $alert_result OR (warning_message IS NOT NULL AND TRIM(warning_message) <> ''))");
+            clauses.Add("(result = $alert_result OR (result <> $unverified_result AND warning_message IS NOT NULL AND TRIM(warning_message) <> ''))");
             parameters["$alert_result"] = (int)PassageOutcome.UncouplingAlarm;
+            parameters["$unverified_result"] = (int)PassageOutcome.Unverified;
         }
         return clauses.Count == 0 ? "1=1" : string.Join(" AND ", clauses);
     }
@@ -537,7 +654,7 @@ WHERE result = $alarm_result AND clear_state = $cleared_state;");
 SELECT passage_id, station_id, station_address, head_rfid,
        expected_vehicle_count, result, started_at, completed_at,
        warning_message, alarm_message, clear_state, created_at, cleared_at,
-       alarm_acknowledged_at, alarm_recovered_at
+       alarm_acknowledged_at, alarm_recovered_at, vehicle_name, vehicle_head_rfid, vehicle_no
 FROM passage_record
 WHERE passage_id = $passage_id;";
         command.Parameters.AddWithValue("$passage_id", passageId.ToString("D"));
@@ -555,7 +672,7 @@ WHERE passage_id = $passage_id;";
             checked((byte)reader.GetInt32(2)),
             reader.IsDBNull(3) ? null : checked((ushort)reader.GetInt32(3)),
             details.Select(item => item.RfidValue),
-            reader.GetInt32(4),
+            reader.IsDBNull(4) ? null : reader.GetInt32(4),
             (PassageOutcome)reader.GetInt32(5),
             FromUnixMilliseconds(reader.GetInt64(6)),
             FromUnixMilliseconds(reader.GetInt64(7)),
@@ -566,7 +683,10 @@ WHERE passage_id = $passage_id;";
             reader.IsDBNull(12) ? null : FromUnixMilliseconds(reader.GetInt64(12)),
             FromUnixMilliseconds(reader.GetInt64(11)),
             reader.IsDBNull(13) ? null : FromUnixMilliseconds(reader.GetInt64(13)),
-            reader.IsDBNull(14) ? null : FromUnixMilliseconds(reader.GetInt64(14)));
+            reader.IsDBNull(14) ? null : FromUnixMilliseconds(reader.GetInt64(14)),
+            reader.IsDBNull(15) ? null : reader.GetString(15),
+            reader.IsDBNull(16) ? null : checked((ushort)reader.GetInt32(16)),
+            reader.IsDBNull(17) ? null : reader.GetString(17));
     }
 
     private static IReadOnlyList<PassageRfidObservation> LoadDetails(SQLiteConnection connection, Guid passageId)

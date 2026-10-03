@@ -5,5 +5,6 @@ public enum StationRecognitionState
     Waiting,
     Recognizing,
     Completed,
-    UncouplingAlarm
+    UncouplingAlarm,
+    Unverified
 }

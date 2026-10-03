@@ -24,6 +24,9 @@ public sealed class RfidStationConfig
     /// <summary>The protocol address carried in Byte2 of the 40-byte frame.</summary>
     public byte ProtocolAddress { get; set; }
 
+    /// <summary>Optional expected vehicle count for this station; null uses the project-wide default.</summary>
+    public int? ExpectedVehicleCount { get; set; }
+
     /// <summary>Legacy alias retained for existing project files and callers.</summary>
     public byte Address
     {

@@ -3,6 +3,60 @@ namespace MineRailMonitor.Core.Tests;
 public sealed class SettingsPageMarkupTests
 {
     [Fact]
+    public void Settings_combines_rfid_settings_and_stations_into_one_tab()
+    {
+        var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
+
+        Assert.Equal(2, markup.Split(new[] { "<TabItem Header=" }, StringSplitOptions.None).Length - 1);
+        Assert.Contains("Header=\"RFID配置\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"RFID识别参数\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"RFID基站配置\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Header=\"通信配置\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ConfigureYardCommunicationButton\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Settings_exposes_vehicle_configuration_in_a_settings_tab()
+    {
+        var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
+        var code = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml.cs"));
+
+        Assert.Contains("x:Key=\"SettingsTabControlStyle\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource SettingsTabControlStyle}\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"车辆配置\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"VehicleListDataGrid\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"车辆编号\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"车辆名称\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"车头标签\"", markup, StringComparison.Ordinal);
+        Assert.Contains("SelectionChanged=\"OnVehicleSelectionChanged\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"VehicleEditorPanel\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"VehicleNoTextBox\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"VehicleNameTextBox\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"VehicleTagsItemsControl\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"总节数\"", markup, StringComparison.Ordinal);
+        Assert.Contains("添加车节", markup, StringComparison.Ordinal);
+        Assert.Contains("删除", markup, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OnSaveVehiclesClick\"", markup, StringComparison.Ordinal);
+        Assert.Contains("SaveVehicleConfigurationsAsync", code, StringComparison.Ordinal);
+        Assert.Contains("await VehiclesSaveRequested(vehicles)", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Vehicle_tag_rfid_uses_a_dark_textbox_instead_of_double_click_grid_editing()
+    {
+        var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
+        var tagEditorStart = markup.IndexOf("x:Name=\"VehicleTagsItemsControl\"", StringComparison.Ordinal);
+        var tagEditorEnd = markup.IndexOf("</ItemsControl>", tagEditorStart, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("VehicleTagsDataGrid", markup, StringComparison.Ordinal);
+        Assert.True(tagEditorStart >= 0);
+        Assert.True(tagEditorEnd > tagEditorStart);
+        var tagEditorMarkup = markup.Substring(tagEditorStart, tagEditorEnd - tagEditorStart);
+        Assert.Contains("Style=\"{StaticResource SettingsTableTextBoxStyle}\"", tagEditorMarkup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding RfidText, UpdateSourceTrigger=PropertyChanged}\"", tagEditorMarkup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Settings_markup_exposes_all_station_endpoint_fields_and_row_controls()
     {
         var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
@@ -608,6 +662,20 @@ public sealed class SettingsPageMarkupTests
 
         Assert.Contains("public string StationId { get; init; }", model, StringComparison.Ordinal);
         Assert.Contains("ToolTip=\"稳定标识，创建后不可修改\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Station_editor_exposes_optional_expected_vehicle_count_with_global_fallback()
+    {
+        var model = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor.Core", "Models", "RfidStationConfig.cs"));
+        var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
+        var code = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml.cs"));
+
+        Assert.Contains("public int? ExpectedVehicleCount { get; set; }", model, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding ExpectedVehicleCount, UpdateSourceTrigger=PropertyChanged}\"", markup, StringComparison.Ordinal);
+        Assert.Contains("留空使用全局标准值", markup, StringComparison.Ordinal);
+        Assert.Contains("count is < 1 or > 14", code, StringComparison.Ordinal);
+        Assert.Contains("ExpectedVehicleCount = expectedVehicleCount", code, StringComparison.Ordinal);
     }
 
     private static string LocateSourceFile(params string[] segments)

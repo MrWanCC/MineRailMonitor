@@ -7,6 +7,42 @@ namespace MineRailMonitor.Infrastructure.Tests;
 public sealed class ProjectConfigServiceTests
 {
     [Fact]
+    public async Task Missing_global_expected_count_stays_unconfigured_when_loaded_and_saved()
+    {
+        const string manifest = """
+            {
+              "Id": "Temporary",
+              "Name": "Temporary Project",
+              "DefaultStationId": "560",
+              "RfidSettings": {
+                "PollIntervalMs": 200,
+                "InterVehicleTimeoutSeconds": 30,
+                "EmptyRfidValue": 0
+              },
+              "Stations": [ { "Id": "560", "ConfigFile": "stations/560.json" } ]
+            }
+            """;
+        using var project = TemporaryProject.Create(manifest, TemporaryProject.StationWithoutY611);
+        var service = CreateService();
+
+        var loaded = await service.LoadAsync(project.Path);
+        Assert.True((object?)loaded.Project!.RfidSettings.ExpectedVehicleCount is null);
+
+        var saved = await service.SaveRfidSettingsAsync(project.Path, new RfidSettings
+        {
+            PollIntervalMs = 250,
+            ExpectedVehicleCount = null,
+            InterVehicleTimeoutSeconds = 30,
+            EmptyRfidValue = 0
+        });
+
+        Assert.True(saved.Succeeded, string.Join(Environment.NewLine, saved.Errors));
+        var reloaded = await service.LoadAsync(project.Path);
+        Assert.True((object?)reloaded.Project!.RfidSettings.ExpectedVehicleCount is null);
+    }
+
+
+    [Fact]
     public async Task LoadsAndSavesRfidCoreSettingsInProjectManifest()
     {
         const string manifest = """
@@ -54,6 +90,121 @@ public sealed class ProjectConfigServiceTests
     }
 
     [Fact]
+    public async Task Saves_and_loads_vehicle_tag_slots_as_string_types()
+    {
+        using var project = TemporaryProject.Create(TemporaryProject.Manifest, TemporaryProject.StationWithThreeDevices);
+        var service = CreateService();
+        var vehicles = new[]
+        {
+            new VehicleConfig
+            {
+                VehicleNo = "K001",
+                HeadRfid = 1,
+                VehicleName = "1号矿车",
+                Enabled = true,
+                Tags = new List<VehicleTagConfig>
+                {
+                    new() { Position = 0, Rfid = 1, Type = VehicleTagType.Head },
+                    new() { Position = 1, Rfid = 17, Type = VehicleTagType.Carriage },
+                    new() { Position = 2, Rfid = 18, Type = VehicleTagType.Carriage }
+                }
+            }
+        };
+
+        var saved = await service.SaveVehiclesAsync(project.Path, vehicles);
+
+        Assert.True(saved.Succeeded, string.Join(Environment.NewLine, saved.Errors));
+        var json = File.ReadAllText(Path.Combine(project.Path, "project.json"));
+        Assert.Contains("\"Vehicles\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"VehicleNo\": \"K001\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"VehicleName\": \"1号矿车\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"Type\": \"Head\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"Type\": \"Carriage\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("TotalSectionCount", json, StringComparison.Ordinal);
+
+        var loaded = await service.LoadAsync(project.Path);
+
+        Assert.True(loaded.Succeeded, string.Join(Environment.NewLine, loaded.Errors));
+        var vehicle = Assert.Single(loaded.Project!.Vehicles);
+        Assert.Equal((ushort)1, vehicle.HeadRfid);
+        Assert.Equal("K001", vehicle.VehicleNo);
+        Assert.Equal("1号矿车", vehicle.VehicleName);
+        Assert.Equal(3, vehicle.TotalSectionCount);
+        Assert.Collection(
+            vehicle.Tags,
+            tag => { Assert.Equal(0, tag.Position); Assert.Equal(VehicleTagType.Head, tag.Type); },
+            tag => { Assert.Equal(1, tag.Position); Assert.Equal(VehicleTagType.Carriage, tag.Type); },
+            tag => { Assert.Equal(2, tag.Position); Assert.Equal(VehicleTagType.Carriage, tag.Type); });
+    }
+
+    [Fact]
+    public async Task Rejects_duplicate_vehicle_numbers_without_rewriting_manifest()
+    {
+        using var project = TemporaryProject.Create(TemporaryProject.Manifest, TemporaryProject.StationWithThreeDevices);
+        var manifestPath = Path.Combine(project.Path, "project.json");
+        var originalManifest = File.ReadAllText(manifestPath);
+        var vehicles = new[]
+        {
+            CreateVehicle("K001", 1, "1号矿车"),
+            CreateVehicle("k001", 2, "2号矿车")
+        };
+
+        var result = await CreateService().SaveVehiclesAsync(project.Path, vehicles);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Errors, error => error.IndexOf("车辆编号重复", StringComparison.Ordinal) >= 0);
+        Assert.Equal(originalManifest, File.ReadAllText(manifestPath));
+    }
+
+    [Fact]
+    public async Task Loads_legacy_vehicle_name_and_generates_a_stable_vehicle_number()
+    {
+        const string manifest = """
+            {
+              "Id": "Temporary",
+              "Name": "Temporary Project",
+              "DefaultStationId": "560",
+              "RfidStations": [],
+              "Stations": [ { "Id": "560", "ConfigFile": "stations/560.json" } ],
+              "Vehicles": [
+                { "HeadRfid": 1, "Name": "1号矿车", "Enabled": true,
+                  "Tags": [ { "Position": 0, "Rfid": 1, "Type": "Head" } ] }
+              ]
+            }
+            """;
+        using var project = TemporaryProject.Create(manifest, TemporaryProject.StationWithoutY611);
+
+        var result = await CreateService().LoadAsync(project.Path);
+
+        Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Errors));
+        var vehicle = Assert.Single(result.Project!.Vehicles);
+        Assert.Equal("RFID-0001", vehicle.VehicleNo);
+        Assert.Equal("1号矿车", vehicle.VehicleName);
+    }
+
+    [Fact]
+    public async Task Rejects_invalid_vehicle_configuration_before_writing_manifest()
+    {
+        using var project = TemporaryProject.Create(TemporaryProject.Manifest, TemporaryProject.StationWithThreeDevices);
+        var service = CreateService();
+        var before = File.ReadAllText(Path.Combine(project.Path, "project.json"));
+        var vehicle = new VehicleConfig
+        {
+            HeadRfid = 0,
+            Tags = new List<VehicleTagConfig>
+            {
+                new() { Position = 0, Rfid = 0, Type = VehicleTagType.Head }
+            }
+        };
+
+        var saved = await service.SaveVehiclesAsync(project.Path, new[] { vehicle });
+
+        Assert.False(saved.Succeeded);
+        Assert.NotEmpty(saved.Errors);
+        Assert.Equal(before, File.ReadAllText(Path.Combine(project.Path, "project.json")));
+    }
+
+    [Fact]
     public async Task Loads_sanitized_example_project_without_field_map_data()
     {
         var service = CreateService();
@@ -64,6 +215,7 @@ public sealed class ProjectConfigServiceTests
         Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Errors));
         Assert.NotNull(result.Project);
         Assert.Equal("Example", result.Project!.Id);
+        Assert.Empty(result.Project.Vehicles);
         var station = Assert.Single(result.Project!.Stations, station => station.Id == "560");
         Assert.Empty(station.Points);
         Assert.Empty(station.Labels);
@@ -125,6 +277,17 @@ public sealed class ProjectConfigServiceTests
     {
         return new ProjectConfigService(new FileLogger(Path.Combine(AppContext.BaseDirectory, "test-logs")));
     }
+
+    private static VehicleConfig CreateVehicle(string vehicleNo, ushort headRfid, string vehicleName) => new()
+    {
+        VehicleNo = vehicleNo,
+        HeadRfid = headRfid,
+        VehicleName = vehicleName,
+        Tags = new List<VehicleTagConfig>
+        {
+            new() { Position = 0, Rfid = headRfid, Type = VehicleTagType.Head }
+        }
+    };
 
     private sealed class TemporaryProject : IDisposable
     {

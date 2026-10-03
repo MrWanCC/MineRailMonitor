@@ -8,13 +8,39 @@ public sealed class RfidRecognitionRulesTests
 {
     private static readonly DateTimeOffset Start = new(2026, 9, 9, 9, 0, 0, TimeSpan.FromHours(8));
 
-    [Theory]
-    [InlineData(0x0001, true)]
-    [InlineData(0x000A, true)]
-    [InlineData(0x000B, false)]
-    public void Head_rfid_range_is_01_to_0A(ushort rfid, bool expected)
+    [Fact]
+    public void Analysis_identifies_high_value_rfid_in_position_zero_as_head()
     {
-        Assert.Equal(expected, RfidRecognitionRules.IsHeadRfid(rfid));
+        var frame = CreateFrame(new ushort[] { 0x1001, 0x1101, 0x1102 });
+        frame.HeadRfid = 0x0002;
+
+        var analysis = RfidRecognitionRules.Analyze(frame, emptyRfidValue: 0);
+
+        Assert.Equal(new ushort[] { 0x1001 }, analysis.HeadRfids);
+        Assert.Empty(analysis.HeadWarnings);
+    }
+
+    [Fact]
+    public void Analysis_keeps_0001_as_head_when_it_is_in_position_zero()
+    {
+        var frame = CreateFrame(new ushort[] { 0x0001, 0x0011, 0x0012 });
+
+        var analysis = RfidRecognitionRules.Analyze(frame, emptyRfidValue: 0);
+
+        Assert.Equal(new ushort[] { 0x0001 }, analysis.HeadRfids);
+        Assert.Empty(analysis.HeadWarnings);
+    }
+
+    [Fact]
+    public void Analysis_does_not_treat_position_one_rfid_0002_as_head()
+    {
+        var frame = CreateFrame(new ushort[] { 0x0000, 0x0002 });
+
+        var analysis = RfidRecognitionRules.Analyze(frame, emptyRfidValue: 0);
+
+        Assert.Empty(analysis.HeadRfids);
+        Assert.Contains(RfidHeadWarning.MissingHeadTag, analysis.HeadWarnings);
+        Assert.Contains(RfidHeadWarning.FirstTagIsNotHead, analysis.HeadWarnings);
     }
 
     [Fact]

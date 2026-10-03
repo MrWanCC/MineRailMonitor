@@ -1,6 +1,9 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Globalization;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using MineRailMonitor.Core.Models;
@@ -25,9 +28,11 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
     private readonly ObservableCollection<RfidStationEditorRow> _stationRows = new();
     private readonly ObservableCollection<RfidStationEditorRow> _visibleStationRows = new();
     private readonly ObservableCollection<YardCommunicationEditorRow> _visibleYardCommunicationRows = new();
+    private readonly ObservableCollection<VehicleEditorDraft> _vehicleDrafts = new();
     private readonly IReadOnlyList<string> _configurationErrors;
     private bool _isStationListRefreshInProgress;
     private SettingsDraft _savedDraft = null!;
+    private VehicleEditorDraft[] _savedVehicleDraft = Array.Empty<VehicleEditorDraft>();
 
     public SettingsPage(
         RfidSettings settings,
@@ -39,7 +44,8 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         Func<StationConfig, Task<bool>>? bindingSaveRequested = null,
         Action<string, string>? viewMapPointRequested = null,
         IEnumerable<YardCommunicationConfig>? yardCommunications = null,
-        IEnumerable<YardAlarmForwardConfig>? yardAlarmForwards = null)
+        IEnumerable<YardAlarmForwardConfig>? yardAlarmForwards = null,
+        IEnumerable<VehicleConfig>? vehicles = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _adminModeService = adminModeService ?? throw new ArgumentNullException(nameof(adminModeService));
@@ -49,7 +55,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         _viewMapPointRequested = viewMapPointRequested;
         InitializeComponent();
         PollIntervalTextBox.Text = settings.PollIntervalMs.ToString(CultureInfo.InvariantCulture);
-        ExpectedVehicleCountTextBox.Text = settings.ExpectedVehicleCount.ToString(CultureInfo.InvariantCulture);
+        ExpectedVehicleCountTextBox.Text = settings.ExpectedVehicleCount?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         InterVehicleTimeoutTextBox.Text = settings.InterVehicleTimeoutSeconds.ToString(CultureInfo.InvariantCulture);
         var configuredStations = (stations ?? Array.Empty<RfidStationConfig>()).ToArray();
         _configuredRfidStations = configuredStations;
@@ -82,9 +88,16 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             _stationRows.Add(row);
         }
 
+        foreach (var vehicle in (vehicles ?? Array.Empty<VehicleConfig>()).OrderBy(item => item.HeadRfid))
+        {
+            _vehicleDrafts.Add(VehicleEditorDraft.FromConfig(vehicle));
+        }
+
         StationsItemsControl.ItemsSource = _visibleStationRows;
+        VehicleListDataGrid.ItemsSource = _vehicleDrafts;
         RefreshBindingOverview();
         _savedDraft = CaptureDraft();
+        _savedVehicleDraft = CloneVehicleDraft(_vehicleDrafts);
         _adminModeService.PropertyChanged += OnAdminModePropertyChanged;
         UpdateStationEditorState();
         if (_configurationErrors.Count > 0)
@@ -100,6 +113,10 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
     public event Func<IReadOnlyList<YardCommunicationConfig>, Task<bool>>? SaveYardCommunicationsRequested;
 
     public event Func<IReadOnlyList<YardAlarmForwardConfig>, Task<bool>>? SaveYardAlarmForwardsRequested;
+
+    public event Func<IReadOnlyList<VehicleConfig>, Task<bool>>? VehiclesSaveRequested;
+
+    public event Func<Task<bool>>? AdminModeExitRequested;
 
     public static readonly DependencyProperty BindingEditingEnabledProperty =
         DependencyProperty.Register(nameof(BindingEditingEnabled), typeof(bool), typeof(SettingsPage), new PropertyMetadata(false));
@@ -146,7 +163,35 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         private set => SetValue(YardCommunicationEditingEnabledProperty, value);
     }
 
-    public bool HasUnsavedChanges => !AreDraftsEqual(_savedDraft, CaptureDraft());
+    public static readonly DependencyProperty VehicleEditingEnabledProperty =
+        DependencyProperty.Register(nameof(VehicleEditingEnabled), typeof(bool), typeof(SettingsPage), new PropertyMetadata(false));
+
+    public bool VehicleEditingEnabled
+    {
+        get => (bool)GetValue(VehicleEditingEnabledProperty);
+        private set => SetValue(VehicleEditingEnabledProperty, value);
+    }
+
+    public static readonly DependencyProperty VehicleEditorHasSelectionProperty =
+        DependencyProperty.Register(nameof(VehicleEditorHasSelection), typeof(bool), typeof(SettingsPage), new PropertyMetadata(false));
+
+    public bool VehicleEditorHasSelection
+    {
+        get => (bool)GetValue(VehicleEditorHasSelectionProperty);
+        private set => SetValue(VehicleEditorHasSelectionProperty, value);
+    }
+
+    public static readonly DependencyProperty CanEditSelectedVehicleProperty =
+        DependencyProperty.Register(nameof(CanEditSelectedVehicle), typeof(bool), typeof(SettingsPage), new PropertyMetadata(false));
+
+    public bool CanEditSelectedVehicle
+    {
+        get => (bool)GetValue(CanEditSelectedVehicleProperty);
+        private set => SetValue(CanEditSelectedVehicleProperty, value);
+    }
+
+    public bool HasUnsavedChanges => !AreDraftsEqual(_savedDraft, CaptureDraft()) ||
+        !AreVehicleDraftsEqual(_savedVehicleDraft, _vehicleDrafts);
 
     public void RefreshBindingOverview()
     {
@@ -239,14 +284,28 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
         return dialog.Result switch
         {
-            UnsavedSettingsChangesResult.SaveAndContinue => await SaveChangesAsync(),
+            UnsavedSettingsChangesResult.SaveAndContinue => await SaveAllChangesAsync(),
             UnsavedSettingsChangesResult.Discard => RestoreSavedDraft(),
             _ => false
         };
     }
 
-    private void OnEnterAdminModeClick(object sender, RoutedEventArgs e)
+    private async void OnAdminModeButtonClick(object sender, RoutedEventArgs e)
     {
+        if (_adminModeService.IsAdmin)
+        {
+            if (AdminModeExitRequested is not null)
+            {
+                await AdminModeExitRequested();
+            }
+            else if (await TryLeaveAsync("退出管理员模式"))
+            {
+                _adminModeService.ExitAdminMode();
+            }
+
+            return;
+        }
+
         var dialog = new AdminPasswordDialog(_adminModeService)
         {
             Owner = Window.GetWindow(this)
@@ -272,7 +331,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
         var defaults = new RfidSettings();
         PollIntervalTextBox.Text = defaults.PollIntervalMs.ToString(CultureInfo.InvariantCulture);
-        ExpectedVehicleCountTextBox.Text = defaults.ExpectedVehicleCount.ToString(CultureInfo.InvariantCulture);
+        ExpectedVehicleCountTextBox.Text = defaults.ExpectedVehicleCount?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         InterVehicleTimeoutTextBox.Text = defaults.InterVehicleTimeoutSeconds.ToString(CultureInfo.InvariantCulture);
     }
 
@@ -318,6 +377,203 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         RefreshBindingOverview();
     }
 
+    private void OnAddVehicleClick(object sender, RoutedEventArgs e)
+    {
+        if (!VehicleEditingEnabled)
+        {
+            return;
+        }
+
+        var vehicle = new VehicleEditorDraft(string.Empty, string.Empty, true, new[]
+        {
+            new VehicleTagEditorDraft(0, string.Empty)
+        });
+        _vehicleDrafts.Add(vehicle);
+        VehicleListDataGrid.SelectedItem = vehicle;
+        VehicleListDataGrid.ScrollIntoView(vehicle);
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            VehicleNoTextBox.Focus();
+            VehicleNoTextBox.SelectAll();
+        }));
+        SetVehicleSaveResult(string.Empty, false);
+    }
+
+    private void OnDeleteVehicleClick(object sender, RoutedEventArgs e)
+    {
+        if (!VehicleEditingEnabled || VehicleListDataGrid.SelectedItem is not VehicleEditorDraft vehicle)
+        {
+            return;
+        }
+
+        var index = _vehicleDrafts.IndexOf(vehicle);
+        _vehicleDrafts.Remove(vehicle);
+        VehicleListDataGrid.SelectedItem = _vehicleDrafts.Count == 0
+            ? null
+            : _vehicleDrafts[Math.Min(index, _vehicleDrafts.Count - 1)];
+        SetVehicleSaveResult(string.Empty, false);
+    }
+
+    private void OnVehicleSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var selected = VehicleListDataGrid.SelectedItem as VehicleEditorDraft;
+        VehicleEditorHasSelection = selected is not null;
+        CanEditSelectedVehicle = VehicleEditingEnabled && selected is not null;
+        VehicleTagsItemsControl.ItemsSource = selected?.Tags;
+    }
+
+    private void OnAddVehicleTagClick(object sender, RoutedEventArgs e)
+    {
+        if (!CanEditSelectedVehicle || VehicleListDataGrid.SelectedItem is not VehicleEditorDraft vehicle)
+        {
+            return;
+        }
+
+        var occupiedPositions = vehicle.Tags.Select(tag => tag.Position).ToHashSet();
+        var position = Enumerable.Range(1, 13)
+            .Where(candidate => !occupiedPositions.Contains(candidate))
+            .DefaultIfEmpty(-1)
+            .First();
+        if (position < 0)
+        {
+            SetVehicleSaveResult("车辆最多配置14个位置（位置0为车头）。", true);
+            return;
+        }
+
+        var tag = new VehicleTagEditorDraft(position, string.Empty);
+        var insertIndex = vehicle.Tags.TakeWhile(item => item.Position < position).Count();
+        vehicle.Tags.Insert(insertIndex, tag);
+        SetVehicleSaveResult(string.Empty, false);
+    }
+
+    private void OnDeleteVehicleTagClick(object sender, RoutedEventArgs e)
+    {
+        if (!CanEditSelectedVehicle ||
+            VehicleListDataGrid.SelectedItem is not VehicleEditorDraft vehicle ||
+            (sender as FrameworkElement)?.DataContext is not VehicleTagEditorDraft tag)
+        {
+            return;
+        }
+
+        if (tag.Position == 0)
+        {
+            SetVehicleSaveResult("位置0是车头，不能删除。", true);
+            return;
+        }
+
+        vehicle.Tags.Remove(tag);
+        SetVehicleSaveResult(string.Empty, false);
+    }
+
+    private async void OnSaveVehiclesClick(object sender, RoutedEventArgs e)
+    {
+        await SaveVehicleConfigurationsAsync();
+    }
+
+    private void OnDiscardVehicleChangesClick(object sender, RoutedEventArgs e)
+    {
+        if (!VehicleEditingEnabled)
+        {
+            return;
+        }
+
+        if (AreVehicleDraftsEqual(_savedVehicleDraft, _vehicleDrafts))
+        {
+            SetVehicleSaveResult("当前没有未保存的车辆修改。", false);
+            return;
+        }
+
+        var selectedIndex = VehicleListDataGrid.SelectedIndex;
+        _vehicleDrafts.Clear();
+        foreach (var vehicle in CloneVehicleDraft(_savedVehicleDraft))
+        {
+            _vehicleDrafts.Add(vehicle);
+        }
+
+        VehicleListDataGrid.SelectedIndex = _vehicleDrafts.Count == 0
+            ? -1
+            : Math.Min(Math.Max(selectedIndex, 0), _vehicleDrafts.Count - 1);
+        VehicleTagsItemsControl.ItemsSource = (VehicleListDataGrid.SelectedItem as VehicleEditorDraft)?.Tags;
+        SetVehicleSaveResult("已撤销未保存的车辆修改。", false);
+    }
+
+    private async Task<bool> SaveVehicleConfigurationsAsync()
+    {
+        if (!VehicleEditingEnabled)
+        {
+            SetVehicleSaveResult("请先进入管理员模式后再修改车辆配置。", true);
+            return false;
+        }
+
+        var errors = new List<string>();
+        var vehicles = new List<VehicleConfig>();
+        foreach (var draft in _vehicleDrafts)
+        {
+            var tags = new List<VehicleTagConfig>();
+            foreach (var tag in draft.Tags)
+            {
+                if (!ushort.TryParse(tag.RfidText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var rfid))
+                {
+                    errors.Add($"Position {tag.Position} 的RFID必须是0到65535之间的整数。");
+                    rfid = 0;
+                }
+
+                tags.Add(new VehicleTagConfig
+                {
+                    Position = tag.Position,
+                    Rfid = rfid,
+                    Type = tag.Position == 0 ? VehicleTagType.Head : VehicleTagType.Carriage
+                });
+            }
+
+            var headRfid = tags.FirstOrDefault(tag => tag.Position == 0)?.Rfid ?? (ushort)0;
+            vehicles.Add(new VehicleConfig
+            {
+                VehicleNo = draft.VehicleNo.Trim(),
+                HeadRfid = headRfid,
+                VehicleName = draft.VehicleName.Trim(),
+                Enabled = draft.Enabled,
+                Tags = tags
+            });
+        }
+
+        errors.AddRange(VehicleConfigurationRules.Validate(vehicles));
+        if (errors.Count > 0)
+        {
+            SetVehicleSaveResult(string.Join(Environment.NewLine, errors.Distinct()), true);
+            return false;
+        }
+        if (VehiclesSaveRequested is null)
+        {
+            SetVehicleSaveResult("车辆配置保存服务尚未连接。", true);
+            return false;
+        }
+
+        try
+        {
+            if (!await VehiclesSaveRequested(vehicles))
+            {
+                return false;
+            }
+
+            _savedVehicleDraft = CloneVehicleDraft(_vehicleDrafts);
+            SetVehicleSaveResult("车辆编组配置已保存。", false);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            SetVehicleSaveResult($"保存车辆配置失败：{exception.Message}", true);
+            return false;
+        }
+    }
+
+    public void SetVehicleSaveResult(string message, bool isError)
+    {
+        VehicleValidationText.Text = message;
+        VehicleValidationText.Foreground = new System.Windows.Media.SolidColorBrush(
+            isError ? System.Windows.Media.Color.FromRgb(255, 135, 149) : System.Windows.Media.Color.FromRgb(118, 229, 178));
+    }
+
     public void SetSaveResult(string message, bool isError)
     {
         ValidationText.Text = message;
@@ -336,10 +592,19 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
     private void UpdateStationEditorState()
     {
         StationEditorPanel.IsEnabled = true;
+        AdminModeStatusText.Text = _adminModeService.IsAdmin ? "管理员模式已开启" : "管理员模式未开启";
+        AdminModeButton.Content = _adminModeService.IsAdmin ? "退出管理员模式" : "进入管理员模式";
+        VehicleAccessText.Text = !_stationsEditable
+            ? "当前运行模式禁止修改车辆配置。"
+            : _adminModeService.IsAdmin
+                ? "可直接编辑；修改暂存于本页，点击保存后生效。"
+                : "请先在页头开启管理员模式，车辆信息为只读。";
         RfidSettingsEditingEnabled = _adminModeService.IsAdmin;
         StationEditingEnabled = _stationsEditable && _adminModeService.IsAdmin;
         BindingEditingEnabled = _stationsEditable && _adminModeService.IsAdmin && _bindingSaveRequested is not null;
         YardCommunicationEditingEnabled = _stationsEditable && _adminModeService.IsAdmin;
+        VehicleEditingEnabled = _stationsEditable && _adminModeService.IsAdmin;
+        CanEditSelectedVehicle = VehicleEditingEnabled && VehicleEditorHasSelection;
         CanAddStation = StationEditingEnabled && IsConcreteYardSelected();
     }
 
@@ -471,8 +736,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         BindingPendingSummaryCard.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(42, 32, 12));
         BindingPendingSummaryCard.BorderBrush = warningBrush;
         var statusBrush = warningBrush;
-        BindingPendingSummaryIcon.Text = "\uE7BA";
-        BindingPendingSummaryIcon.Foreground = statusBrush;
+        BindingPendingSummaryIcon.Stroke = statusBrush;
         BindingPendingSummaryIconContainer.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(73, 44, 14));
         BindingPendingCountText.Foreground = statusBrush;
         BindingPendingDetailsText.Foreground = mutedTextBrush;
@@ -830,9 +1094,11 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         dialog.ShowDialog();
     }
 
-    private async void OnSaveClick(object sender, RoutedEventArgs e) => await SaveChangesAsync();
+    private async void OnSaveClick(object sender, RoutedEventArgs e) => await SaveChangesAsync(includeVehicles: false);
 
-    private async Task<bool> SaveChangesAsync()
+    private async Task<bool> SaveAllChangesAsync() => await SaveChangesAsync(includeVehicles: true);
+
+    private async Task<bool> SaveChangesAsync(bool includeVehicles)
     {
         if (!_adminModeService.IsAdmin)
         {
@@ -847,11 +1113,22 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         }
 
         if (!int.TryParse(PollIntervalTextBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var interval) ||
-            !int.TryParse(ExpectedVehicleCountTextBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var vehicleCount) ||
             !int.TryParse(InterVehicleTimeoutTextBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var timeout))
         {
-            SetSaveResult("三个参数都必须是整数。", true);
+            SetSaveResult("轮询间隔和识别超时必须是整数。", true);
             return false;
+        }
+
+        int? vehicleCount = null;
+        if (!string.IsNullOrWhiteSpace(ExpectedVehicleCountTextBox.Text))
+        {
+            if (!int.TryParse(ExpectedVehicleCountTextBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedVehicleCount))
+            {
+                SetSaveResult("全局回退节数必须是1到14之间的整数，或留空禁用。", true);
+                return false;
+            }
+
+            vehicleCount = parsedVehicleCount;
         }
 
         var candidate = new RfidSettings
@@ -879,6 +1156,11 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
         try
         {
+            if (includeVehicles && !AreVehicleDraftsEqual(_savedVehicleDraft, _vehicleDrafts) &&
+                !await SaveVehicleConfigurationsAsync())
+            {
+                return false;
+            }
             if (_stationsEditable && _adminModeService.IsAdmin && StationsSaveRequested is not null &&
                 !await StationsSaveRequested(stations))
             {
@@ -924,9 +1206,16 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         {
             _yardCommunicationRows.Add(communication.ToRow(_yardOptions));
         }
+        _vehicleDrafts.Clear();
+        foreach (var vehicle in CloneVehicleDraft(_savedVehicleDraft))
+        {
+            _vehicleDrafts.Add(vehicle);
+        }
+        VehicleListDataGrid.SelectedItem = _vehicleDrafts.FirstOrDefault();
         StationsItemsControl.Items.Refresh();
         RefreshBindingOverview();
         ValidationText.Text = string.Empty;
+        SetVehicleSaveResult(string.Empty, false);
         return true;
     }
 
@@ -936,6 +1225,30 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         InterVehicleTimeoutTextBox?.Text ?? string.Empty,
         _stationRows.Select(StationDraft.FromRow).ToArray(),
         _yardCommunicationRows.Select(YardCommunicationDraft.FromRow).ToArray());
+
+    private static VehicleEditorDraft[] CloneVehicleDraft(IEnumerable<VehicleEditorDraft> vehicles) =>
+        vehicles.Select(vehicle => vehicle.Clone()).ToArray();
+
+    private static bool AreVehicleDraftsEqual(
+        IReadOnlyList<VehicleEditorDraft> left,
+        IEnumerable<VehicleEditorDraft> right)
+    {
+        var rightList = right.ToArray();
+        if (left.Count != rightList.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Count; index++)
+        {
+            if (!left[index].IsSameAs(rightList[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static bool AreDraftsEqual(SettingsDraft left, SettingsDraft right)
     {
@@ -1090,6 +1403,17 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
                 errors.Add($"RFID基站端口无效：{row.StationId}。");
                 continue;
             }
+            int? expectedVehicleCount = null;
+            if (!string.IsNullOrWhiteSpace(row.ExpectedVehicleCount))
+            {
+                if (!int.TryParse(row.ExpectedVehicleCount, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) || count is < 1 or > 14)
+                {
+                    errors.Add($"RFID基站标准列车节数必须为空或在1到14之间：{row.StationId}。");
+                    continue;
+                }
+
+                expectedVehicleCount = count;
+            }
 
             stations.Add(new RfidStationConfig
             {
@@ -1099,6 +1423,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
                 IpAddress = row.IpAddress.Trim(),
                 Port = port,
                 ProtocolAddress = protocolAddress,
+                ExpectedVehicleCount = expectedVehicleCount,
                 Enabled = true,
                 Mode = 0x04,
                 CommandBytes = new byte[4],
@@ -1253,6 +1578,158 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             ? null
             : yardId!.Trim();
 
+    private sealed class VehicleEditorDraft : INotifyPropertyChanged
+    {
+        private string _vehicleNo;
+        private string _vehicleName;
+        private bool _enabled;
+
+        public VehicleEditorDraft(string vehicleNo, string vehicleName, bool enabled, IEnumerable<VehicleTagEditorDraft> tags)
+        {
+            _vehicleNo = vehicleNo;
+            _vehicleName = vehicleName;
+            _enabled = enabled;
+            Tags = new ObservableCollection<VehicleTagEditorDraft>(tags.OrderBy(tag => tag.Position));
+            Tags.CollectionChanged += OnTagsChanged;
+            foreach (var tag in Tags)
+            {
+                tag.PropertyChanged += OnTagPropertyChanged;
+            }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public ObservableCollection<VehicleTagEditorDraft> Tags { get; }
+
+        public string VehicleNo
+        {
+            get => _vehicleNo;
+            set
+            {
+                if (string.Equals(_vehicleNo, value, StringComparison.Ordinal)) return;
+                _vehicleNo = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public string VehicleName
+        {
+            get => _vehicleName;
+            set
+            {
+                if (string.Equals(_vehicleName, value, StringComparison.Ordinal)) return;
+                _vehicleName = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public bool Enabled
+        {
+            get => _enabled;
+            set
+            {
+                if (_enabled == value) return;
+                _enabled = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(StatusText));
+            }
+        }
+
+        public string HeadRfidText => Tags.FirstOrDefault(tag => tag.Position == 0)?.RfidText ?? string.Empty;
+
+        public string TotalSectionCountText => $"{Tags.Count}节";
+
+        public string StatusText => Enabled ? "启用" : "停用";
+
+        public static VehicleEditorDraft FromConfig(VehicleConfig vehicle) => new(
+            vehicle.VehicleNo ?? string.Empty,
+            vehicle.VehicleName ?? string.Empty,
+            vehicle.Enabled,
+            (vehicle.Tags ?? new List<VehicleTagConfig>()).Select(tag =>
+                new VehicleTagEditorDraft(tag.Position, tag.Rfid.ToString(CultureInfo.InvariantCulture))));
+
+        public VehicleEditorDraft Clone() => new(
+            VehicleNo,
+            VehicleName,
+            Enabled,
+            Tags.Select(tag => tag.Clone()));
+
+        public bool IsSameAs(VehicleEditorDraft other) =>
+            string.Equals(VehicleNo, other.VehicleNo, StringComparison.Ordinal) &&
+            string.Equals(VehicleName, other.VehicleName, StringComparison.Ordinal) &&
+            Enabled == other.Enabled &&
+            Tags.Count == other.Tags.Count &&
+            Tags.Zip(other.Tags, (left, right) => left.IsSameAs(right)).All(same => same);
+
+        private void OnTagsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            if (e.OldItems is not null)
+            {
+                foreach (VehicleTagEditorDraft tag in e.OldItems)
+                {
+                    tag.PropertyChanged -= OnTagPropertyChanged;
+                }
+            }
+            if (e.NewItems is not null)
+            {
+                foreach (VehicleTagEditorDraft tag in e.NewItems)
+                {
+                    tag.PropertyChanged += OnTagPropertyChanged;
+                }
+            }
+
+            OnPropertyChanged(nameof(HeadRfidText));
+            OnPropertyChanged(nameof(TotalSectionCountText));
+        }
+
+        private void OnTagPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (sender is VehicleTagEditorDraft { Position: 0 } && e.PropertyName == nameof(VehicleTagEditorDraft.RfidText))
+            {
+                OnPropertyChanged(nameof(HeadRfidText));
+            }
+        }
+
+        private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    private sealed class VehicleTagEditorDraft : INotifyPropertyChanged
+    {
+        private string _rfidText;
+
+        public VehicleTagEditorDraft(int position, string rfidText)
+        {
+            Position = position;
+            _rfidText = rfidText;
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public int Position { get; }
+
+        public string PositionText => $"位置 {Position}";
+
+        public string RfidText
+        {
+            get => _rfidText;
+            set
+            {
+                if (string.Equals(_rfidText, value, StringComparison.Ordinal)) return;
+                _rfidText = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RfidText)));
+            }
+        }
+
+        public string TypeText => Position == 0 ? "车头" : "车节";
+
+        public VehicleTagEditorDraft Clone() => new(Position, RfidText);
+
+        public bool IsSameAs(VehicleTagEditorDraft other) =>
+            Position == other.Position &&
+            string.Equals(RfidText, other.RfidText, StringComparison.Ordinal);
+    }
+
     private sealed class SettingsDraft
     {
         public SettingsDraft(
@@ -1376,6 +1853,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             string ipAddress,
             string port,
             string protocolAddress,
+            string expectedVehicleCount,
             string yardId,
             bool enabled)
         {
@@ -1384,6 +1862,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             IpAddress = ipAddress;
             Port = port;
             ProtocolAddress = protocolAddress;
+            ExpectedVehicleCount = expectedVehicleCount;
             YardId = yardId;
             Enabled = enabled;
         }
@@ -1398,6 +1877,8 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
         public string ProtocolAddress { get; }
 
+        public string ExpectedVehicleCount { get; }
+
         public string YardId { get; }
 
         public bool Enabled { get; }
@@ -1408,6 +1889,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             row.IpAddress,
             row.Port,
             row.ProtocolAddress,
+            row.ExpectedVehicleCount,
             row.YardId,
             row.Enabled);
 
@@ -1424,6 +1906,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             IpAddress = IpAddress,
             Port = Port,
             ProtocolAddress = ProtocolAddress,
+            ExpectedVehicleCount = ExpectedVehicleCount,
             YardId = YardId,
             Enabled = Enabled
         };
@@ -1434,6 +1917,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             string.Equals(IpAddress, other.IpAddress, StringComparison.Ordinal) &&
             string.Equals(Port, other.Port, StringComparison.Ordinal) &&
             string.Equals(ProtocolAddress, other.ProtocolAddress, StringComparison.Ordinal) &&
+            string.Equals(ExpectedVehicleCount, other.ExpectedVehicleCount, StringComparison.Ordinal) &&
             string.Equals(YardId, other.YardId, StringComparison.Ordinal) &&
             Enabled == other.Enabled;
     }
@@ -1529,6 +2013,16 @@ public sealed class RfidStationEditorRow
 
     public string ProtocolAddress { get; set; } = string.Empty;
 
+    public string ExpectedVehicleCount { get; set; } = string.Empty;
+
+    public string ExpectedVehicleCountDisplay => int.TryParse(
+        ExpectedVehicleCount,
+        NumberStyles.Integer,
+        CultureInfo.InvariantCulture,
+        out var count)
+        ? $"标准节数 {count}"
+        : "标准节数 跟随全局";
+
     public string YardId { get; set; } = string.Empty;
 
     public string YardDisplayName { get; set; } = "未归属";
@@ -1567,6 +2061,7 @@ public sealed class RfidStationEditorRow
         IpAddress = station.IpAddress,
         Port = station.Port > 0 ? station.Port.ToString(CultureInfo.InvariantCulture) : string.Empty,
         ProtocolAddress = station.ProtocolAddress.ToString("X2"),
+        ExpectedVehicleCount = station.ExpectedVehicleCount?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
         Enabled = station.Enabled,
         BindingDisplay = "未绑定"
     };
@@ -1581,6 +2076,7 @@ public sealed class RfidStationEditorRow
         IpAddress = IpAddress.Trim(),
         Port = int.TryParse(Port, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) ? port : 0,
         ProtocolAddress = byte.TryParse(NormalizeProtocolText(ProtocolAddress), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var protocolAddress) ? protocolAddress : (byte)0,
+        ExpectedVehicleCount = int.TryParse(ExpectedVehicleCount, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) ? count : null,
         Enabled = false,
         Mode = 0x04,
         CommandBytes = new byte[4],

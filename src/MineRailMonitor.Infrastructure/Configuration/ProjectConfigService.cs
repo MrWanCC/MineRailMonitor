@@ -73,7 +73,12 @@ public sealed class ProjectConfigService : IProjectConfigService
         var rfidStations = (manifest.RfidStations ?? Array.Empty<ProjectConfigService.ProjectManifest.RfidStationManifest>())
             .Select(item => item.ToConfig())
             .ToArray();
+        var vehicles = (manifest.Vehicles ?? Array.Empty<ProjectConfigService.ProjectManifest.VehicleManifest>())
+            .Select(item => item.ToConfig())
+            .ToArray();
         ValidateUniqueRfidStationIds(rfidStations, errors);
+        ValidateStationExpectedVehicleCounts(rfidStations, errors);
+        errors.AddRange(VehicleConfigurationRules.Validate(vehicles));
         if (errors.Count > 0)
         {
             return ProjectConfigLoadResult.Failure(errors);
@@ -155,6 +160,7 @@ public sealed class ProjectConfigService : IProjectConfigService
             RfidStations = rfidStations,
             YardCommunications = yardCommunications,
             YardAlarmForwards = yardAlarmForwards,
+            Vehicles = vehicles,
             UsesLegacySharedListener = manifest.YardCommunications is null
         };
         // Legacy map entries may still carry only ProtocolAddress. Resolve them in memory
@@ -473,6 +479,49 @@ public sealed class ProjectConfigService : IProjectConfigService
         }
     }
 
+    public async Task<ProjectConfigSaveResult> SaveVehiclesAsync(
+        string projectDirectory,
+        IEnumerable<VehicleConfig> vehicles,
+        CancellationToken cancellationToken = default)
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(projectDirectory))
+        {
+            return SaveFailure(errors, "项目目录不能为空。");
+        }
+        if (vehicles is null)
+        {
+            return SaveFailure(errors, "车辆配置不能为空。");
+        }
+
+        var vehicleList = vehicles.ToArray();
+        errors.AddRange(VehicleConfigurationRules.Validate(vehicleList));
+        if (errors.Count > 0)
+        {
+            return ProjectConfigSaveResult.Failure(errors);
+        }
+
+        var manifestPath = Path.Combine(projectDirectory, "project.json");
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var root = JObject.Parse(File.ReadAllText(manifestPath));
+            var vehicleArray = new JArray(vehicleList.Select(ToManifestObject));
+            SetProperty(root, "Vehicles", vehicleArray);
+            using (var writer = File.CreateText(manifestPath))
+            {
+                await writer.WriteAsync(root.ToString(Newtonsoft.Json.Formatting.Indented));
+            }
+
+            _logger.Information($"车辆编组配置保存成功，车辆数：{vehicleList.Length}。");
+            return ProjectConfigSaveResult.Success();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Newtonsoft.Json.JsonException)
+        {
+            return SaveFailure(errors, $"保存车辆配置失败：{exception.Message}", exception);
+        }
+    }
+
     public async Task<ProjectConfigSaveResult> SaveYardCommunicationsAsync(
         string projectDirectory,
         IEnumerable<YardCommunicationConfig> configurations,
@@ -653,6 +702,10 @@ public sealed class ProjectConfigService : IProjectConfigService
             {
                 errors.Add($"RFID基站协议地址不能为00：{station.StationId}。");
             }
+            if (station.ExpectedVehicleCount is < 1 or > 14)
+            {
+                errors.Add($"RFID基站标准列车节数必须在1到14之间：{station.StationId}。");
+            }
         }
     }
 
@@ -663,6 +716,19 @@ public sealed class ProjectConfigService : IProjectConfigService
         foreach (var stationId in RfidStationConfigurationRules.FindDuplicateStationIds(stations))
         {
             errors.Add($"RFID基站编号重复：{stationId}。");
+        }
+    }
+
+    private static void ValidateStationExpectedVehicleCounts(
+        IEnumerable<RfidStationConfig> stations,
+        ICollection<string> errors)
+    {
+        foreach (var station in stations.Where(item => item is not null && item.Enabled))
+        {
+            if (station.ExpectedVehicleCount is < 1 or > 14)
+            {
+                errors.Add($"RFID基站标准列车节数必须在1到14之间：{station.StationId}。");
+            }
         }
     }
 
@@ -774,6 +840,10 @@ public sealed class ProjectConfigService : IProjectConfigService
         {
             result["YardId"] = station.YardId!.Trim();
         }
+        if (station.ExpectedVehicleCount.HasValue)
+        {
+            result["ExpectedVehicleCount"] = station.ExpectedVehicleCount.Value;
+        }
 
         return result;
     }
@@ -795,6 +865,20 @@ public sealed class ProjectConfigService : IProjectConfigService
         ["TargetIp"] = configuration.TargetIp?.Trim() ?? string.Empty,
         ["TargetPort"] = configuration.TargetPort,
         ["SourcePort"] = configuration.SourcePort
+    };
+
+    private static JObject ToManifestObject(VehicleConfig vehicle) => new()
+    {
+        ["HeadRfid"] = vehicle.HeadRfid,
+        ["VehicleNo"] = vehicle.VehicleNo.Trim(),
+        ["VehicleName"] = vehicle.VehicleName ?? string.Empty,
+        ["Enabled"] = vehicle.Enabled,
+        ["Tags"] = new JArray(vehicle.Tags.Select(tag => new JObject
+        {
+            ["Position"] = tag.Position,
+            ["Rfid"] = tag.Rfid,
+            ["Type"] = tag.Type.ToString()
+        }))
     };
 
     private static JArray ToByteArrayToken(IEnumerable<byte>? values) =>
@@ -881,6 +965,48 @@ public sealed class ProjectConfigService : IProjectConfigService
 
         public IReadOnlyList<YardAlarmForwardManifest>? YardAlarmForwards { get; set; }
 
+        public IReadOnlyList<VehicleManifest>? Vehicles { get; set; }
+
+        public sealed class VehicleManifest
+        {
+            public ushort HeadRfid { get; set; }
+            public string? VehicleNo { get; set; }
+            public string? VehicleName { get; set; }
+            public string? Name { get; set; }
+            public bool Enabled { get; set; } = true;
+            public List<VehicleTagManifest>? Tags { get; set; }
+
+            public VehicleConfig ToConfig()
+            {
+                var vehicleNo = VehicleNo?.Trim();
+                var vehicleName = string.IsNullOrWhiteSpace(VehicleName) ? Name : VehicleName;
+                return new VehicleConfig
+                {
+                    HeadRfid = HeadRfid,
+                    VehicleNo = string.IsNullOrWhiteSpace(vehicleNo) ? $"RFID-{HeadRfid:X4}" : vehicleNo ?? string.Empty,
+                    VehicleName = vehicleName ?? string.Empty,
+                    Enabled = Enabled,
+                    Tags = (Tags ?? new List<VehicleTagManifest>())
+                        .Select(tag => tag is null
+                            ? new VehicleTagConfig { Position = -1 }
+                            : new VehicleTagConfig
+                        {
+                            Position = tag.Position,
+                            Rfid = tag.Rfid,
+                            Type = tag.Type
+                        })
+                        .ToList()
+                };
+            }
+        }
+
+        public sealed class VehicleTagManifest
+        {
+            public int Position { get; set; }
+            public ushort Rfid { get; set; }
+            public VehicleTagType Type { get; set; }
+        }
+
         public sealed class YardCommunicationManifest
         {
             public string YardId { get; set; } = string.Empty;
@@ -927,6 +1053,7 @@ public sealed class ProjectConfigService : IProjectConfigService
         public string IpAddress { get; set; } = string.Empty;
         public int Port { get; set; }
         public byte ProtocolAddress { get; set; }
+        public int? ExpectedVehicleCount { get; set; }
 
         // Legacy fields remain readable for existing project manifests.
         public byte Address { get; set; }
@@ -957,6 +1084,7 @@ public sealed class ProjectConfigService : IProjectConfigService
                 IpAddress = ipAddress,
                 Port = port,
                 ProtocolAddress = protocolAddress,
+                ExpectedVehicleCount = ExpectedVehicleCount,
                 Enabled = Enabled,
                 Mode = Mode,
                 CommandBytes = CommandBytes,

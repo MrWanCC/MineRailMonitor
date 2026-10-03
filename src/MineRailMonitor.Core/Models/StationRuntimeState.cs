@@ -6,7 +6,7 @@ public sealed class StationRuntimeState
 {
     private readonly HashSet<Guid> _unacknowledgedAlarmPassageIds = new();
 
-    internal StationRuntimeState(byte stationAddress, int expectedVehicleCount, ushort emptyRfidValue)
+    internal StationRuntimeState(byte stationAddress, int? expectedVehicleCount, ushort emptyRfidValue)
         : this($"RFID-{stationAddress:X2}", $"RFID-{stationAddress:X2}", stationAddress, expectedVehicleCount, emptyRfidValue)
     {
     }
@@ -15,7 +15,7 @@ public sealed class StationRuntimeState
         string stationId,
         string stationName,
         byte stationAddress,
-        int expectedVehicleCount,
+        int? expectedVehicleCount,
         ushort emptyRfidValue)
     {
         StationAddress = stationAddress;
@@ -57,7 +57,7 @@ public sealed class StationRuntimeState
 
     public int DetectedVehicleCount { get; internal set; }
 
-    public int ExpectedVehicleCount { get; internal set; }
+    public int? ExpectedVehicleCount { get; internal set; }
 
     public ushort EmptyRfidValue { get; internal set; }
 

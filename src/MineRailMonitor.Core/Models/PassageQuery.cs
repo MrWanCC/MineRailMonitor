@@ -17,7 +17,7 @@ public sealed class PassageQuery
     public PassageOutcome? Outcome { get; set; }
 
     /// <summary>
-    /// Includes both uncoupling alarms and completed passages that contain recognition warnings.
+    /// Includes uncoupling alarms and completed passages with recognition warnings; unverified passages are excluded.
     /// </summary>
     public bool IncludeWarnings { get; set; }
 

@@ -10,7 +10,7 @@ public sealed class PassageRecord
         byte stationAddress,
         ushort? headRfid,
         IEnumerable<ushort> observedRfids,
-        int expectedVehicleCount,
+        int? expectedVehicleCount,
         PassageOutcome outcome,
         DateTimeOffset startedAt,
         DateTimeOffset completedAt,
@@ -21,7 +21,10 @@ public sealed class PassageRecord
         DateTimeOffset? clearedAt = null,
         DateTimeOffset? createdAt = null,
         DateTimeOffset? alarmAcknowledgedAt = null,
-        DateTimeOffset? alarmRecoveredAt = null)
+        DateTimeOffset? alarmRecoveredAt = null,
+        string? vehicleName = null,
+        ushort? vehicleHeadRfid = null,
+        string? vehicleNo = null)
     {
         if (passageId == Guid.Empty)
         {
@@ -35,7 +38,7 @@ public sealed class PassageRecord
         {
             throw new ArgumentNullException(nameof(observedRfids));
         }
-        if (expectedVehicleCount < 1 || expectedVehicleCount > 14)
+        if (expectedVehicleCount is < 1 or > 14)
         {
             throw new ArgumentOutOfRangeException(nameof(expectedVehicleCount));
         }
@@ -69,6 +72,9 @@ public sealed class PassageRecord
         CreatedAt = createdAt ?? completedAt;
         AlarmAcknowledgedAt = alarmAcknowledgedAt;
         AlarmRecoveredAt = alarmRecoveredAt;
+        VehicleName = vehicleName;
+        VehicleHeadRfid = vehicleHeadRfid;
+        VehicleNo = vehicleNo;
     }
 
     public Guid PassageId { get; }
@@ -85,7 +91,7 @@ public sealed class PassageRecord
 
     public IReadOnlyList<PassageRfidObservation> RfidObservations { get; }
 
-    public int ExpectedVehicleCount { get; }
+    public int? ExpectedVehicleCount { get; }
 
     public int DetectedVehicleCount { get; }
 
@@ -99,9 +105,12 @@ public sealed class PassageRecord
 
     public bool HasWarnings => WarningMessages.Count > 0;
 
-    public bool IsAlert => Outcome == PassageOutcome.UncouplingAlarm || HasWarnings;
+    public bool IsAlert => Outcome != PassageOutcome.Unverified &&
+        (Outcome == PassageOutcome.UncouplingAlarm || HasWarnings);
 
-    public bool IsWarningOnly => HasWarnings && Outcome != PassageOutcome.UncouplingAlarm;
+    public bool IsWarningOnly => HasWarnings &&
+        Outcome != PassageOutcome.UncouplingAlarm &&
+        Outcome != PassageOutcome.Unverified;
 
     public string? AlarmMessage { get; }
 
@@ -115,9 +124,23 @@ public sealed class PassageRecord
 
     public DateTimeOffset? AlarmRecoveredAt { get; }
 
+    public string? VehicleName { get; }
+
+    public ushort? VehicleHeadRfid { get; }
+
+    public string? VehicleNo { get; }
+
     public bool RequiresAlarmAcknowledgement => Outcome == PassageOutcome.UncouplingAlarm;
 
     public bool IsAlarmAcknowledged => RequiresAlarmAcknowledgement && AlarmAcknowledgedAt.HasValue;
 
     public bool IsAlarmRecovered => RequiresAlarmAcknowledgement && AlarmRecoveredAt.HasValue;
+
+    public AlarmStatus? AlarmStatus => !RequiresAlarmAcknowledgement
+        ? null
+        : !AlarmAcknowledgedAt.HasValue
+            ? global::MineRailMonitor.Core.Models.AlarmStatus.Unconfirmed
+            : AlarmRecoveredAt.HasValue
+                ? global::MineRailMonitor.Core.Models.AlarmStatus.Recovered
+                : global::MineRailMonitor.Core.Models.AlarmStatus.Acknowledged;
 }

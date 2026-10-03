@@ -104,6 +104,7 @@
                         <ComboBoxItem Content="全部" Tag="" />
                         <ComboBoxItem Content="正常通过" Tag="Completed" />
                         <ComboBoxItem Content="脱节报警" Tag="UncouplingAlarm" />
+                        <ComboBoxItem Content="完整性未判定" Tag="Unverified" />
                     </ComboBox>
                     <Button Content="查询" Width="78" Height="30" MinHeight="30" Background="#087DDD" BorderBrush="#16B8FF" Click="OnQueryClick" />
                     <Button Content="重置" Width="78" Height="30" MinHeight="30" Margin="8,0,0,0" Click="OnResetClick" />

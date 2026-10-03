@@ -1,5 +1,6 @@
 using System.Data.SQLite;
 using System.Globalization;
+using System.Reflection;
 using MineRailMonitor.Core.Models;
 using MineRailMonitor.Infrastructure.Persistence;
 
@@ -10,12 +11,12 @@ public sealed class SqlitePassageRecordStoreTests
     private static readonly DateTimeOffset Today = new(2026, 9, 9, 10, 0, 0, TimeSpan.FromHours(8));
 
     [Fact]
-    public void Constructor_creates_schema_v3_and_applies_connection_pragmas()
+    public void Constructor_creates_schema_v6_and_applies_connection_pragmas()
     {
         using var database = new TemporaryDatabase();
 
         using var connection = database.OpenConnection();
-        Assert.Equal(3L, ExecuteScalar<long>(connection, "PRAGMA user_version;"));
+        Assert.Equal(6L, ExecuteScalar<long>(connection, "PRAGMA user_version;"));
         Assert.Equal(2L, ExecuteScalar<long>(connection, "PRAGMA synchronous;"));
         Assert.Equal(1L, ExecuteScalar<long>(connection, "PRAGMA foreign_keys;"));
         Assert.Equal(5000L, ExecuteScalar<long>(connection, "PRAGMA busy_timeout;"));
@@ -24,6 +25,130 @@ public sealed class SqlitePassageRecordStoreTests
         Assert.Equal(1L, ExecuteScalar<long>(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='passage_rfid';"));
         Assert.True(HasColumn(connection, "passage_record", "alarm_acknowledged_at"));
         Assert.True(HasColumn(connection, "passage_record", "alarm_recovered_at"));
+        Assert.True(HasColumn(connection, "passage_record", "vehicle_name"));
+        Assert.True(HasColumn(connection, "passage_record", "vehicle_head_rfid"));
+        Assert.True(HasColumn(connection, "passage_record", "vehicle_no"));
+        Assert.False(IsColumnNotNull(connection, "passage_record", "expected_vehicle_count"));
+    }
+
+    [Fact]
+    public void V5_migration_makes_expected_count_optional_and_preserves_passage_rows_and_details()
+    {
+        using var legacy = new LegacyV2Database(PassageOutcome.Completed, PassageClearState.PendingClear, Today);
+        var legacyAlarmPassageId = Guid.NewGuid();
+        using (var connection = legacy.OpenConnection())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = @"
+ALTER TABLE passage_record ADD COLUMN alarm_acknowledged_at INTEGER NULL;
+ALTER TABLE passage_record ADD COLUMN alarm_recovered_at INTEGER NULL;
+ALTER TABLE passage_record ADD COLUMN vehicle_name TEXT NULL;
+ALTER TABLE passage_record ADD COLUMN vehicle_head_rfid INTEGER NULL;
+ALTER TABLE passage_record ADD COLUMN vehicle_no TEXT NULL;
+INSERT INTO passage_record
+(passage_id, station_id, station_address, head_rfid, vehicle_name, vehicle_head_rfid, vehicle_no,
+ expected_vehicle_count, detected_vehicle_count, result, started_at, completed_at,
+ warning_message, alarm_message, clear_state, created_at, cleared_at,
+ alarm_acknowledged_at, alarm_recovered_at)
+VALUES ($alarm_id, 'RFID-02', 2, 2, NULL, NULL, NULL, 7, 6, $alarm_result,
+        $started, $completed, '脱节报警', '脱节报警', $pending_clear, $created, NULL, NULL, NULL);
+DROP TABLE passage_rfid;
+CREATE TABLE passage_rfid
+(
+    passage_id TEXT NOT NULL,
+    sequence_no INTEGER NOT NULL,
+    rfid_value INTEGER NOT NULL,
+    first_seen_at INTEGER NOT NULL,
+    batch_no INTEGER NOT NULL,
+    PRIMARY KEY (passage_id, sequence_no),
+    FOREIGN KEY (passage_id) REFERENCES passage_record(passage_id) ON DELETE CASCADE
+);
+INSERT INTO passage_rfid (passage_id, sequence_no, rfid_value, first_seen_at, batch_no)
+VALUES ('" + legacy.PassageId.ToString("D") + @"', 1, 3, 1000, 1);
+INSERT INTO passage_rfid (passage_id, sequence_no, rfid_value, first_seen_at, batch_no)
+VALUES ($alarm_id, 1, 2, $started, 1),
+       ($alarm_id, 2, 17, $started, 1),
+       ($alarm_id, 3, 18, $started, 1),
+       ($alarm_id, 4, 19, $started, 1),
+       ($alarm_id, 5, 20, $started, 1),
+       ($alarm_id, 6, 21, $started, 1);
+PRAGMA user_version=5;";
+            command.Parameters.AddWithValue("$alarm_id", legacyAlarmPassageId.ToString("D"));
+            command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
+            command.Parameters.AddWithValue("$started", ToUnixMilliseconds(Today.AddSeconds(-12)));
+            command.Parameters.AddWithValue("$completed", ToUnixMilliseconds(Today.AddSeconds(-2)));
+            command.Parameters.AddWithValue("$pending_clear", (int)PassageClearState.PendingClear);
+            command.Parameters.AddWithValue("$created", ToUnixMilliseconds(Today.AddSeconds(-2)));
+            command.ExecuteNonQuery();
+        }
+
+        using var store = new SqlitePassageRecordStore(legacy.Path);
+
+        var original = store.GetDetails(legacy.PassageId)!;
+        Assert.Equal(11, original.ExpectedVehicleCount);
+        Assert.Equal((ushort)0x0003, Assert.Single(original.RfidObservations).RfidValue);
+        var legacyAlarm = store.GetDetails(legacyAlarmPassageId)!;
+        Assert.Equal(PassageOutcome.UncouplingAlarm, legacyAlarm.Outcome);
+        Assert.Equal(7, legacyAlarm.ExpectedVehicleCount);
+        Assert.Equal(6, legacyAlarm.DetectedVehicleCount);
+        Assert.Equal(AlarmStatus.Unconfirmed, legacyAlarm.AlarmStatus);
+        Assert.False(IsColumnNotNullOnPath(legacy.Path, "expected_vehicle_count"));
+
+        var unverified = new PassageRecord(
+            Guid.NewGuid(),
+            "RFID-01",
+            0x01,
+            0x0002,
+            new ushort[] { 0x0002, 0x0011 },
+            null,
+            PassageOutcome.Unverified,
+            Today,
+            Today.AddSeconds(2));
+        store.Save(unverified);
+
+        var saved = store.GetDetails(unverified.PassageId)!;
+        Assert.True((object?)saved.ExpectedVehicleCount is null);
+        Assert.Equal(PassageOutcome.Unverified, saved.Outcome);
+        Assert.Equal(2, saved.DetectedVehicleCount);
+        Assert.Null(saved.AlarmStatus);
+        Assert.Null(saved.VehicleNo);
+        Assert.Null(saved.VehicleName);
+        Assert.Equal(Today, saved.StartedAt);
+        Assert.Equal(Today.AddSeconds(2), saved.CompletedAt);
+        using var migratedConnection = legacy.OpenConnection();
+        Assert.Equal(6L, ExecuteScalar<long>(migratedConnection, "PRAGMA user_version;"));
+        using var foreignKeyCheck = migratedConnection.CreateCommand();
+        foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
+        using var foreignKeyReader = foreignKeyCheck.ExecuteReader();
+        Assert.False(foreignKeyReader.Read());
+    }
+
+    [Fact]
+    public void Unverified_records_are_not_returned_by_alarm_or_warning_queries()
+    {
+        using var database = new TemporaryDatabase();
+        var unverified = new PassageRecord(
+            Guid.NewGuid(),
+            "RFID-01",
+            0x01,
+            null,
+            new ushort[] { 0x0011 },
+            null,
+            PassageOutcome.Unverified,
+            Today,
+            Today.AddSeconds(30),
+            warningMessages: new[] { "识别诊断提示" });
+        var alarm = CreateRecordWithStation(
+            Guid.NewGuid(), "RFID-01", 0x01, Today.AddSeconds(31), PassageOutcome.UncouplingAlarm);
+        database.Store.Save(unverified);
+        database.Store.Save(alarm);
+
+        var query = database.Store.Query(new PassageQuery { IncludeWarnings = true, PageSize = 20 });
+
+        Assert.False(unverified.IsAlert);
+        Assert.DoesNotContain(query.Items, item => item.PassageId == unverified.PassageId);
+        Assert.Equal(alarm.PassageId, Assert.Single(query.Items).PassageId);
+        Assert.Equal(alarm.PassageId, Assert.Single(database.Store.GetUnacknowledgedAlarms()).PassageId);
     }
 
     [Fact]
@@ -41,6 +166,49 @@ public sealed class SqlitePassageRecordStoreTests
         Assert.Equal(new ushort[] { 0x0003, 0x001D }, saved.RfidObservations.Select(item => item.RfidValue));
         Assert.Equal(1, saved.RfidObservations[0].BatchNo);
         Assert.Equal(2, saved.RfidObservations[1].BatchNo);
+    }
+
+    [Fact]
+    public void Save_and_load_round_trip_vehicle_identity_fields()
+    {
+        using var database = new TemporaryDatabase();
+        var constructor = typeof(PassageRecord).GetConstructors().Single();
+        var parameters = constructor.GetParameters();
+        Assert.Contains(parameters, parameter => parameter.Name == "vehicleName");
+        Assert.Contains(parameters, parameter => parameter.Name == "vehicleHeadRfid");
+        Assert.Contains(parameters, parameter => parameter.Name == "vehicleNo");
+        var arguments = parameters.Select(parameter => parameter.Name switch
+        {
+            "passageId" => (object)Guid.Parse("a1111111-1111-1111-1111-111111111111"),
+            "stationId" => "RFID-01",
+            "stationAddress" => (byte)0x01,
+            "headRfid" => (ushort?)0x0001,
+            "observedRfids" => new ushort[] { 0x0001, 0x0011 },
+            "expectedVehicleCount" => 7,
+            "outcome" => PassageOutcome.UncouplingAlarm,
+            "startedAt" => Today.AddSeconds(-10),
+            "completedAt" => Today,
+            "warningMessages" => new[] { "脱节报警" },
+            "alarmMessage" => "脱节报警",
+            "rfidObservations" => null,
+            "clearState" => PassageClearState.PendingClear,
+            "clearedAt" => null,
+            "createdAt" => Today,
+            "alarmAcknowledgedAt" => null,
+            "alarmRecoveredAt" => null,
+            "vehicleName" => "01号矿车",
+            "vehicleHeadRfid" => (ushort?)0x0001,
+            "vehicleNo" => "K001",
+            _ => throw new InvalidOperationException($"Unexpected PassageRecord constructor parameter: {parameter.Name}")
+        }).ToArray();
+        var record = Assert.IsType<PassageRecord>(constructor.Invoke(arguments));
+
+        database.Store.Save(record);
+
+        var saved = database.Store.GetDetails(record.PassageId)!;
+        Assert.Equal("01号矿车", GetProperty<string>(saved, "VehicleName"));
+        Assert.Equal((ushort)0x0001, GetProperty<ushort?>(saved, "VehicleHeadRfid"));
+        Assert.Equal("K001", GetProperty<string>(saved, "VehicleNo"));
     }
 
     [Fact]
@@ -196,9 +364,13 @@ public sealed class SqlitePassageRecordStoreTests
         var record = store.GetDetails(legacy.PassageId)!;
 
         using var migratedConnection = legacy.OpenConnection();
-        Assert.Equal(3L, ExecuteScalar<long>(migratedConnection, "PRAGMA user_version;"));
+        Assert.Equal(6L, ExecuteScalar<long>(migratedConnection, "PRAGMA user_version;"));
+        Assert.True(HasColumn(migratedConnection, "passage_record", "vehicle_name"));
+        Assert.True(HasColumn(migratedConnection, "passage_record", "vehicle_head_rfid"));
+        Assert.True(HasColumn(migratedConnection, "passage_record", "vehicle_no"));
         Assert.Equal(Today, record.AlarmAcknowledgedAt);
         Assert.Equal(Today, record.AlarmRecoveredAt);
+        Assert.Equal(AlarmStatus.Recovered, record.AlarmStatus);
         Assert.Empty(store.GetUnacknowledgedAlarms());
     }
 
@@ -215,6 +387,65 @@ public sealed class SqlitePassageRecordStoreTests
 
         Assert.Null(record.AlarmAcknowledgedAt);
         Assert.Null(record.AlarmRecoveredAt);
+        Assert.Equal(AlarmStatus.Unconfirmed, record.AlarmStatus);
+    }
+
+    [Fact]
+    public void V3_database_migrates_nullable_vehicle_identity_fields()
+    {
+        using var legacy = new LegacyV2Database(
+            PassageOutcome.UncouplingAlarm,
+            PassageClearState.PendingClear,
+            Today);
+        using (var connection = legacy.OpenConnection())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = @"
+ALTER TABLE passage_record ADD COLUMN alarm_acknowledged_at INTEGER NULL;
+ALTER TABLE passage_record ADD COLUMN alarm_recovered_at INTEGER NULL;
+PRAGMA user_version=3;";
+            command.ExecuteNonQuery();
+        }
+
+        using var store = new SqlitePassageRecordStore(legacy.Path);
+        var record = store.GetDetails(legacy.PassageId)!;
+
+        using var migratedConnection = legacy.OpenConnection();
+        Assert.Equal(6L, ExecuteScalar<long>(migratedConnection, "PRAGMA user_version;"));
+        Assert.True(HasColumn(migratedConnection, "passage_record", "vehicle_name"));
+        Assert.True(HasColumn(migratedConnection, "passage_record", "vehicle_head_rfid"));
+        Assert.True(HasColumn(migratedConnection, "passage_record", "vehicle_no"));
+        Assert.Null(GetProperty<string?>(record, "VehicleName"));
+        Assert.Null(GetProperty<ushort?>(record, "VehicleHeadRfid"));
+        Assert.Null(GetProperty<string?>(record, "VehicleNo"));
+    }
+
+    [Fact]
+    public void V4_database_migrates_vehicle_number_as_nullable_and_preserves_legacy_rows()
+    {
+        using var legacy = new LegacyV2Database(
+            PassageOutcome.UncouplingAlarm,
+            PassageClearState.PendingClear,
+            Today);
+        using (var connection = legacy.OpenConnection())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = @"
+ALTER TABLE passage_record ADD COLUMN alarm_acknowledged_at INTEGER NULL;
+ALTER TABLE passage_record ADD COLUMN alarm_recovered_at INTEGER NULL;
+ALTER TABLE passage_record ADD COLUMN vehicle_name TEXT NULL;
+ALTER TABLE passage_record ADD COLUMN vehicle_head_rfid INTEGER NULL;
+PRAGMA user_version=4;";
+            command.ExecuteNonQuery();
+        }
+
+        using var store = new SqlitePassageRecordStore(legacy.Path);
+        var record = store.GetDetails(legacy.PassageId)!;
+
+        using var migratedConnection = legacy.OpenConnection();
+        Assert.Equal(6L, ExecuteScalar<long>(migratedConnection, "PRAGMA user_version;"));
+        Assert.True(HasColumn(migratedConnection, "passage_record", "vehicle_no"));
+        Assert.Null(GetProperty<string?>(record, "VehicleNo"));
     }
 
     [Fact]
@@ -391,7 +622,10 @@ PRAGMA user_version=1;";
             using var versionCommand = migratedConnection.CreateCommand();
             versionCommand.CommandText = "PRAGMA user_version;";
 
-            Assert.Equal(3L, Convert.ToInt64(versionCommand.ExecuteScalar(), CultureInfo.InvariantCulture));
+            Assert.Equal(6L, Convert.ToInt64(versionCommand.ExecuteScalar(), CultureInfo.InvariantCulture));
+            Assert.True(HasColumn(migratedConnection, "passage_record", "vehicle_name"));
+            Assert.True(HasColumn(migratedConnection, "passage_record", "vehicle_head_rfid"));
+            Assert.True(HasColumn(migratedConnection, "passage_record", "vehicle_no"));
             Assert.Equal(PassageRecord.LegacyStationId, record.StationId);
             var unixEpoch = new DateTimeOffset(1970, 1, 1, 0, 0, 0, TimeSpan.Zero);
             Assert.Equal(1, store.GetStatistics(unixEpoch.AddMilliseconds(1000)).ByStation[PassageRecord.LegacyStationId]);
@@ -559,6 +793,36 @@ PRAGMA user_version=1;";
         }
 
         return false;
+    }
+
+    private static bool IsColumnNotNull(SQLiteConnection connection, string tableName, string columnName)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return reader.GetInt32(3) != 0;
+            }
+        }
+
+        throw new InvalidOperationException($"Column not found: {tableName}.{columnName}");
+    }
+
+    private static bool IsColumnNotNullOnPath(string path, string columnName)
+    {
+        using var connection = new SQLiteConnection($"Data Source={path};Version=3;");
+        connection.Open();
+        return IsColumnNotNull(connection, "passage_record", columnName);
+    }
+
+    private static T? GetProperty<T>(object target, string propertyName)
+    {
+        var property = target.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(property);
+        return (T?)property!.GetValue(target);
     }
 
     private sealed class TemporaryDatabase : IDisposable

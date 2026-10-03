@@ -57,6 +57,25 @@ public sealed class PassageLifecycleTests
     }
 
     [Fact]
+    public void Single_head_tag_becomes_an_uncoupling_passage_after_timeout()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var coordinator = CreateCoordinator(store);
+        var headOnly = new ushort[] { 0x0001 };
+
+        coordinator.ProcessFrame(CreateFrame(0x01, Start, headOnly));
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(29.9), headOnly));
+        coordinator.Evaluate(Start.AddSeconds(30));
+
+        Assert.Equal(PassageLifecycleState.Alarm, coordinator.States[0x01].LifecycleState);
+        var record = Assert.Single(store.Records);
+        Assert.Equal(PassageOutcome.UncouplingAlarm, record.Outcome);
+        Assert.Equal(11, record.ExpectedVehicleCount);
+        Assert.Equal(1, record.DetectedVehicleCount);
+        Assert.Equal("脱节报警", record.AlarmMessage);
+    }
+
+    [Fact]
     public void Uncoupling_alarm_stays_red_until_the_alarm_passage_is_cleared()
     {
         var store = new InMemoryPassageRecordStore();
@@ -156,6 +175,49 @@ public sealed class PassageLifecycleTests
     }
 
     [Fact]
+    public void Stations_use_independent_expected_vehicle_counts_with_global_fallback()
+    {
+        var store = new InMemoryPassageRecordStore();
+        var stations = new[]
+        {
+            new RfidStationConfig
+            {
+                StationId = "RFID-620-01",
+                Name = "一号站",
+                IpAddress = "127.0.0.1",
+                Port = 62001,
+                ProtocolAddress = 0x01,
+                Enabled = true
+            },
+            new RfidStationConfig
+            {
+                StationId = "RFID-620-02",
+                Name = "二号站",
+                IpAddress = "127.0.0.1",
+                Port = 62002,
+                ProtocolAddress = 0x02,
+                ExpectedVehicleCount = 6,
+                Enabled = true
+            }
+        };
+        var coordinator = new RfidRuntimeCoordinator(
+            stations,
+            new RfidSettings { ExpectedVehicleCount = 11, InterVehicleTimeoutSeconds = 30 },
+            store);
+        var sixRfids = new ushort[] { 0x0002, 0x0021, 0x0022, 0x0023, 0x0024, 0x0025 };
+
+        coordinator.ProcessFrame(CreateFrame(0x01, Start, sixRfids, new IPEndPoint(IPAddress.Loopback, 62001)));
+        coordinator.ProcessFrame(CreateFrame(0x02, Start, sixRfids, new IPEndPoint(IPAddress.Loopback, 62002)));
+
+        Assert.Equal(11, coordinator.States[0x01].ExpectedVehicleCount);
+        Assert.Equal(6, coordinator.States[0x01].DetectedVehicleCount);
+        Assert.Equal(PassageLifecycleState.Recognizing, coordinator.States[0x01].LifecycleState);
+        Assert.Equal(6, coordinator.States[0x02].ExpectedVehicleCount);
+        Assert.Equal(PassageLifecycleState.Completed, coordinator.States[0x02].LifecycleState);
+        Assert.Equal(6, Assert.Single(store.Records).ExpectedVehicleCount);
+    }
+
+    [Fact]
     public void Passage_records_keep_stable_station_ids_for_same_protocol_at_distinct_endpoints()
     {
         var store = new InMemoryPassageRecordStore();
@@ -196,15 +258,17 @@ public sealed class PassageLifecycleTests
     {
         var store = new InMemoryPassageRecordStore();
         var coordinator = CreateCoordinator(store);
-        var values = new ushort[] { 0x0001, 0x0003, 0x000B, 0x000C, 0x000D, 0x000E, 0x000F, 0x0010, 0x0011, 0x0012, 0x0013 };
+        var firstValues = new ushort[] { 0x0001, 0x0003, 0x000B, 0x000C, 0x000D, 0x000E, 0x000F, 0x0010, 0x0011, 0x0012 };
+        var completedValues = new ushort[] { 0x0003, 0x0001, 0x000B, 0x000C, 0x000D, 0x000E, 0x000F, 0x0010, 0x0011, 0x0012, 0x0013 };
 
-        coordinator.ProcessFrame(CreateFrame(0x01, Start, values));
+        coordinator.ProcessFrame(CreateFrame(0x01, Start, firstValues));
+        coordinator.ProcessFrame(CreateFrame(0x01, Start.AddSeconds(1), completedValues));
 
         var state = coordinator.States[0x01];
         Assert.Equal(PassageLifecycleState.Completed, state.LifecycleState);
         Assert.Equal(RfidStationVisualState.Warning, state.VisualState);
         Assert.Equal(PassageOutcome.Completed, store.Records[0].Outcome);
-        Assert.Contains(state.WarningMessages, warning => warning.StartsWith("检测到多个车头标签", StringComparison.Ordinal));
+        Assert.Contains(state.WarningMessages, warning => warning.StartsWith("检测到多个车头槽位RFID", StringComparison.Ordinal));
     }
 
     [Fact]

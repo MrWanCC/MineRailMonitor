@@ -202,6 +202,7 @@ public partial class HistoryPage : UserControl
         {
             nameof(PassageOutcome.Completed) => PassageOutcome.Completed,
             nameof(PassageOutcome.UncouplingAlarm) => PassageOutcome.UncouplingAlarm,
+            nameof(PassageOutcome.Unverified) => PassageOutcome.Unverified,
             _ => null
         };
     }
@@ -367,7 +368,13 @@ public partial class HistoryPage : UserControl
 
     private static string FormatRfid(ushort? value) => value.HasValue ? value.Value.ToString("X4") : "-";
 
-    private static string FormatOutcome(PassageOutcome value) => value == PassageOutcome.Completed ? "正常" : "脱节报警";
+    private static string FormatOutcome(PassageOutcome value) => value switch
+    {
+        PassageOutcome.Completed => "正常",
+        PassageOutcome.UncouplingAlarm => "脱节报警",
+        PassageOutcome.Unverified => "完整性未判定",
+        _ => "未知"
+    };
 
     private static string FormatClearState(PassageClearState value) => value == PassageClearState.Cleared ? "已清除" : "待清除";
 
@@ -380,7 +387,7 @@ public partial class HistoryPage : UserControl
             StationText = stationText;
             HeadRfidText = FormatRfid(record.HeadRfid);
             DetectedCountText = record.DetectedVehicleCount.ToString(CultureInfo.InvariantCulture);
-            ExpectedCountText = record.ExpectedVehicleCount.ToString(CultureInfo.InvariantCulture);
+            ExpectedCountText = record.ExpectedVehicleCount?.ToString(CultureInfo.InvariantCulture) ?? "未配置";
             OutcomeText = FormatOutcome(record.Outcome);
             ClearStateText = FormatClearState(record.ClearState);
         }

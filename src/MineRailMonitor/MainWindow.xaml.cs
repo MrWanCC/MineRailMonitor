@@ -1365,7 +1365,7 @@ public partial class MainWindow : Window
     private void UpdateRecognitionStatus()
     {
         // The canonical head-warning text is produced by RfidRuntimeCoordinator:
-        // 未检测到车头标签、首个识别标签不是有效车头标签、检测到多个车头标签、协议数据告警。
+        // 未检测到车头槽位(Position 0)、首个识别RFID未出现在车头槽位(Position 0)、检测到多个车头槽位RFID、协议数据告警。
         if (_monitorPage is null)
         {
             return;
@@ -1631,7 +1631,7 @@ public partial class MainWindow : Window
         ? new RfidSettings
         {
             PollIntervalMs = 200,
-            ExpectedVehicleCount = 11,
+            ExpectedVehicleCount = project.RfidSettings.ExpectedVehicleCount,
             InterVehicleTimeoutSeconds = _acceptanceOptions.InterVehicleTimeoutSeconds,
             EmptyRfidValue = 0
         }

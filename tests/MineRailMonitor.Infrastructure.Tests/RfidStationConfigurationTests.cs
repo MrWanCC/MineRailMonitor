@@ -29,6 +29,58 @@ public sealed class RfidStationConfigurationTests
     }
 
     [Fact]
+    public async Task Save_and_load_preserves_station_expected_vehicle_count()
+    {
+        using var project = TemporaryProject.Create();
+        var service = new ProjectConfigService(new FileLogger(Path.Combine(project.Path, "test-logs")));
+        var station = CreateStation("RFID-06", "六节站", "127.0.0.1", 62306, 0x36);
+        station.ExpectedVehicleCount = 6;
+
+        var save = await service.SaveRfidStationsAsync(project.Path, new[] { station });
+        var loaded = await service.LoadAsync(project.Path);
+
+        Assert.True(save.Succeeded, string.Join(Environment.NewLine, save.Errors));
+        Assert.Equal(6, Assert.Single(loaded.Project!.RfidStations).ExpectedVehicleCount);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(15)]
+    public async Task Save_rejects_out_of_range_station_expected_vehicle_count(int count)
+    {
+        using var project = TemporaryProject.Create();
+        var service = new ProjectConfigService(new FileLogger(Path.Combine(project.Path, "test-logs")));
+        var station = CreateStation("RFID-06", "六节站", "127.0.0.1", 62306, 0x36);
+        station.ExpectedVehicleCount = count;
+
+        var save = await service.SaveRfidStationsAsync(project.Path, new[] { station });
+
+        Assert.False(save.Succeeded);
+        Assert.Contains(save.Errors, error => error.IndexOf("标准列车节数", StringComparison.Ordinal) >= 0);
+    }
+
+    [Fact]
+    public async Task Load_rejects_out_of_range_station_expected_vehicle_count()
+    {
+        using var project = TemporaryProject.Create("""
+            {
+              "Id": "test",
+              "Name": "test",
+              "RfidStations": [
+                { "StationId": "RFID-15", "Name": "异常站", "IpAddress": "127.0.0.1", "Port": 62315, "ProtocolAddress": 21, "ExpectedVehicleCount": 15, "Enabled": true }
+              ],
+              "Stations": []
+            }
+            """);
+        var service = new ProjectConfigService(new FileLogger(Path.Combine(project.Path, "test-logs")));
+
+        var result = await service.LoadAsync(project.Path);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Errors, error => error.IndexOf("标准列车节数", StringComparison.Ordinal) >= 0);
+    }
+
+    [Fact]
     public async Task Load_rfid_stations_maps_legacy_destination_fields_without_inventing_values()
     {
         using var project = TemporaryProject.Create("""

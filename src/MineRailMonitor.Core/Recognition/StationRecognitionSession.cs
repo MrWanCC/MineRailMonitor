@@ -8,16 +8,19 @@ public sealed class StationRecognitionSession
     private readonly ushort _emptyRfidValue;
     private readonly List<ushort> _detectedVehicleRfids = new();
     private readonly HashSet<ushort> _detectedVehicleSet = new();
+    private readonly List<ushort> _observedHeadRfids = new();
+    private readonly HashSet<ushort> _observedHeadRfidSet = new();
     private readonly List<IReadOnlyList<ushort>> _observedVehicleBatches = new();
     private readonly List<PassageRfidObservation> _rfidObservations = new();
 
     public StationRecognitionSession(
         byte stationAddress,
-        int expectedVehicleCount,
+        int? expectedVehicleCount,
         TimeSpan interVehicleTimeout,
-        ushort emptyRfidValue = 0)
+        ushort emptyRfidValue = 0,
+        VehicleMatchResult? vehicleMatchResult = null)
     {
-        if (expectedVehicleCount < 1 || expectedVehicleCount > 14)
+        if (expectedVehicleCount is < 1 or > 14)
         {
             throw new ArgumentOutOfRangeException(nameof(expectedVehicleCount));
         }
@@ -27,6 +30,7 @@ public sealed class StationRecognitionSession
         }
         StationAddress = stationAddress;
         ExpectedVehicleCount = expectedVehicleCount;
+        VehicleMatchResult = vehicleMatchResult?.IsMatched == true ? vehicleMatchResult : null;
         _interVehicleTimeout = interVehicleTimeout;
         _emptyRfidValue = emptyRfidValue;
     }
@@ -50,7 +54,37 @@ public sealed class StationRecognitionSession
 
     public int DetectedVehicleCount => _detectedVehicleRfids.Count;
 
-    public int ExpectedVehicleCount { get; }
+    public int? ExpectedVehicleCount { get; }
+
+    public TimeSpan InterVehicleTimeout => _interVehicleTimeout;
+
+    public VehicleMatchResult? VehicleMatchResult { get; private set; }
+
+    public string? VehicleName => VehicleMatchResult?.VehicleName;
+
+    public string? VehicleNo => VehicleMatchResult?.VehicleNo;
+
+    public ushort? VehicleHeadRfid => VehicleMatchResult?.HeadRfid;
+
+    internal bool TrySupplementVehicleIdentity(VehicleMatchResult matchResult)
+    {
+        if (matchResult is null) throw new ArgumentNullException(nameof(matchResult));
+        if (VehicleMatchResult is not null || !matchResult.IsMatched || !matchResult.HeadRfid.HasValue)
+        {
+            return false;
+        }
+
+        VehicleMatchResult = new VehicleMatchResult
+        {
+            IsMatched = true,
+            HeadRfid = matchResult.HeadRfid,
+            VehicleNo = matchResult.VehicleNo,
+            VehicleName = matchResult.VehicleName,
+            ExpectedVehicleCount = ExpectedVehicleCount,
+            Source = matchResult.Source
+        };
+        return true;
+    }
 
     public DateTimeOffset? FirstVehicleAt { get; private set; }
 
@@ -82,13 +116,20 @@ public sealed class StationRecognitionSession
             throw new ArgumentException("Frame station address does not match this session.", nameof(frame));
         }
 
-        HeadRfid = frame.HeadRfid;
+        HeadRfid = RfidRecognitionRules.GetPositionZeroRfid(frame, _emptyRfidValue) ?? _emptyRfidValue;
         ReportedCardCount = frame.ReportedCardCount;
         ActualNonZeroSlotCount = frame.ActualNonZeroSlotCount > 0 || frame.ValidRfids.Count > 0
             ? frame.ActualNonZeroSlotCount
             : frame.RawRfidSlots.Count(value => value != _emptyRfidValue);
         ProtocolDataWarning = frame.ProtocolDataWarning || ReportedCardCount != ActualNonZeroSlotCount;
         var analysis = RfidRecognitionRules.Analyze(frame, _emptyRfidValue);
+        foreach (var headRfid in analysis.HeadRfids)
+        {
+            if (_observedHeadRfidSet.Add(headRfid))
+            {
+                _observedHeadRfids.Add(headRfid);
+            }
+        }
 
         var added = false;
         var newBatch = new List<ushort>();
@@ -122,22 +163,17 @@ public sealed class StationRecognitionSession
         {
             return;
         }
-        if (DetectedVehicleCount >= 2)
-        {
-            FirstVehicleAt ??= frame.ReceivedAt;
-            LastNewVehicleAt = frame.ReceivedAt;
-        }
+        FirstVehicleAt ??= frame.ReceivedAt;
+        LastNewVehicleAt = frame.ReceivedAt;
 
-        State = DetectedVehicleCount >= ExpectedVehicleCount
+        State = ExpectedVehicleCount is int expectedVehicleCount && DetectedVehicleCount >= expectedVehicleCount
             ? StationRecognitionState.Completed
-            : DetectedVehicleCount >= 2
-                ? StationRecognitionState.Recognizing
-                : StationRecognitionState.Waiting;
+            : StationRecognitionState.Recognizing;
     }
 
     private void UpdateHeadDiagnostics()
     {
-        HeadTagRfids = _detectedVehicleRfids.Where(RfidRecognitionRules.IsHeadRfid).ToArray();
+        HeadTagRfids = _observedHeadRfids.ToArray();
         HeadTagCount = HeadTagRfids.Count;
         FirstValidRfid = _detectedVehicleRfids.Count == 0 ? null : _detectedVehicleRfids[0];
 
@@ -146,7 +182,7 @@ public sealed class StationRecognitionSession
         {
             warnings.Add(RfidHeadWarning.MissingHeadTag);
         }
-        if (FirstValidRfid.HasValue && !RfidRecognitionRules.IsHeadRfid(FirstValidRfid.Value))
+        if (FirstValidRfid.HasValue && !_observedHeadRfidSet.Contains(FirstValidRfid.Value))
         {
             warnings.Add(RfidHeadWarning.FirstTagIsNotHead);
         }
@@ -164,7 +200,9 @@ public sealed class StationRecognitionSession
             LastNewVehicleAt.HasValue &&
             now - LastNewVehicleAt.Value >= _interVehicleTimeout)
         {
-            State = StationRecognitionState.UncouplingAlarm;
+            State = ExpectedVehicleCount.HasValue
+                ? StationRecognitionState.UncouplingAlarm
+                : StationRecognitionState.Unverified;
         }
     }
 }

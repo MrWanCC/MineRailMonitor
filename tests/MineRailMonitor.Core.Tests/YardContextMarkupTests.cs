@@ -31,7 +31,7 @@ public sealed class YardContextMarkupTests
     }
 
     [Fact]
-    public void All_record_pages_receive_the_current_yard_display_scope()
+    public void Record_and_statistics_pages_receive_the_current_yard_scope()
     {
         var code = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));
         var monitorCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "MonitorPage.xaml.cs"));
@@ -44,7 +44,7 @@ public sealed class YardContextMarkupTests
         Assert.Contains("_monitorPage.SetRfidRuntimeStates", code, StringComparison.Ordinal);
         Assert.Contains("_historyPage?.SetDisplayScope", code, StringComparison.Ordinal);
         Assert.Contains("_alarmHistoryPage?.SetDisplayScope", code, StringComparison.Ordinal);
-        Assert.Contains("_statisticsPage?.SetDisplayScope", code, StringComparison.Ordinal);
+        Assert.Contains("_statisticsPage?.SetDisplayScope(stationIds, selectedYardId)", code, StringComparison.Ordinal);
         Assert.Contains("_communicationPage.SetDisplayScope", code, StringComparison.Ordinal);
         Assert.Contains("FilterCurrentYardStates(GetAllRuntimeStates()).ToArray()", code, StringComparison.Ordinal);
         Assert.Contains("YardPassageFilter.BuildStatistics", code, StringComparison.Ordinal);
@@ -53,7 +53,24 @@ public sealed class YardContextMarkupTests
         Assert.Contains("ClearDetails", monitorCode, StringComparison.Ordinal);
         Assert.Contains("StationIds = _displayScopeStationIds", historyCode, StringComparison.Ordinal);
         Assert.Contains("StationIds = _displayScopeStationIds", alarmCode, StringComparison.Ordinal);
-        Assert.Contains("YardPassageFilter.Filter", statisticsCode, StringComparison.Ordinal);
+        Assert.Contains("GetVehicleStatistics", statisticsCode, StringComparison.Ordinal);
+        Assert.Contains("public void SetDisplayScope", statisticsCode, StringComparison.Ordinal);
+        Assert.Contains("_displayScopeStationIds", statisticsCode, StringComparison.Ordinal);
+        Assert.Contains("stationIds: _displayScopeStationIds", statisticsCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("YardPassageFilter.Filter", statisticsCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Empty_current_yard_station_scope_is_forwarded_and_reported_without_global_fallback()
+    {
+        var mainWindowCode = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));
+        var statisticsCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml.cs"));
+        var applyScopeMethod = ExtractMethod(mainWindowCode, "private void ApplyCurrentYardDisplayScope");
+
+        Assert.Contains("var stationIds = scope.IsGlobal ? null : scope.RfidStationIds;", applyScopeMethod, StringComparison.Ordinal);
+        Assert.Contains("_statisticsPage?.SetDisplayScope(stationIds, selectedYardId)", applyScopeMethod, StringComparison.Ordinal);
+        Assert.Contains("if (_displayScopeStationIds is { Count: 0 })", statisticsCode, StringComparison.Ordinal);
+        Assert.Contains("当前站场未配置 RFID 基站", statisticsCode, StringComparison.Ordinal);
     }
 
     [Fact]

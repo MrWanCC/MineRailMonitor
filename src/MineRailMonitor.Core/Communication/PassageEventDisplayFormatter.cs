@@ -122,6 +122,8 @@ public static class PassageEventDisplayFormatter
         PassageEventTypes.Alarm => "脱节报警",
         PassageEventTypes.Unverified => "完整性未判定",
         PassageEventTypes.Clear => "清除完成",
+        PassageEventTypes.PersistenceFailed => "数据库保存失败",
+        PassageEventTypes.PersistenceRecovered => "数据库保存恢复",
         _ => string.IsNullOrWhiteSpace(eventType) ? "未知事件" : eventType
     };
 
@@ -133,6 +135,8 @@ public static class PassageEventDisplayFormatter
         PassageEventTypes.Alarm => "报警",
         PassageEventTypes.Unverified => "完整性未判定",
         PassageEventTypes.Clear => "已清除",
+        PassageEventTypes.PersistenceFailed => "待恢复",
+        PassageEventTypes.PersistenceRecovered => "已恢复",
         _ => "未知"
     };
 
@@ -144,6 +148,8 @@ public static class PassageEventDisplayFormatter
         PassageEventTypes.Alarm => "Alarm",
         PassageEventTypes.Unverified => "Unverified",
         PassageEventTypes.Clear => "Clear",
+        PassageEventTypes.PersistenceFailed => "Warning",
+        PassageEventTypes.PersistenceRecovered => "Clear",
         _ => "Unknown"
     };
 
@@ -166,6 +172,10 @@ public static class PassageEventDisplayFormatter
                 return "清除完成";
             case PassageEventTypes.Unverified:
                 return $"完整性未判定；已识别{detected}个RFID；{GetUnverifiedReason(passageEvent.Reason)}";
+            case PassageEventTypes.PersistenceFailed:
+                return $"数据库保存失败（{FormatNumber(passageEvent.FailureCount)}次）；{passageEvent.Reason}";
+            case PassageEventTypes.PersistenceRecovered:
+                return $"Passage记录已恢复保存；此前失败{FormatNumber(passageEvent.FailureCount)}次";
             default:
                 return string.IsNullOrWhiteSpace(passageEvent.Reason)
                     ? passageEvent.EventType
@@ -219,6 +229,16 @@ public static class PassageEventDisplayFormatter
                 $"已识别: {FormatNumber(passageEvent.DetectedCount)}个唯一RFID",
                 $"结果: 完整性未判定",
                 $"原因: {GetUnverifiedReason(passageEvent.Reason)}"
+            },
+            PassageEventTypes.PersistenceFailed => new[]
+            {
+                $"失败次数: {FormatNumber(passageEvent.FailureCount)}",
+                $"原因: {passageEvent.Reason ?? "--"}"
+            },
+            PassageEventTypes.PersistenceRecovered => new[]
+            {
+                "状态: 数据库保存恢复",
+                $"此前失败: {FormatNumber(passageEvent.FailureCount)}次"
             },
             PassageEventTypes.Clear => new[] { "清除完成" },
             _ => new[] { passageEvent.Reason ?? passageEvent.EventType }

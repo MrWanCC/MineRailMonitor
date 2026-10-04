@@ -5,6 +5,7 @@ namespace MineRailMonitor.Core.Models;
 public sealed class StationRuntimeState
 {
     private readonly HashSet<Guid> _unacknowledgedAlarmPassageIds = new();
+    private readonly List<PassagePersistenceFault> _pendingPersistenceFaults = new();
 
     internal StationRuntimeState(byte stationAddress, int? expectedVehicleCount, ushort emptyRfidValue)
         : this($"RFID-{stationAddress:X2}", $"RFID-{stationAddress:X2}", stationAddress, expectedVehicleCount, emptyRfidValue)
@@ -42,6 +43,12 @@ public sealed class StationRuntimeState
     public PassageRecord? LastPassageRecord { get; internal set; }
 
     public bool PersistenceWarning { get; internal set; }
+
+    public PassagePersistenceState PersistenceState => _pendingPersistenceFaults.Count == 0
+        ? PassagePersistenceState.Healthy
+        : PassagePersistenceState.PersistenceFault;
+
+    public IReadOnlyList<PassagePersistenceFault> PendingPersistenceFaults => _pendingPersistenceFaults.ToArray();
 
     public string? PersistenceErrorMessage { get; internal set; }
 
@@ -96,4 +103,17 @@ public sealed class StationRuntimeState
     internal bool RemoveUnacknowledgedAlarm(Guid passageId) => _unacknowledgedAlarmPassageIds.Remove(passageId);
 
     internal bool ContainsUnacknowledgedAlarm(Guid passageId) => _unacknowledgedAlarmPassageIds.Contains(passageId);
+
+    internal PassagePersistenceFault? FindPersistenceFault(Guid passageId) =>
+        _pendingPersistenceFaults.FirstOrDefault(fault => fault.Record.PassageId == passageId);
+
+    internal void AddPersistenceFault(PassagePersistenceFault fault)
+    {
+        if (FindPersistenceFault(fault.Record.PassageId) is null)
+        {
+            _pendingPersistenceFaults.Add(fault);
+        }
+    }
+
+    internal bool RemovePersistenceFault(PassagePersistenceFault fault) => _pendingPersistenceFaults.Remove(fault);
 }

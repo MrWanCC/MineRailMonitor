@@ -91,6 +91,45 @@ public sealed class PassageEventJsonlLoggerTests
     }
 
     [Fact]
+    public void Writes_passage_persistence_failure_diagnostic_to_jsonl()
+    {
+        var logsDirectory = Path.Combine(Path.GetTempPath(), "MineRailMonitorTests", Guid.NewGuid().ToString("N"));
+        var passageId = Guid.NewGuid();
+        var occurredAt = new DateTimeOffset(2026, 10, 4, 10, 30, 35, TimeSpan.FromHours(8));
+
+        try
+        {
+            new PassageEventJsonlLogger(logsDirectory).Write(new PassageEvent
+            {
+                PassageId = passageId,
+                EventType = PassageEventTypes.PersistenceFailed,
+                OccurredAt = occurredAt,
+                StationId = "RFID-560-01",
+                StationAddress = 1,
+                FailureCount = 3,
+                Reason = "IOException: 数据库暂不可用"
+            });
+
+            var path = Path.Combine(logsDirectory, "Passage", "passage-event-20261004.jsonl");
+            using var document = JsonDocument.Parse(Assert.Single(File.ReadAllLines(path)));
+
+            Assert.Equal(passageId, document.RootElement.GetProperty("PassageId").GetGuid());
+            Assert.Equal("PASSAGE_PERSISTENCE_FAILED", document.RootElement.GetProperty("EventType").GetString());
+            Assert.Equal("RFID-560-01", document.RootElement.GetProperty("StationId").GetString());
+            Assert.Equal(3, document.RootElement.GetProperty("FailureCount").GetInt32());
+            Assert.Equal("IOException: 数据库暂不可用", document.RootElement.GetProperty("Reason").GetString());
+            Assert.Equal(occurredAt, document.RootElement.GetProperty("OccurredAt").GetDateTimeOffset());
+        }
+        finally
+        {
+            if (Directory.Exists(logsDirectory))
+            {
+                Directory.Delete(logsDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void Runtime_writes_passage_lifecycle_events_through_yard_manager()
     {
         var logsDirectory = Path.Combine(Path.GetTempPath(), "MineRailMonitorTests", Guid.NewGuid().ToString("N"));

@@ -72,6 +72,40 @@ public sealed class PassageEventDisplayFormatterTests
     }
 
     [Fact]
+    public void Displays_persistence_failure_with_passage_identity_and_recovery_state()
+    {
+        var passageId = Guid.Parse("86c053d8-fcb7-4e58-bd6d-f6db4c76c57a");
+        var failure = PassageEventDisplayFormatter.Format(new PassageEvent
+        {
+            PassageId = passageId,
+            EventType = PassageEventTypes.PersistenceFailed,
+            OccurredAt = new DateTimeOffset(2026, 10, 4, 10, 30, 35, TimeSpan.FromHours(8)),
+            StationId = "RFID-560-01",
+            VehicleNo = "K001",
+            FailureCount = 3,
+            Reason = "IOException: 数据库暂不可用"
+        });
+        var recovered = PassageEventDisplayFormatter.Format(new PassageEvent
+        {
+            PassageId = passageId,
+            EventType = PassageEventTypes.PersistenceRecovered,
+            OccurredAt = new DateTimeOffset(2026, 10, 4, 10, 31, 35, TimeSpan.FromHours(8)),
+            StationId = "RFID-560-01",
+            VehicleNo = "K001",
+            FailureCount = 3
+        });
+
+        Assert.Equal("数据库保存失败", failure.EventTypeText);
+        Assert.Equal("待恢复", failure.Status);
+        Assert.Contains("失败（3次）", failure.Content, StringComparison.Ordinal);
+        Assert.Equal(passageId.ToString("D"), failure.PassageIdText);
+        Assert.Equal("RFID-560-01", failure.StationIdText);
+        Assert.Equal("数据库保存恢复", recovered.EventTypeText);
+        Assert.Equal("已恢复", recovered.Status);
+        Assert.Contains("此前失败3次", recovered.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Formats_unverified_terminal_event_with_station_passage_count_and_reason()
     {
         var passageId = Guid.NewGuid();

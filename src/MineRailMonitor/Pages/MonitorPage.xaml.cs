@@ -649,10 +649,29 @@ public partial class MonitorPage : UserControl
         runtimeEvent.Message.IndexOf("脱节", StringComparison.OrdinalIgnoreCase) >= 0;
 
     private static bool IsAlertState(StationRuntimeState state) =>
-        IsUncouplingAlarm(state) || state.WarningMessages.Count > 0;
+        IsUncouplingAlarm(state) ||
+        state.PersistenceState == PassagePersistenceState.PersistenceFault ||
+        state.WarningMessages.Count > 0;
 
     private static RfidAlarmDisplayItem CreateRuntimeAlertItem(StationRuntimeState state)
     {
+        if (state.PersistenceState == PassagePersistenceState.PersistenceFault)
+        {
+            var fault = state.PendingPersistenceFaults
+                .OrderBy(item => item.FailedAt)
+                .Last();
+            var originalAlarm = fault.Record.Outcome == PassageOutcome.UncouplingAlarm
+                ? $"；原Passage结果：{PassageAlarmDisplayFormatter.FormatSummary(fault.Record)}"
+                : string.Empty;
+            return new RfidAlarmDisplayItem(
+                fault.LastAttemptAt.ToLocalTime().ToString("HH:mm:ss"),
+                state.StationName,
+                "数据库保存失败",
+                $"{state.PersistenceErrorMessage ?? fault.ToDiagnosticMessage()}{originalAlarm}",
+                fault.LastAttemptAt,
+                fault.Record.PassageId);
+        }
+
         var isAlarm = IsUncouplingAlarm(state);
         var warningText = string.Join("；", state.WarningMessages);
         var passageAlarmSummary = state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm
@@ -679,6 +698,11 @@ public partial class MonitorPage : UserControl
         if (configuration?.Enabled == false)
         {
             return "已禁用";
+        }
+
+        if (state?.PersistenceState == PassagePersistenceState.PersistenceFault)
+        {
+            return "数据库保存失败";
         }
 
         if (state is not null && IsUncouplingAlarm(state))
@@ -710,7 +734,7 @@ public partial class MonitorPage : UserControl
 
     private static string GetTaskCategory(string statusText, bool isActive)
     {
-        if (statusText is "脱节报警" or "识别不完整")
+        if (statusText is "脱节报警" or "识别不完整" or "数据库保存失败")
         {
             return "异常";
         }
@@ -726,7 +750,7 @@ public partial class MonitorPage : UserControl
     private static Brush GetTaskStatusBrush(string statusText) => statusText switch
     {
         "识别中" => GetResourceBrush("AccentBrush"),
-        "识别不完整" or "正在清除" => GetResourceBrush("WarningBrush"),
+        "识别不完整" or "正在清除" or "数据库保存失败" => GetResourceBrush("WarningBrush"),
         "脱节报警" => GetResourceBrush("AlarmBrush"),
         "离线" or "已禁用" or "等待清空确认" => GetResourceBrush("OfflineBrush"),
         _ => GetResourceBrush("SuccessBrush")
@@ -1659,6 +1683,11 @@ public partial class MonitorPage : UserControl
 
     private static string GetRuntimeStateText(StationRuntimeState state)
     {
+        if (state.PersistenceState == PassagePersistenceState.PersistenceFault)
+        {
+            return "数据库保存失败";
+        }
+
         if (state.LastPassageRecord?.Outcome == PassageOutcome.Unverified)
         {
             return "完整性未判定";

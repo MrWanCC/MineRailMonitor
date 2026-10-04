@@ -28,6 +28,8 @@ public sealed class PassageEvent
 
     public int? TimeoutSeconds { get; init; }
 
+    public int? FailureCount { get; init; }
+
     public string? Reason { get; init; }
 }
 
@@ -46,4 +48,8 @@ public static class PassageEventTypes
     public const string Clear = "PASSAGE_CLEAR";
 
     public const string VehicleMatchLateResolved = "VEHICLE_MATCH_LATE_RESOLVED";
+
+    public const string PersistenceFailed = "PASSAGE_PERSISTENCE_FAILED";
+
+    public const string PersistenceRecovered = "PASSAGE_PERSISTENCE_RECOVERED";
 }

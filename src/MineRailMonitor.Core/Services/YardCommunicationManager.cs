@@ -345,6 +345,8 @@ public sealed class YardCommunicationManager : IDisposable
         }
     }
 
+    public int RetryPendingPassages() => _contexts.Values.Sum(context => context.RetryPendingPassages());
+
     public IReadOnlyList<YardCommunicationSnapshot> GetSnapshot() =>
         _contexts.Values
             .Select(context => new YardCommunicationSnapshot(context))

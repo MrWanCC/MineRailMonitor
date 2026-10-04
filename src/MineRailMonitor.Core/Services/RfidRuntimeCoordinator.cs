@@ -141,6 +141,86 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         }
     }
 
+    public int RetryPendingPassages()
+    {
+        var alarmForwardRequests = new List<AlarmForwardRequest>();
+        var recoveredAlarms = new List<PassageRecord>();
+        var recoveredCount = 0;
+        var attemptedAt = DateTimeOffset.UtcNow;
+        lock (_syncRoot)
+        {
+            foreach (var state in _statesByEndpoint.Values)
+            {
+                foreach (var fault in state.PendingPersistenceFaults)
+                {
+                    try
+                    {
+                        var before = fault.ClearedAt.HasValue
+                            ? _recordStore.GetDetails(fault.Record.PassageId)
+                            : null;
+                        _recordStore.Save(fault.Record);
+                        PassageRecord? after = null;
+                        if (fault.ClearedAt.HasValue)
+                        {
+                            _recordStore.MarkCleared(fault.Record.PassageId, fault.ClearedAt.Value);
+                            after = _recordStore.GetDetails(fault.Record.PassageId);
+                        }
+
+                        if (before?.AlarmStatus != AlarmStatus.Recovered && after?.AlarmStatus == AlarmStatus.Recovered)
+                        {
+                            recoveredAlarms.Add(after);
+                        }
+
+                        if (fault.Record.RequiresAlarmAcknowledgement)
+                        {
+                            state.AddUnacknowledgedAlarm(fault.Record.PassageId);
+                            alarmForwardRequests.Add(new AlarmForwardRequest(
+                                fault.Record.PassageId,
+                                fault.Record.StationId,
+                                fault.Record.StationAddress,
+                                fault.LastVehiclePacket,
+                                fault.Record.CompletedAt));
+                        }
+
+                        WritePassageEvent(CreatePersistenceEvent(
+                            fault.Record,
+                            PassageEventTypes.PersistenceRecovered,
+                            attemptedAt,
+                            fault.FailureCount,
+                            $"Passage记录已恢复保存；此前失败{fault.FailureCount}次"));
+                        state.RemovePersistenceFault(fault);
+                        recoveredCount++;
+                    }
+                    catch (Exception exception)
+                    {
+                        fault.RecordFailure(exception, attemptedAt);
+                        WritePassageEvent(CreatePersistenceEvent(
+                            fault.Record,
+                            PassageEventTypes.PersistenceFailed,
+                            attemptedAt,
+                            fault.FailureCount,
+                            fault.LastException));
+                    }
+
+                    RefreshPersistenceFaultDisplay(state);
+                }
+
+                UpdateVisualState(state);
+            }
+        }
+
+        foreach (var request in alarmForwardRequests)
+        {
+            PublishAlarmForwardRequest(request);
+        }
+        foreach (var alarm in recoveredAlarms)
+        {
+            PublishAlarmRecovered(alarm);
+        }
+
+        return recoveredCount;
+    }
+
     public StationRecognitionSession? ProcessFrame(RfidStationFrame frame)
     {
         if (frame is null) throw new ArgumentNullException(nameof(frame));
@@ -186,7 +266,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
 
         if (state.LifecycleState == PassageLifecycleState.Finalizing)
         {
-            alarmForwardRequest = TryPersistPendingPassage(state);
+            alarmForwardRequest = TryPersistPendingPassage(state, frame.ReceivedAt);
             UpdateVisualState(state);
             return state.RecognitionSession;
         }
@@ -414,7 +494,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             state.CommunicationState = StationCommunicationState.Online;
             if (state.LifecycleState == PassageLifecycleState.Finalizing)
             {
-                var retryRequest = TryPersistPendingPassage(state);
+                var retryRequest = TryPersistPendingPassage(state, now);
                 if (retryRequest is not null)
                 {
                     alarmForwardRequests.Add(retryRequest);
@@ -753,10 +833,10 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             }
         }
 
-        return TryPersistPendingPassage(state);
+        return TryPersistPendingPassage(state, completedAt);
     }
 
-    private AlarmForwardRequest? TryPersistPendingPassage(StationRuntimeState state)
+    private AlarmForwardRequest? TryPersistPendingPassage(StationRuntimeState state, DateTimeOffset attemptedAt)
     {
         var record = state.LastPassageRecord;
         if (record is null || state.PersistenceAttemptCount >= _policy.MaxPersistenceAttempts)
@@ -769,8 +849,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         {
             // Freeze and save before exposing PendingClear to the round-robin poller.
             _recordStore.Save(record);
-            state.PersistenceWarning = false;
-            state.PersistenceErrorMessage = null;
+            RefreshPersistenceFaultDisplay(state);
             state.PersistenceAttemptCount = 0;
             state.ClearPersistenceAttemptCount = 0;
             if (record.RequiresAlarmAcknowledgement && !record.AlarmAcknowledgedAt.HasValue)
@@ -803,6 +882,31 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
             state.LifecycleState = PassageLifecycleState.Finalizing;
             AddWarning(state, state.PersistenceErrorMessage);
             state.PendingClear = false;
+
+            if (state.PersistenceAttemptCount >= _policy.MaxPersistenceAttempts)
+            {
+                var fault = new PassagePersistenceFault(
+                    record,
+                    state.PersistenceAttemptCount,
+                    exception,
+                    attemptedAt,
+                    state.LastNewVehicleRawPacket);
+                state.AddPersistenceFault(fault);
+                RefreshPersistenceFaultDisplay(state);
+                WritePassageEvent(CreatePersistenceEvent(
+                    record,
+                    PassageEventTypes.PersistenceFailed,
+                    attemptedAt,
+                    fault.FailureCount,
+                    fault.LastException));
+
+                // Preserve the frozen record for recovery while allowing the existing clear handshake to run.
+                state.LifecycleState = PassageLifecycleState.Clearing;
+                state.PendingClear = true;
+                state.ClearAttempts = 0;
+                state.ClearPersistenceAttemptCount = 0;
+                state.ConsecutiveEmptyReads = 0;
+            }
         }
 
         return null;
@@ -812,6 +916,15 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
     {
         if (state.LastPassageRecord is null)
         {
+            ResetToIdle(state);
+            return;
+        }
+
+        var pendingPersistenceFault = state.FindPersistenceFault(state.LastPassageRecord.PassageId);
+        if (pendingPersistenceFault is not null)
+        {
+            pendingPersistenceFault.ClearedAt ??= clearedAt;
+            WritePassageEvent(CreatePassageEvent(state.LastPassageRecord, clearedAt));
             ResetToIdle(state);
             return;
         }
@@ -922,11 +1035,38 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         state.LastNewVehicleRawPacket = null;
         state.LastNewVehicleRawPacketAt = null;
         state.AlarmForwardTriggeredPassageId = null;
-        state.PersistenceWarning = false;
-        state.PersistenceErrorMessage = null;
         state.PersistenceAttemptCount = 0;
         state.ClearPersistenceAttemptCount = 0;
+        RefreshPersistenceFaultDisplay(state);
         UpdateVisualState(state);
+    }
+
+    private static void RefreshPersistenceFaultDisplay(StationRuntimeState state)
+    {
+        var warnings = state.WarningMessages
+            .Where(message => !message.StartsWith("记录保存失败：", StringComparison.Ordinal) &&
+                              !message.StartsWith("数据库保存失败；", StringComparison.Ordinal))
+            .ToList();
+        var latestFault = state.PendingPersistenceFaults
+            .OrderBy(fault => fault.FailedAt)
+            .LastOrDefault();
+        if (latestFault is null)
+        {
+            if (state.PersistenceErrorMessage?.StartsWith("记录保存失败：", StringComparison.Ordinal) == true ||
+                state.PersistenceErrorMessage?.StartsWith("数据库保存失败；", StringComparison.Ordinal) == true)
+            {
+                state.PersistenceWarning = false;
+                state.PersistenceErrorMessage = null;
+            }
+        }
+        else
+        {
+            state.PersistenceWarning = true;
+            state.PersistenceErrorMessage = latestFault.ToDiagnosticMessage();
+            warnings.Add(state.PersistenceErrorMessage);
+        }
+
+        state.WarningMessages = warnings.AsReadOnly();
     }
 
     private void AddWarning(StationRuntimeState state, string warning)
@@ -981,6 +1121,27 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         DetectedCount = record.DetectedVehicleCount
     };
 
+    private static PassageEvent CreatePersistenceEvent(
+        PassageRecord record,
+        string eventType,
+        DateTimeOffset occurredAt,
+        int failureCount,
+        string reason) => new()
+        {
+            PassageId = record.PassageId,
+            EventType = eventType,
+            OccurredAt = occurredAt,
+            StationId = record.StationId,
+            StationAddress = record.StationAddress,
+            VehicleName = record.VehicleName,
+            VehicleNo = record.VehicleNo,
+            VehicleHeadRfid = record.VehicleHeadRfid ?? record.HeadRfid,
+            ExpectedCount = record.ExpectedVehicleCount,
+            DetectedCount = record.DetectedVehicleCount,
+            FailureCount = failureCount,
+            Reason = reason
+        };
+
     private void WritePassageEvent(PassageEvent passageEvent)
     {
         try
@@ -1017,6 +1178,12 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         if (state.CommunicationState == StationCommunicationState.Offline)
         {
             state.VisualState = RfidStationVisualState.Offline;
+            return;
+        }
+
+        if (state.PersistenceState == PassagePersistenceState.PersistenceFault)
+        {
+            state.VisualState = RfidStationVisualState.Warning;
             return;
         }
 

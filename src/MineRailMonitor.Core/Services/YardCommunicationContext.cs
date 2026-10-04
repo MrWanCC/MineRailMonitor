@@ -616,6 +616,8 @@ public sealed class YardCommunicationContext : IDisposable
     public void RestorePendingClear(IEnumerable<PassageRecord> records) =>
         _runtimeCoordinator?.RestorePendingClear(FilterRecordsForContext(records));
 
+    public int RetryPendingPassages() => _runtimeCoordinator?.RetryPendingPassages() ?? 0;
+
     public void RestoreUnacknowledgedAlarms(IEnumerable<PassageRecord> records) =>
         _runtimeCoordinator?.RestoreUnacknowledgedAlarms(FilterRecordsForContext(records));
 

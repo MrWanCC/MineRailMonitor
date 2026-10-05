@@ -30,7 +30,7 @@ public sealed class RunLogPageMarkupTests
             new[] { "时间", "事件类型", "车辆编号", "事件内容", "状态" },
             GetGridHeaders(markup, "EventGrid"));
         Assert.Equal(
-            new[] { "基站名称", "StationId", "IP地址", "端口", "状态", "最后接收时间" },
+            new[] { "基站名称", "基站编号", "IP地址", "端口", "状态", "最后接收时间" },
             GetGridHeaders(markup, "CommunicationGrid"));
         Assert.Equal(
             new[] { "时间", "操作类型", "对象", "内容", "结果" },

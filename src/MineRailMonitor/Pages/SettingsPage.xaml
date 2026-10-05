@@ -52,6 +52,13 @@
             </Setter>
         </Style>
 
+        <Style x:Key="AdminOnlyTabItemStyle" TargetType="TabItem" BasedOn="{StaticResource SettingsTabItemStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsAdmin, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}" Value="False">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="SettingsTabControlStyle" TargetType="TabControl">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -378,7 +385,8 @@
                     Width="82" Margin="16,0,0,0" Click="OnAboutClick" />
         </Grid>
 
-        <TabControl Grid.Row="1" x:Name="SettingsTabs" Style="{StaticResource SettingsTabControlStyle}">
+        <TabControl Grid.Row="1" x:Name="SettingsTabs" Style="{StaticResource SettingsTabControlStyle}"
+                    SelectionChanged="OnSettingsTabSelectionChanged">
             <TabItem Header="RFID配置">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -965,6 +973,7 @@
                                            Style="{StaticResource SettingsHelperStyle}" Margin="0,1,0,0" />
                             </StackPanel>
                             <Button Grid.Column="2" Content="＋  新增车辆" Style="{StaticResource SettingsPrimaryButtonStyle}" Width="132"
+                                    Visibility="{Binding AdminActionVisibility, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                     IsEnabled="{Binding VehicleEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                     Click="OnAddVehicleClick" />
                         </Grid>
@@ -996,6 +1005,7 @@
                                         </DataGrid.Columns>
                                     </DataGrid>
                                     <Button Grid.Row="2" Content="删除车辆" Style="{StaticResource SettingsDangerButtonStyle}" Width="110" HorizontalAlignment="Right" Margin="0,8,0,0"
+                                            Visibility="{Binding AdminActionVisibility, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                             IsEnabled="{Binding VehicleEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                             Click="OnDeleteVehicleClick" />
                                 </Grid>
@@ -1070,6 +1080,7 @@
                                                            Style="{StaticResource SettingsHelperStyle}" Margin="0,2,0,0" />
                                             </StackPanel>
                                             <Button Grid.Column="1" Content="＋ 添加车节" Style="{StaticResource SettingsTableBindButtonStyle}" Width="112"
+                                                    Visibility="{Binding AdminActionVisibility, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                                     IsEnabled="{Binding CanEditSelectedVehicle, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                                     Click="OnAddVehicleTagClick" />
                                         </Grid>
@@ -1104,6 +1115,9 @@
                                                                                 <DataTrigger Binding="{Binding Position}" Value="0">
                                                                                     <Setter Property="Visibility" Value="Collapsed" />
                                                                                 </DataTrigger>
+                                                                                <DataTrigger Binding="{Binding AdminActionVisibility, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}" Value="Collapsed">
+                                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                                </DataTrigger>
                                                                             </Style.Triggers>
                                                                         </Style>
                                                                     </Button.Style>
@@ -1131,6 +1145,7 @@
                                         <TextBlock Text="从左侧选择车辆，或新增一辆矿车开始配置。" Foreground="{StaticResource TextSecondaryBrush}"
                                                    TextWrapping="Wrap" TextAlignment="Center" Margin="0,6,0,14" />
                                         <Button Content="＋ 新增车辆" Style="{StaticResource SettingsPrimaryButtonStyle}" Width="132" HorizontalAlignment="Center"
+                                                Visibility="{Binding AdminActionVisibility, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                                 IsEnabled="{Binding VehicleEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                                 Click="OnAddVehicleClick" />
                                     </StackPanel>
@@ -1151,14 +1166,60 @@
                                                Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <Button Grid.Column="1" Content="撤销未保存" Style="{StaticResource SettingsToolbarButtonStyle}" Width="112" Margin="0,0,8,0"
+                                        Visibility="{Binding AdminActionVisibility, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                         IsEnabled="{Binding VehicleEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                         ToolTip="恢复上次保存的车辆配置，放弃本页所有未保存修改"
                                         Click="OnDiscardVehicleChangesClick" />
                                 <Button Grid.Column="2" Content="保存车辆配置" Style="{StaticResource SettingsPrimaryButtonStyle}" Width="150"
+                                        Visibility="{Binding AdminActionVisibility, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                         IsEnabled="{Binding VehicleEditingEnabled, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}}"
                                         Click="OnSaveVehiclesClick" />
                             </Grid>
                         </Border>
+                    </Grid>
+                </Border>
+            </TabItem>
+
+
+            <TabItem x:Name="CommunicationTestsTab" Header="通信测试" Style="{StaticResource AdminOnlyTabItemStyle}">
+                <Border Style="{StaticResource SettingsPanelStyle}" Padding="8">
+                    <ContentControl x:Name="CommunicationTestContent" />
+                </Border>
+            </TabItem>
+
+            <TabItem x:Name="DataManagementTab" Header="数据管理" Style="{StaticResource AdminOnlyTabItemStyle}">
+                <Border Style="{StaticResource SettingsPanelStyle}" Padding="18">
+                    <StackPanel HorizontalAlignment="Left" MaxWidth="760">
+                        <TextBlock Text="数据备份与导出" Style="{StaticResource SettingsSectionTitleStyle}" />
+                        <TextBlock Text="数据库备份会执行完整性校验，并保存到系统 Backups/SQLite 目录。"
+                                   Foreground="{StaticResource TextSecondaryBrush}" Margin="0,8,0,16" TextWrapping="Wrap" />
+                        <Button Content="立即备份数据库" Style="{StaticResource SettingsPrimaryButtonStyle}"
+                                Width="170" HorizontalAlignment="Left" Click="OnCreateBackupClick" />
+                        <TextBlock x:Name="BackupResultText" Foreground="{StaticResource TextSecondaryBrush}"
+                                   Margin="0,8,0,20" TextWrapping="Wrap" />
+                        <Button Content="日志导出（暂不可用）" Style="{StaticResource SettingsToolbarButtonStyle}"
+                                Width="190" HorizontalAlignment="Left" IsEnabled="False"
+                                ToolTip="当前版本尚无日志导出功能。" />
+                    </StackPanel>
+                </Border>
+            </TabItem>
+
+            <TabItem x:Name="OperationLogTab" Header="操作日志" Style="{StaticResource AdminOnlyTabItemStyle}">
+                <Border Style="{StaticResource SettingsPanelStyle}" Padding="8">
+                    <Grid>
+                        <DataGrid x:Name="OperationLogGrid" Style="{StaticResource IndustrialDataGridStyle}"
+                                  AutoGenerateColumns="False" HeadersVisibility="Column" IsReadOnly="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="时间" Binding="{Binding TimeText}" Width="1.2*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                <DataGridTextColumn Header="操作人" Binding="{Binding OperatorName}" Width="0.9*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                <DataGridTextColumn Header="类型" Binding="{Binding OperationType}" Width="1.2*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                <DataGridTextColumn Header="内容" Binding="{Binding Content}" Width="2.5*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                <DataGridTextColumn Header="结果" Binding="{Binding Result}" Width="0.7*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock x:Name="OperationLogEmptyText" Text="暂无操作记录"
+                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="14"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" />
                     </Grid>
                 </Border>
             </TabItem>

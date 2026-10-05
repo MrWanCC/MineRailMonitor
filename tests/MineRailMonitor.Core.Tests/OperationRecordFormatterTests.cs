@@ -91,6 +91,61 @@ public sealed class OperationRecordFormatterTests
         Assert.Equal("IP地址: 192.168.1.101", record.AfterValue);
     }
 
+    [Fact]
+    public void Yard_communication_edit_records_only_changed_fields()
+    {
+        var before = new YardCommunicationConfig
+        {
+            YardId = "560",
+            ListenIp = "127.0.0.1",
+            ListenPort = 62001,
+            ExternalAlarmListenIp = "127.0.0.1",
+            ExternalAlarmListenPort = 62002,
+            Enabled = true
+        };
+        var after = new YardCommunicationConfig
+        {
+            YardId = "560",
+            ListenIp = "127.0.0.1",
+            ListenPort = 62001,
+            ExternalAlarmListenIp = "127.0.0.1",
+            ExternalAlarmListenPort = 62003,
+            Enabled = true
+        };
+
+        var record = Assert.Single(ConfigurationOperationRecordFormatter.GetYardCommunicationChanges(
+            new[] { before }, new[] { after }));
+
+        Assert.Equal("COMMUNICATION_CONFIG_CHANGED", record.OperationType);
+        Assert.Equal("站场通信配置", record.TargetType);
+        Assert.Equal("560", record.TargetName);
+        Assert.Equal("外部报警监听端口: 62002", record.BeforeValue);
+        Assert.Equal("外部报警监听端口: 62003", record.AfterValue);
+    }
+
+    [Fact]
+    public void Yard_alarm_forward_add_is_recorded_as_communication_configuration_change()
+    {
+        var record = Assert.Single(ConfigurationOperationRecordFormatter.GetYardAlarmForwardChanges(
+            Array.Empty<YardAlarmForwardConfig>(),
+            new[]
+            {
+                new YardAlarmForwardConfig
+                {
+                    YardId = "620",
+                    Enabled = true,
+                    TargetIp = "127.0.0.1",
+                    TargetPort = 63001
+                }
+            }));
+
+        Assert.Equal("COMMUNICATION_CONFIG_CHANGED", record.OperationType);
+        Assert.Equal("外部报警转发配置", record.TargetType);
+        Assert.Equal("620", record.TargetName);
+        Assert.Contains("目标IP: 127.0.0.1", record.AfterValue, StringComparison.Ordinal);
+        Assert.Contains("目标端口: 63001", record.AfterValue, StringComparison.Ordinal);
+    }
+
     private static VehicleConfig CreateVehicle(string vehicleNo, ushort headRfid, string name, int totalCount)
     {
         var tags = new List<VehicleTagConfig>

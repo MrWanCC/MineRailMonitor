@@ -127,7 +127,8 @@
             </Grid>
         </Border>
 
-        <TabControl x:Name="RunLogTabs" Grid.Row="1" Style="{StaticResource RunLogTabControlStyle}" SelectedIndex="0">
+        <TabControl x:Name="RunLogTabs" Grid.Row="1" Style="{StaticResource RunLogTabControlStyle}" SelectedIndex="0"
+                    SelectionChanged="OnRunLogTabSelectionChanged">
             <TabItem Header="车辆事件">
                 <Grid Margin="8">
                     <Grid.ColumnDefinitions>
@@ -217,7 +218,7 @@
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="2*" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="StationId" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
+                                        <TextBlock Text="基站编号" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
                                         <TextBlock Grid.Column="1" Text="{Binding StationIdText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding StationIdText}" Margin="6,0,12,0" />
                                         <TextBlock Grid.Column="2" Text="判定说明" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
                                         <TextBlock Grid.Column="3" Text="{Binding OutcomeReasonText, TargetNullValue=--}" Style="{StaticResource FieldValueStyle}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="6,0,0,0" />
@@ -312,7 +313,7 @@
                                       AutoGenerateColumns="False" HeadersVisibility="Column" IsReadOnly="True">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="基站名称" Binding="{Binding StationName}" Width="1.25*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
-                                    <DataGridTextColumn Header="StationId" Binding="{Binding StationId}" Width="1.15*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
+                                    <DataGridTextColumn Header="基站编号" Binding="{Binding StationId}" Width="1.15*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                                     <DataGridTextColumn Header="IP地址" Binding="{Binding IpAddress}" Width="1.3*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                                     <DataGridTextColumn Header="端口" Binding="{Binding Port}" Width="0.7*" ElementStyle="{StaticResource DataGridTextElementStyle}" />
                                     <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="0.8*" ElementStyle="{StaticResource StationStatusTextStyle}" />
@@ -335,7 +336,7 @@
                 </Border>
             </TabItem>
 
-            <TabItem Header="操作记录">
+            <TabItem x:Name="OperationRecordsTab" Header="操作记录">
                 <Border Style="{StaticResource RunLogSectionStyle}" Margin="8">
                     <Grid>
                         <Grid.ColumnDefinitions>

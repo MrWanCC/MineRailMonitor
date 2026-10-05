@@ -117,7 +117,8 @@ public partial class MainWindow : Window
             new PassageEventJsonlQueryService(passageEventLogDirectory),
             _operationRecordStore,
             _passageRecordStore,
-            () => _yardCommunicationManager?.GetPollingStatuses() ?? Array.Empty<RfidStationPollingStatus>());
+            () => _yardCommunicationManager?.GetPollingStatuses() ?? Array.Empty<RfidStationPollingStatus>(),
+            _adminModeService);
         var blackBoxRootDirectory = _acceptanceOptions.Enabled
             ? Path.Combine(_acceptanceOptions.LogDirectory!, "BlackBox")
             : appPaths.BlackBoxDirectory;
@@ -256,13 +257,16 @@ public partial class MainWindow : Window
             viewMapPointRequested: ViewRfidMapPoint,
             yardCommunications: result.Project.YardCommunications,
             yardAlarmForwards: result.Project.YardAlarmForwards,
-            vehicles: result.Project.Vehicles);
+            vehicles: result.Project.Vehicles,
+            operationRecordStore: _operationRecordStore);
+        _settingsPage.SetCommunicationTestContent(_communicationPage);
         _settingsPage.SaveRequested += SaveRfidSettingsAsync;
         _settingsPage.StationsSaveRequested += SaveRfidStationsAsync;
         _settingsPage.SaveYardCommunicationsRequested += SaveYardCommunicationsAsync;
         _settingsPage.SaveYardAlarmForwardsRequested += SaveYardAlarmForwardsAsync;
         _settingsPage.VehiclesSaveRequested += SaveVehiclesAsync;
         _settingsPage.AdminModeExitRequested += ExitAdminModeAsync;
+        _settingsPage.BackupRequested += CreateManualBackupAsync;
         await RecreateYardCommunicationManagerAsync(result.Project, settingsStations, runtimeSettings);
         _acceptanceRuntimeStateWriter?.Write("loaded");
         _historyPage = new HistoryPage(
@@ -342,13 +346,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (page == "Communication")
-        {
-            ApplyCurrentYardDisplayScope();
-            PageContent.Content = _communicationPage;
-            return;
-        }
-
         if (page == "Rfid" && _statisticsPage is not null)
         {
             _statisticsPage.Refresh();
@@ -359,6 +356,7 @@ public partial class MainWindow : Window
         if (page == "Settings" && _settingsPage is not null)
         {
             _settingsPage.RefreshBindingOverview();
+            _settingsPage.RefreshOperationLogs();
             PageContent.Content = _settingsPage;
             return;
         }
@@ -393,7 +391,6 @@ public partial class MainWindow : Window
             "Alarms" => "报警记录",
             "History" => "历史查询",
             "RunLogs" => "运行日志",
-            "Communication" => "通信调试",
             "Settings" => "系统设置",
             _ => "页面"
         };
@@ -438,7 +435,7 @@ public partial class MainWindow : Window
 
     private async Task<bool> SaveRfidSettingsAsync(RfidSettings settings)
     {
-        if (_loadedProject is null || _settingsPage is null)
+        if (_loadedProject is null || _settingsPage is null || !_adminModeService.IsAdmin)
         {
             return false;
         }
@@ -519,6 +516,7 @@ public partial class MainWindow : Window
             return false;
         }
 
+        var previousConfigurations = _loadedProject.YardCommunications.ToArray();
         var result = await _configService.SaveYardCommunicationsAsync(_projectDirectory, configurations);
         if (!result.Succeeded)
         {
@@ -527,6 +525,9 @@ public partial class MainWindow : Window
         }
 
         _loadedProject.YardCommunications = configurations.ToArray();
+        RecordOperationChanges(ConfigurationOperationRecordFormatter.GetYardCommunicationChanges(
+            previousConfigurations,
+            _loadedProject.YardCommunications));
         _loadedProject.UsesLegacySharedListener = false;
         _communicationPage.SetExternalAlarmConfigurations(
             _loadedProject.YardCommunications,
@@ -563,6 +564,7 @@ public partial class MainWindow : Window
             return false;
         }
 
+        var previousConfigurations = _loadedProject.YardAlarmForwards.ToArray();
         var result = await _configService.SaveYardAlarmForwardsAsync(_projectDirectory, configurations);
         if (!result.Succeeded)
         {
@@ -571,6 +573,9 @@ public partial class MainWindow : Window
         }
 
         _loadedProject.YardAlarmForwards = configurations.ToArray();
+        RecordOperationChanges(ConfigurationOperationRecordFormatter.GetYardAlarmForwardChanges(
+            previousConfigurations,
+            _loadedProject.YardAlarmForwards));
         _communicationPage.SetExternalAlarmConfigurations(
             _loadedProject.YardCommunications,
             _loadedProject.YardAlarmForwards);
@@ -585,7 +590,7 @@ public partial class MainWindow : Window
 
     private async Task<bool> SaveRfidStationsAsync(IReadOnlyList<RfidStationConfig> stations)
     {
-        if (_loadedProject is null || _settingsPage is null)
+        if (_loadedProject is null || _settingsPage is null || !_adminModeService.IsAdmin)
         {
             return false;
         }
@@ -1460,9 +1465,22 @@ public partial class MainWindow : Window
     {
         if (e.PropertyName == nameof(AdminModeService.IsAdmin))
         {
+            RecordOperationChanges(new[]
+            {
+                new OperationRecord
+                {
+                    OperationType = _adminModeService.IsAdmin ? "ADMIN_LOGIN" : "ADMIN_LOGOUT",
+                    TargetType = "管理员模式",
+                    TargetName = "管理员",
+                    BeforeValue = _adminModeService.IsAdmin ? "状态: 未登录" : "状态: 已登录",
+                    AfterValue = _adminModeService.IsAdmin ? "状态: 已登录" : "状态: 未登录",
+                    Result = "成功"
+                }
+            });
             UpdateAdminModeBanner();
             _monitorPage?.HandleAdminModeChanged(_adminModeService.IsAdmin);
             _communicationPage.SetAdminMode(_adminModeService.IsAdmin);
+            _runLogPage.SetAdminMode(_adminModeService.IsAdmin);
         }
     }
 
@@ -1798,9 +1816,12 @@ public partial class MainWindow : Window
 
     private async Task SendCommunicationTestAsync(RfidStationConfig station, RfidPollCommand command)
     {
-        if (command == RfidPollCommand.Clear && !_adminModeService.IsAdmin)
+        if (!_adminModeService.IsAdmin)
         {
-            throw new InvalidOperationException("发送清空命令需要管理员模式。");
+            var message = command == RfidPollCommand.Clear
+                ? "发送清空命令需要管理员模式。"
+                : "通信测试需要管理员模式。";
+            throw new UnauthorizedAccessException(message);
         }
 
         var context = _yardCommunicationManager?.FindContextForStation(station);
@@ -1823,6 +1844,64 @@ public partial class MainWindow : Window
                     Result = "成功"
                 }
             });
+        }
+    }
+
+    private async Task<string?> CreateManualBackupAsync()
+    {
+        if (!_adminModeService.IsAdmin)
+        {
+            throw new UnauthorizedAccessException("数据库备份需要管理员模式。");
+        }
+
+        try
+        {
+            var app = (App)Application.Current;
+            var databasePath = _acceptanceOptions.Enabled
+                ? _acceptanceOptions.DatabasePath!
+                : app.Paths.DatabasePath;
+            var backupRoot = _acceptanceOptions.Enabled
+                ? Path.Combine(_acceptanceOptions.LogDirectory!, "Backups", "SQLite")
+                : app.Paths.SqliteBackupDirectory;
+            var healthChecker = new SqliteDatabaseHealthChecker(new SystemRfidTimeProvider(), app.Logger);
+            var backupService = new SqliteBackupService(healthChecker, app.Logger);
+            var result = await Task.Run(() => backupService.CreateValidatedBackupAsync(
+                databasePath,
+                backupRoot,
+                DateTimeOffset.Now,
+                CancellationToken.None).GetAwaiter().GetResult());
+            if (!result.Succeeded)
+            {
+                throw new InvalidOperationException(result.ErrorMessage ?? "数据库备份失败。");
+            }
+
+            RecordOperationChanges(new[]
+            {
+                new OperationRecord
+                {
+                    OperationType = "DATABASE_BACKUP",
+                    TargetType = "数据库",
+                    TargetName = "SQLite",
+                    AfterValue = $"备份文件: {Path.GetFileName(result.FinalPath)}",
+                    Result = "成功"
+                }
+            });
+            return result.FinalPath;
+        }
+        catch (Exception exception)
+        {
+            RecordOperationChanges(new[]
+            {
+                new OperationRecord
+                {
+                    OperationType = "DATABASE_BACKUP_FAILED",
+                    TargetType = "数据库",
+                    TargetName = "SQLite",
+                    AfterValue = $"错误: {exception.Message}",
+                    Result = "失败"
+                }
+            });
+            throw;
         }
     }
 

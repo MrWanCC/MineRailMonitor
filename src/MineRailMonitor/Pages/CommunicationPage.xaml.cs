@@ -33,6 +33,7 @@ public partial class CommunicationPage : UserControl
     private IReadOnlyList<RfidStationPollingStatus> _stationStatuses = Array.Empty<RfidStationPollingStatus>();
     private HashSet<string>? _displayScopeStationIds;
     private bool _isYardFilterSync;
+    private bool _isAdmin;
     private bool _hasObservedStationStatuses;
     private string? _selectedStationId;
     private long _invalidFrameCount;
@@ -304,6 +305,8 @@ public partial class CommunicationPage : UserControl
 
     public void SetAdminMode(bool isAdmin)
     {
+        _isAdmin = isAdmin;
+        RfidTestControls.IsEnabled = isAdmin;
         ClearTestButton.IsEnabled = isAdmin;
         ClearTestButton.ToolTip = isAdmin
             ? "发送清空命令前需要确认"
@@ -585,6 +588,12 @@ public partial class CommunicationPage : UserControl
 
     private async Task SendSelectedAsync(RfidPollCommand command)
     {
+        if (!_isAdmin)
+        {
+            SetListenerStatus("通信测试需要管理员模式。");
+            return;
+        }
+
         if (TestStationSelector.SelectedItem is not ComboBoxItem { Tag: RfidStationConfig station })
         {
             SetListenerStatus("请先选择测试基站。");
@@ -1252,14 +1261,14 @@ public partial class CommunicationPage : UserControl
 
     private static string FormatRuntimeState(PassageLifecycleState state) => state switch
     {
-        PassageLifecycleState.Idle => "Idle 空闲",
-        PassageLifecycleState.Recognizing => "Recognizing 识别中",
-        PassageLifecycleState.Completed => "Completed 已完成",
-        PassageLifecycleState.Alarm => "Alarm 脱节报警",
-        PassageLifecycleState.Clearing => "Clearing 清除中",
-        PassageLifecycleState.WaitForEmpty => "WaitForEmpty 等待清空",
-        PassageLifecycleState.Finalizing => "Finalizing 收尾",
-        _ => state.ToString()
+        PassageLifecycleState.Idle => "空闲",
+        PassageLifecycleState.Recognizing => "识别中",
+        PassageLifecycleState.Completed => "已完成",
+        PassageLifecycleState.Alarm => "脱节报警",
+        PassageLifecycleState.Clearing => "清除中",
+        PassageLifecycleState.WaitForEmpty => "等待清空",
+        PassageLifecycleState.Finalizing => "记录保存中",
+        _ => "未知状态"
     };
 
     private sealed class ExternalAlarmRxLogRow

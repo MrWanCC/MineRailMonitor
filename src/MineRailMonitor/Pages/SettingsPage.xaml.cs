@@ -6,6 +6,8 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using MineRailMonitor.Core.Communication;
+using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
 using MineRailMonitor.Core.Services;
 
@@ -21,6 +23,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
     private readonly IReadOnlyList<StationConfig> _yardConfigs;
     private readonly Func<StationConfig, Task<bool>>? _bindingSaveRequested;
     private readonly Action<string, string>? _viewMapPointRequested;
+    private readonly IOperationRecordStore? _operationRecordStore;
     private readonly ObservableCollection<YardCommunicationEditorRow> _yardCommunicationRows = new();
     private readonly IReadOnlyList<string> _stationIdOptions;
     private readonly IReadOnlyList<RfidStationYardOption> _yardOptions;
@@ -45,7 +48,8 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         Action<string, string>? viewMapPointRequested = null,
         IEnumerable<YardCommunicationConfig>? yardCommunications = null,
         IEnumerable<YardAlarmForwardConfig>? yardAlarmForwards = null,
-        IEnumerable<VehicleConfig>? vehicles = null)
+        IEnumerable<VehicleConfig>? vehicles = null,
+        IOperationRecordStore? operationRecordStore = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _adminModeService = adminModeService ?? throw new ArgumentNullException(nameof(adminModeService));
@@ -53,6 +57,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         _isRfidStationBound = isRfidStationBound ?? (_ => false);
         _bindingSaveRequested = bindingSaveRequested;
         _viewMapPointRequested = viewMapPointRequested;
+        _operationRecordStore = operationRecordStore;
         InitializeComponent();
         PollIntervalTextBox.Text = settings.PollIntervalMs.ToString(CultureInfo.InvariantCulture);
         ExpectedVehicleCountTextBox.Text = settings.ExpectedVehicleCount?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
@@ -100,6 +105,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         _savedVehicleDraft = CloneVehicleDraft(_vehicleDrafts);
         _adminModeService.PropertyChanged += OnAdminModePropertyChanged;
         UpdateStationEditorState();
+        RefreshOperationLogs();
         if (_configurationErrors.Count > 0)
         {
             SetSaveResult("项目配置错误：" + string.Join(Environment.NewLine, _configurationErrors), true);
@@ -117,6 +123,17 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
     public event Func<IReadOnlyList<VehicleConfig>, Task<bool>>? VehiclesSaveRequested;
 
     public event Func<Task<bool>>? AdminModeExitRequested;
+
+    public event Func<Task<string?>>? BackupRequested;
+
+    public static readonly DependencyProperty IsAdminProperty =
+        DependencyProperty.Register(nameof(IsAdmin), typeof(bool), typeof(SettingsPage), new PropertyMetadata(false));
+
+    public bool IsAdmin
+    {
+        get => (bool)GetValue(IsAdminProperty);
+        private set => SetValue(IsAdminProperty, value);
+    }
 
     public static readonly DependencyProperty BindingEditingEnabledProperty =
         DependencyProperty.Register(nameof(BindingEditingEnabled), typeof(bool), typeof(SettingsPage), new PropertyMetadata(false));
@@ -170,6 +187,15 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
     {
         get => (bool)GetValue(VehicleEditingEnabledProperty);
         private set => SetValue(VehicleEditingEnabledProperty, value);
+    }
+
+    public static readonly DependencyProperty AdminActionVisibilityProperty =
+        DependencyProperty.Register(nameof(AdminActionVisibility), typeof(Visibility), typeof(SettingsPage), new PropertyMetadata(Visibility.Collapsed));
+
+    public Visibility AdminActionVisibility
+    {
+        get => (Visibility)GetValue(AdminActionVisibilityProperty);
+        private set => SetValue(AdminActionVisibilityProperty, value);
     }
 
     public static readonly DependencyProperty VehicleEditorHasSelectionProperty =
@@ -243,6 +269,27 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         {
             _isStationListRefreshInProgress = false;
         }
+    }
+
+    public void SetCommunicationTestContent(UIElement content)
+    {
+        CommunicationTestContent.Content = content ?? throw new ArgumentNullException(nameof(content));
+    }
+
+    public void RefreshOperationLogs()
+    {
+        if (!_adminModeService.IsAdmin)
+        {
+            OperationLogGrid.ItemsSource = Array.Empty<OperationRecordDisplayItem>();
+            OperationLogEmptyText.Visibility = Visibility.Visible;
+            return;
+        }
+
+        var rows = _operationRecordStore?.QueryPage(0, 100)
+            .Select(OperationRecordDisplayFormatter.Format)
+            .ToArray() ?? Array.Empty<OperationRecordDisplayItem>();
+        OperationLogGrid.ItemsSource = rows;
+        OperationLogEmptyText.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     public void SetSelectedYard(string? yardId)
@@ -592,6 +639,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
     private void UpdateStationEditorState()
     {
         StationEditorPanel.IsEnabled = true;
+        IsAdmin = _adminModeService.IsAdmin;
         AdminModeStatusText.Text = _adminModeService.IsAdmin ? "管理员模式已开启" : "管理员模式未开启";
         AdminModeButton.Content = _adminModeService.IsAdmin ? "退出管理员模式" : "进入管理员模式";
         VehicleAccessText.Text = !_stationsEditable
@@ -599,13 +647,76 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             : _adminModeService.IsAdmin
                 ? "可直接编辑；修改暂存于本页，点击保存后生效。"
                 : "请先在页头开启管理员模式，车辆信息为只读。";
-        RfidSettingsEditingEnabled = _adminModeService.IsAdmin;
-        StationEditingEnabled = _stationsEditable && _adminModeService.IsAdmin;
-        BindingEditingEnabled = _stationsEditable && _adminModeService.IsAdmin && _bindingSaveRequested is not null;
-        YardCommunicationEditingEnabled = _stationsEditable && _adminModeService.IsAdmin;
-        VehicleEditingEnabled = _stationsEditable && _adminModeService.IsAdmin;
+        RfidSettingsEditingEnabled = IsAdmin;
+        StationEditingEnabled = _stationsEditable && IsAdmin;
+        BindingEditingEnabled = _stationsEditable && IsAdmin && _bindingSaveRequested is not null;
+        YardCommunicationEditingEnabled = _stationsEditable && IsAdmin;
+        VehicleEditingEnabled = _stationsEditable && IsAdmin;
+        AdminActionVisibility = VehicleEditingEnabled ? Visibility.Visible : Visibility.Collapsed;
         CanEditSelectedVehicle = VehicleEditingEnabled && VehicleEditorHasSelection;
         CanAddStation = StationEditingEnabled && IsConcreteYardSelected();
+        if (!IsAdmin && (ReferenceEquals(SettingsTabs.SelectedItem, CommunicationTestsTab) ||
+                         ReferenceEquals(SettingsTabs.SelectedItem, DataManagementTab) ||
+                         ReferenceEquals(SettingsTabs.SelectedItem, OperationLogTab)))
+        {
+            SettingsTabs.SelectedIndex = 0;
+        }
+
+        if (!IsAdmin)
+        {
+            RefreshOperationLogs();
+        }
+    }
+
+    private async void OnCreateBackupClick(object sender, RoutedEventArgs e)
+    {
+        if (!_adminModeService.IsAdmin)
+        {
+            BackupResultText.Text = "需要管理员权限才能创建数据库备份。";
+            return;
+        }
+
+        var handler = BackupRequested;
+        if (handler is null)
+        {
+            BackupResultText.Text = "数据库备份服务不可用。";
+            return;
+        }
+
+        BackupResultText.Text = "正在创建并校验数据库备份…";
+        try
+        {
+            var backupPath = await handler();
+            BackupResultText.Text = string.IsNullOrWhiteSpace(backupPath)
+                ? "数据库备份失败。"
+                : $"备份完成：{backupPath}";
+        }
+        catch (Exception exception)
+        {
+            BackupResultText.Text = $"数据库备份失败：{exception.Message}";
+        }
+    }
+
+    private void OnSettingsTabSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, SettingsTabs))
+        {
+            return;
+        }
+
+        var selectedAdminTab = ReferenceEquals(SettingsTabs.SelectedItem, CommunicationTestsTab) ||
+                               ReferenceEquals(SettingsTabs.SelectedItem, DataManagementTab) ||
+                               ReferenceEquals(SettingsTabs.SelectedItem, OperationLogTab);
+        if (selectedAdminTab && !_adminModeService.IsAdmin)
+        {
+            SettingsTabs.SelectedIndex = 0;
+            return;
+        }
+
+        if (ReferenceEquals(SettingsTabs.SelectedItem, OperationLogTab))
+        {
+            RefreshOperationLogs();
+        }
     }
 
     private void OnViewRangeChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)

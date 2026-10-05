@@ -1,4 +1,5 @@
 using System.Linq;
+using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,6 +17,7 @@ public partial class RunLogPage : UserControl
     private readonly IOperationRecordStore _operationRecordStore;
     private readonly IPassageRecordStore _passageRecordStore;
     private readonly Func<IEnumerable<RfidStationPollingStatus>> _pollingStatusesProvider;
+    private readonly AdminModeService? _adminModeService;
     private IReadOnlyList<RfidStationConfig> _rfidStations = Array.Empty<RfidStationConfig>();
     private HashSet<string>? _displayScopeStationIds;
     private string? _displayScopeYardId;
@@ -25,13 +27,37 @@ public partial class RunLogPage : UserControl
         IPassageEventQueryService passageEventQueryService,
         IOperationRecordStore operationRecordStore,
         IPassageRecordStore passageRecordStore,
-        Func<IEnumerable<RfidStationPollingStatus>> pollingStatusesProvider)
+        Func<IEnumerable<RfidStationPollingStatus>> pollingStatusesProvider,
+        AdminModeService? adminModeService = null)
     {
         _passageEventQueryService = passageEventQueryService ?? throw new ArgumentNullException(nameof(passageEventQueryService));
         _operationRecordStore = operationRecordStore ?? throw new ArgumentNullException(nameof(operationRecordStore));
         _passageRecordStore = passageRecordStore ?? throw new ArgumentNullException(nameof(passageRecordStore));
         _pollingStatusesProvider = pollingStatusesProvider ?? throw new ArgumentNullException(nameof(pollingStatusesProvider));
+        _adminModeService = adminModeService;
         InitializeComponent();
+        if (_adminModeService is not null)
+        {
+            _adminModeService.PropertyChanged += OnAdminModePropertyChanged;
+        }
+
+        SetAdminMode(_adminModeService?.IsAdmin == true);
+    }
+
+    public void SetAdminMode(bool isAdmin)
+    {
+        OperationRecordsTab.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        if (!isAdmin && OperationRecordsTab.IsSelected)
+        {
+            RunLogTabs.SelectedIndex = 0;
+        }
+
+        if (!isAdmin)
+        {
+            OperationGrid.ItemsSource = Array.Empty<OperationRecordDisplayItem>();
+            OperationDetailsPanel.DataContext = null;
+            OperationEmptyText.Visibility = Visibility.Visible;
+        }
     }
 
     public void SetRfidStations(IEnumerable<RfidStationConfig>? stations)
@@ -77,9 +103,11 @@ public partial class RunLogPage : UserControl
         }
         UpdateSelectedPassage();
 
-        var operationRecords = _operationRecordStore.QueryPage(0, PageSize)
-            .Select(OperationRecordDisplayFormatter.Format)
-            .ToArray();
+        var operationRecords = _adminModeService?.IsAdmin == true
+            ? _operationRecordStore.QueryPage(0, PageSize)
+                .Select(OperationRecordDisplayFormatter.Format)
+                .ToArray()
+            : Array.Empty<OperationRecordDisplayItem>();
         _isRefreshing = true;
         try
         {
@@ -94,6 +122,31 @@ public partial class RunLogPage : UserControl
         UpdateSelectedOperation();
 
         RefreshStationStatuses();
+    }
+
+    private void OnAdminModePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(AdminModeService.IsAdmin))
+        {
+            SetAdminMode(_adminModeService?.IsAdmin == true);
+        }
+    }
+
+    private void OnRunLogTabSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ReferenceEquals(e.OriginalSource, RunLogTabs) &&
+            ReferenceEquals(RunLogTabs.SelectedItem, OperationRecordsTab) &&
+            _adminModeService?.IsAdmin != true)
+        {
+            RunLogTabs.SelectedIndex = 0;
+            return;
+        }
+
+        if (ReferenceEquals(e.OriginalSource, RunLogTabs) &&
+            ReferenceEquals(RunLogTabs.SelectedItem, OperationRecordsTab))
+        {
+            Refresh();
+        }
     }
 
     public void RefreshStationStatuses()

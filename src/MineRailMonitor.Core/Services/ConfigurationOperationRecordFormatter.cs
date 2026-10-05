@@ -166,6 +166,145 @@ public static class ConfigurationOperationRecordFormatter
         return records;
     }
 
+    public static IReadOnlyList<OperationRecord> GetYardCommunicationChanges(
+        IReadOnlyList<YardCommunicationConfig> before,
+        IReadOnlyList<YardCommunicationConfig> after) => GetYardChanges(
+        before,
+        after,
+        "站场通信配置",
+        GetYardId,
+        GetYardCommunicationFieldChanges,
+        FormatYardCommunicationSnapshot);
+
+    public static IReadOnlyList<OperationRecord> GetYardAlarmForwardChanges(
+        IReadOnlyList<YardAlarmForwardConfig> before,
+        IReadOnlyList<YardAlarmForwardConfig> after) => GetYardChanges(
+        before,
+        after,
+        "外部报警转发配置",
+        GetYardId,
+        GetYardAlarmForwardFieldChanges,
+        FormatYardAlarmForwardSnapshot);
+
+    private static IReadOnlyList<OperationRecord> GetYardChanges<T>(
+        IReadOnlyList<T> before,
+        IReadOnlyList<T> after,
+        string targetType,
+        Func<T, string> getYardId,
+        Func<T, T, List<(string Label, string Before, string After)>> getFieldChanges,
+        Func<T, string> formatSnapshot)
+        where T : class
+    {
+        if (before is null) throw new ArgumentNullException(nameof(before));
+        if (after is null) throw new ArgumentNullException(nameof(after));
+
+        var previousByYardId = before
+            .Where(item => item is not null)
+            .Select(item => (Item: item, YardId: getYardId(item)))
+            .Where(item => !string.IsNullOrWhiteSpace(item.YardId))
+            .ToDictionary(item => item.YardId, item => item.Item, StringComparer.OrdinalIgnoreCase);
+        var nextIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var records = new List<OperationRecord>();
+
+        foreach (var configuration in after.Where(item => item is not null))
+        {
+            var yardId = getYardId(configuration);
+            if (string.IsNullOrWhiteSpace(yardId))
+            {
+                continue;
+            }
+
+            nextIds.Add(yardId);
+            if (!previousByYardId.TryGetValue(yardId, out var previous))
+            {
+                records.Add(CreateRecord(
+                    "COMMUNICATION_CONFIG_CHANGED",
+                    targetType,
+                    yardId,
+                    null,
+                    formatSnapshot(configuration)));
+                continue;
+            }
+
+            var changedFields = getFieldChanges(previous, configuration);
+            if (changedFields.Count == 0)
+            {
+                continue;
+            }
+
+            records.Add(CreateRecord(
+                "COMMUNICATION_CONFIG_CHANGED",
+                targetType,
+                yardId,
+                string.Join(Environment.NewLine, changedFields.Select(item => $"{item.Label}: {item.Before}")),
+                string.Join(Environment.NewLine, changedFields.Select(item => $"{item.Label}: {item.After}"))));
+        }
+
+        foreach (var previous in before.Where(item => item is not null))
+        {
+            var yardId = getYardId(previous);
+            if (string.IsNullOrWhiteSpace(yardId) || nextIds.Contains(yardId))
+            {
+                continue;
+            }
+
+            records.Add(CreateRecord(
+                "COMMUNICATION_CONFIG_CHANGED",
+                targetType,
+                yardId,
+                formatSnapshot(previous),
+                null));
+        }
+
+        return records;
+    }
+
+    private static List<(string Label, string Before, string After)> GetYardCommunicationFieldChanges(
+        YardCommunicationConfig before,
+        YardCommunicationConfig after)
+    {
+        var changedFields = new List<(string Label, string Before, string After)>();
+        AddChange(changedFields, "RFID监听IP", before.ListenIp, after.ListenIp);
+        AddChange(changedFields, "RFID监听端口", FormatNumber(before.ListenPort), FormatNumber(after.ListenPort));
+        AddChange(changedFields, "外部报警监听IP", before.ExternalAlarmListenIp, after.ExternalAlarmListenIp);
+        AddChange(changedFields, "外部报警监听端口", FormatNumber(before.ExternalAlarmListenPort), FormatNumber(after.ExternalAlarmListenPort));
+        AddChange(changedFields, "启用状态", FormatEnabled(before.Enabled), FormatEnabled(after.Enabled));
+        return changedFields;
+    }
+
+    private static List<(string Label, string Before, string After)> GetYardAlarmForwardFieldChanges(
+        YardAlarmForwardConfig before,
+        YardAlarmForwardConfig after)
+    {
+        var changedFields = new List<(string Label, string Before, string After)>();
+        AddChange(changedFields, "转发状态", FormatEnabled(before.Enabled), FormatEnabled(after.Enabled));
+        AddChange(changedFields, "目标IP", before.TargetIp, after.TargetIp);
+        AddChange(changedFields, "目标端口", FormatNumber(before.TargetPort), FormatNumber(after.TargetPort));
+        AddChange(changedFields, "本机来源端口", FormatNumber(before.SourcePort), FormatNumber(after.SourcePort));
+        return changedFields;
+    }
+
+    private static string FormatYardCommunicationSnapshot(YardCommunicationConfig configuration) => string.Join(
+        Environment.NewLine,
+        $"RFID监听IP: {configuration.ListenIp}",
+        $"RFID监听端口: {FormatNumber(configuration.ListenPort)}",
+        $"外部报警监听IP: {configuration.ExternalAlarmListenIp}",
+        $"外部报警监听端口: {FormatNumber(configuration.ExternalAlarmListenPort)}",
+        $"启用状态: {FormatEnabled(configuration.Enabled)}");
+
+    private static string FormatYardAlarmForwardSnapshot(YardAlarmForwardConfig configuration) => string.Join(
+        Environment.NewLine,
+        $"转发状态: {FormatEnabled(configuration.Enabled)}",
+        $"目标IP: {configuration.TargetIp}",
+        $"目标端口: {FormatNumber(configuration.TargetPort)}",
+        $"本机来源端口: {FormatNumber(configuration.SourcePort)}");
+
+    private static string GetYardId(YardCommunicationConfig configuration) => configuration.YardId?.Trim() ?? string.Empty;
+
+    private static string GetYardId(YardAlarmForwardConfig configuration) => configuration.YardId?.Trim() ?? string.Empty;
+
+    private static string FormatNumber(int value) => value.ToString(CultureInfo.InvariantCulture);
+
     private static List<(string Label, string Before, string After)> GetVehicleFieldChanges(
         VehicleConfig before,
         VehicleConfig after)

@@ -3,16 +3,85 @@ namespace MineRailMonitor.Core.Tests;
 public sealed class SettingsPageMarkupTests
 {
     [Fact]
-    public void Settings_combines_rfid_settings_and_stations_into_one_tab()
+    public void Settings_uses_the_requested_tab_structure()
     {
         var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
 
-        Assert.Equal(2, markup.Split(new[] { "<TabItem Header=" }, StringSplitOptions.None).Length - 1);
-        Assert.Contains("Header=\"RFID配置\"", markup, StringComparison.Ordinal);
+        var headers = new[]
+        {
+            "RFID配置",
+            "车辆配置",
+            "通信测试",
+            "数据管理",
+            "操作日志"
+        };
+        var previousIndex = -1;
+        foreach (var header in headers)
+        {
+            var currentIndex = markup.IndexOf($"Header=\"{header}\"", StringComparison.Ordinal);
+            Assert.True(currentIndex > previousIndex, $"Expected settings tab '{header}' after the previous tab.");
+            previousIndex = currentIndex;
+        }
+
+        Assert.Equal(headers.Length, markup.Split(new[] { "<TabItem " }, StringSplitOptions.None).Length - 1);
         Assert.Contains("Text=\"RFID识别参数\"", markup, StringComparison.Ordinal);
         Assert.Contains("Text=\"RFID基站配置\"", markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("Header=\"通信配置\"", markup, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"ConfigureYardCommunicationButton\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"VehicleListDataGrid\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Settings_admin_tabs_are_hidden_by_the_shared_admin_state()
+    {
+        var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
+        var code = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml.cs"));
+
+        Assert.Contains("x:Key=\"AdminOnlyTabItemStyle\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Binding IsAdmin, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsPage}}", markup, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"Visibility\" Value=\"Collapsed\" />", markup, StringComparison.Ordinal);
+        foreach (var tabName in new[] { "CommunicationTestsTab", "DataManagementTab", "OperationLogTab" })
+        {
+            var tabStart = markup.IndexOf($"<TabItem x:Name=\"{tabName}\"", StringComparison.Ordinal);
+            var tabEnd = markup.IndexOf(">", tabStart, StringComparison.Ordinal);
+            Assert.True(tabStart >= 0 && tabEnd > tabStart);
+            Assert.Contains("Style=\"{StaticResource AdminOnlyTabItemStyle}\"", markup.Substring(tabStart, tabEnd - tabStart), StringComparison.Ordinal);
+        }
+        Assert.Contains("public bool IsAdmin", code, StringComparison.Ordinal);
+        Assert.Contains("IsAdmin = _adminModeService.IsAdmin", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Communication_tests_are_hosted_in_the_admin_settings_tab()
+    {
+        var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
+        var code = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml.cs"));
+        var mainWindow = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "MainWindow.xaml.cs"));
+
+        Assert.Contains("x:Name=\"CommunicationTestContent\"", markup, StringComparison.Ordinal);
+        Assert.Contains("SetCommunicationTestContent", code, StringComparison.Ordinal);
+        Assert.Contains("_settingsPage.SetCommunicationTestContent(_communicationPage)", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("page == \"Communication\"", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("<TextBlock Text=\"通信测试\" VerticalAlignment=\"Center\" />", File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "MainWindow.xaml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Settings_uses_one_admin_state_for_vehicle_editing_and_operation_log_visibility()
+    {
+        var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
+        var runLogMarkup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "RunLogPage.xaml"));
+        var settingsCode = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml.cs"));
+        var runLogCode = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "RunLogPage.xaml.cs"));
+
+        Assert.Contains("x:Name=\"OperationLogGrid\"", markup, StringComparison.Ordinal);
+        Assert.Contains("VehicleEditingEnabled = _stationsEditable && IsAdmin", settingsCode, StringComparison.Ordinal);
+        Assert.Contains("AdminActionVisibility = VehicleEditingEnabled ? Visibility.Visible : Visibility.Collapsed", settingsCode, StringComparison.Ordinal);
+        Assert.Contains("RfidSettingsEditingEnabled = IsAdmin", settingsCode, StringComparison.Ordinal);
+        Assert.True(markup.Split(new[] { "Visibility=\"{Binding AdminActionVisibility" }, StringSplitOptions.None).Length - 1 >= 6);
+        Assert.Contains("SettingsTabs.SelectedIndex = 0", settingsCode, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"OperationRecordsTab\"", runLogMarkup, StringComparison.Ordinal);
+        Assert.Contains("AdminModeService.IsAdmin", runLogCode, StringComparison.Ordinal);
+        Assert.Contains("OperationRecordsTab.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed", runLogCode, StringComparison.Ordinal);
+        Assert.Contains("Header=\"操作日志\" Style=\"{StaticResource AdminOnlyTabItemStyle}\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AdminModeButton\"", markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -101,7 +170,7 @@ public sealed class SettingsPageMarkupTests
         var code = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml.cs"));
 
         Assert.Contains("RfidSettingsEditingEnabled", markup, StringComparison.Ordinal);
-        Assert.Contains("RfidSettingsEditingEnabled = _adminModeService.IsAdmin", code, StringComparison.Ordinal);
+        Assert.Contains("RfidSettingsEditingEnabled = IsAdmin", code, StringComparison.Ordinal);
         Assert.Contains("请先进入管理员模式后再修改 RFID 识别参数", code, StringComparison.Ordinal);
     }
 
@@ -375,7 +444,7 @@ public sealed class SettingsPageMarkupTests
         Assert.Contains("RfidStationBindingRules.FindBindings", code, StringComparison.Ordinal);
         Assert.Contains("请先解绑后再绑定", code, StringComparison.Ordinal);
         Assert.Contains("存在历史重复绑定", code, StringComparison.Ordinal);
-        Assert.Contains("BindingEditingEnabled = _stationsEditable && _adminModeService.IsAdmin", code, StringComparison.Ordinal);
+        Assert.Contains("BindingEditingEnabled = _stationsEditable && IsAdmin", code, StringComparison.Ordinal);
     }
 
     [Fact]

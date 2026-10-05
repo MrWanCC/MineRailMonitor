@@ -24,7 +24,7 @@ public static class OperationRecordDisplayFormatter
             Id = record.Id,
             TimeText = record.Time.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
             OperatorName = record.OperatorName,
-            OperationType = record.OperationType,
+            OperationType = FormatOperationType(record.OperationType),
             TargetType = record.TargetType,
             TargetName = record.TargetName,
             TargetText = string.IsNullOrWhiteSpace(record.TargetType)
@@ -41,4 +41,14 @@ public static class OperationRecordDisplayFormatter
         ? string.Empty
         : string.Join("；", value!.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
             .Select(item => item.Trim()));
+
+    private static string FormatOperationType(string operationType) => operationType?.Trim() switch
+    {
+        var value when string.Equals(value, "ADMIN_LOGIN", StringComparison.OrdinalIgnoreCase) => "管理员登录",
+        var value when string.Equals(value, "ADMIN_LOGOUT", StringComparison.OrdinalIgnoreCase) => "管理员退出",
+        var value when string.Equals(value, "COMMUNICATION_CONFIG_CHANGED", StringComparison.OrdinalIgnoreCase) => "通信配置变更",
+        var value when string.Equals(value, "DATABASE_BACKUP", StringComparison.OrdinalIgnoreCase) => "数据库备份",
+        var value when string.Equals(value, "DATABASE_BACKUP_FAILED", StringComparison.OrdinalIgnoreCase) => "数据库备份失败",
+        var value => value ?? string.Empty
+    };
 }

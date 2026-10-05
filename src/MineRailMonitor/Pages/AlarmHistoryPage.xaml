@@ -89,11 +89,13 @@
                     <DatePicker x:Name="FromDatePicker" Width="168" Height="30" Margin="0,0,14,0"
                                 Style="{StaticResource HmiDatePickerStyle}"
                                 SelectedDateFormat="Short"
+                                SelectedDateChanged="OnFilterDateChanged"
                                 ToolTip="点击选择开始日期" PreviewMouseLeftButtonDown="OnDatePickerPreviewMouseLeftButtonDown" />
                     <TextBlock Text="结束时间" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <DatePicker x:Name="ToDatePicker" Width="168" Height="30" Margin="0,0,14,0"
                                 Style="{StaticResource HmiDatePickerStyle}"
                                 SelectedDateFormat="Short"
+                                SelectedDateChanged="OnFilterDateChanged"
                                 ToolTip="点击选择结束日期" PreviewMouseLeftButtonDown="OnDatePickerPreviewMouseLeftButtonDown" />
                     <TextBlock Text="基站" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <ComboBox x:Name="StationFilter" Width="190" Height="30" Margin="0,0,14,0" />
@@ -108,7 +110,7 @@
             </Grid>
         </Border>
 
-        <UniformGrid Grid.Row="2" Columns="4" Margin="0,0,0,8">
+        <UniformGrid Grid.Row="2" Columns="3" Margin="0,0,0,8">
             <Border Style="{StaticResource AlarmSummaryCardStyle}" Margin="0,0,6,0" BorderBrush="#A43754">
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -118,22 +120,8 @@
                     <Path Data="{StaticResource AlarmIconGeometry}" Width="28" Height="28" Stretch="Uniform"
                           Stroke="{StaticResource AlarmBrush}" StrokeThickness="1.8" VerticalAlignment="Center" />
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock x:Name="TodayAlarmValue" Text="0" Style="{StaticResource AlarmSummaryNumberStyle}" Foreground="{StaticResource AlarmBrush}" />
-                        <TextBlock Text="今日告警" Style="{StaticResource AlarmSummaryLabelStyle}" />
-                    </StackPanel>
-                </Grid>
-            </Border>
-            <Border Style="{StaticResource AlarmSummaryCardStyle}" Margin="0,0,6,0" BorderBrush="#167EB3">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="42" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Path Data="{StaticResource QueryIconGeometry}" Width="28" Height="28" Stretch="Uniform"
-                          Stroke="{StaticResource PrimaryBlueBrush}" StrokeThickness="1.8" VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock x:Name="QueryAlarmValue" Text="0" Style="{StaticResource AlarmSummaryNumberStyle}" Foreground="{StaticResource PrimaryBlueBrush}" />
-                        <TextBlock Text="当前查询" Style="{StaticResource AlarmSummaryLabelStyle}" />
+                        <TextBlock x:Name="QueryAlarmValue" Text="0" Style="{StaticResource AlarmSummaryNumberStyle}" Foreground="{StaticResource AlarmBrush}" />
+                        <TextBlock Text="当前查询告警" Style="{StaticResource AlarmSummaryLabelStyle}" />
                     </StackPanel>
                 </Grid>
             </Border>

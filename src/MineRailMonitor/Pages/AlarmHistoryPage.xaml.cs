@@ -23,7 +23,9 @@ public partial class AlarmHistoryPage : UserControl
     private IReadOnlyList<RfidStationYardOption> _yardFilterOptions;
     private HashSet<string>? _displayScopeStationIds;
     private readonly ObservableCollection<AlarmRow> _rows = new();
+    private readonly AlarmHistoryDateRangePolicy _dateRangePolicy = new();
     private bool _isYardFilterSync;
+    private bool _isUpdatingDateRange;
     private int _pageIndex;
     private int _totalCount;
 
@@ -50,6 +52,7 @@ public partial class AlarmHistoryPage : UserControl
     public void Refresh()
     {
         _pageIndex = 0;
+        RefreshDefaultDateRange();
         ExecuteQuery();
     }
 
@@ -138,13 +141,6 @@ public partial class AlarmHistoryPage : UserControl
                 _rows.Add(new AlarmRow(record, FormatStation(record.StationId)));
             }
 
-            var now = DateTimeOffset.Now;
-            var dayStart = new DateTimeOffset(now.Date, now.Offset);
-            var todayAlerts = YardPassageFilter.Filter(_recordStore.Records, _displayScopeStationIds)
-                .Count(record => record.CompletedAt >= dayStart &&
-                                record.CompletedAt < dayStart.AddDays(1) &&
-                                record.IsAlert);
-            TodayAlarmValue.Text = todayAlerts.ToString(CultureInfo.InvariantCulture);
             QueryAlarmValue.Text = _totalCount.ToString(CultureInfo.InvariantCulture);
             StationCountValue.Text = _rows.Select(item => item.Record.StationId)
                 .Where(item => !string.IsNullOrWhiteSpace(item))
@@ -167,7 +163,6 @@ public partial class AlarmHistoryPage : UserControl
             QueryErrorText.Text = exception.Message;
             _rows.Clear();
             ListSummaryText.Text = "查询失败";
-            TodayAlarmValue.Text = "-";
             QueryAlarmValue.Text = "-";
             StationCountValue.Text = "-";
             LatestAlarmStationValue.Text = "-";
@@ -336,8 +331,41 @@ public partial class AlarmHistoryPage : UserControl
 
     private void SetDefaultDateTimeFilter()
     {
-        FromDatePicker.SelectedDate = DateTime.Today;
-        ToDatePicker.SelectedDate = DateTime.Today;
+        _dateRangePolicy.Reset();
+        SetDateTimeFilter(DateTime.Today);
+    }
+
+    private void RefreshDefaultDateRange()
+    {
+        var today = DateTime.Today;
+        if (_dateRangePolicy.ShouldRefreshFor(FromDatePicker.SelectedDate, ToDatePicker.SelectedDate, today))
+        {
+            SetDateTimeFilter(today);
+        }
+    }
+
+    private void SetDateTimeFilter(DateTime date)
+    {
+        _isUpdatingDateRange = true;
+        try
+        {
+            FromDatePicker.SelectedDate = date.Date;
+            ToDatePicker.SelectedDate = date.Date;
+        }
+        finally
+        {
+            _isUpdatingDateRange = false;
+        }
+    }
+
+    private void OnFilterDateChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isUpdatingDateRange)
+        {
+            return;
+        }
+
+        _dateRangePolicy.RecordUserSelection(FromDatePicker.SelectedDate, ToDatePicker.SelectedDate, DateTime.Today);
     }
 
     private void OnDatePickerPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

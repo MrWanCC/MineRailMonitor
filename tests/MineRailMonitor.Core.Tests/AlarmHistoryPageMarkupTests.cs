@@ -58,6 +58,33 @@ public sealed class AlarmHistoryPageMarkupTests
     }
 
     [Fact]
+    public void Alarm_summary_and_list_use_the_same_date_filtered_query()
+    {
+        var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "AlarmHistoryPage.xaml"));
+        var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "AlarmHistoryPage.xaml.cs"));
+
+        Assert.Contains("Text=\"当前查询告警\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"今日告警\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"当前查询\"", markup, StringComparison.Ordinal);
+        Assert.Contains("QueryAlarmValue.Text = _totalCount.ToString(CultureInfo.InvariantCulture)", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("TodayAlarmValue", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("_recordStore.Records", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Alarm_page_refreshes_default_dates_and_tracks_manual_date_selection()
+    {
+        var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "AlarmHistoryPage.xaml"));
+        var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "AlarmHistoryPage.xaml.cs"));
+
+        Assert.Contains("SelectedDateChanged=\"OnFilterDateChanged\"", markup, StringComparison.Ordinal);
+        Assert.Contains("_dateRangePolicy.ShouldRefreshFor", code, StringComparison.Ordinal);
+        Assert.Contains("_dateRangePolicy.RecordUserSelection", code, StringComparison.Ordinal);
+        Assert.Contains("_dateRangePolicy.Reset()", code, StringComparison.Ordinal);
+        Assert.Contains("SetDateTimeFilter(DateTime.Today)", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Main_window_routes_alarms_to_the_alarm_history_page()
     {
         var code = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));

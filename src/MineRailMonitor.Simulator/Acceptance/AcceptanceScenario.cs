@@ -1,3 +1,5 @@
+using MineRailMonitor.Core.Acceptance;
+
 namespace MineRailMonitor.Simulator.Acceptance;
 
 public sealed class AcceptanceScenarioDefinition
@@ -6,12 +8,14 @@ public sealed class AcceptanceScenarioDefinition
         string name,
         IEnumerable<AcceptanceTrainPlan> trains,
         bool reappearsOldTags = false,
-        bool sendNextTrainImmediatelyAfterClear = false)
+        bool sendNextTrainImmediatelyAfterClear = false,
+        string? displayName = null)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Scenario name must not be empty.", nameof(name));
         if (trains is null) throw new ArgumentNullException(nameof(trains));
 
         Name = name;
+        DisplayName = string.IsNullOrWhiteSpace(displayName) ? name : displayName!;
         Trains = trains.ToArray();
         if (Trains.Count == 0)
         {
@@ -23,6 +27,8 @@ public sealed class AcceptanceScenarioDefinition
     }
 
     public string Name { get; }
+
+    public string DisplayName { get; }
 
     public IReadOnlyList<AcceptanceTrainPlan> Trains { get; }
 
@@ -37,7 +43,9 @@ public sealed class AcceptanceTrainPlan
         byte stationAddress,
         IEnumerable<ushort> vehicleRfids,
         IEnumerable<int>? occupiedSlotIndexes = null,
-        TimeSpan? delayBeforeFinalRfid = null)
+        TimeSpan? delayBeforeFinalRfid = null,
+        int? delayBeforeRfidIndex = null,
+        TimeSpan? delayBeforeRfid = null)
     {
         if (vehicleRfids is null) throw new ArgumentNullException(nameof(vehicleRfids));
 
@@ -47,6 +55,17 @@ public sealed class AcceptanceTrainPlan
         if (DelayBeforeFinalRfid < TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(delayBeforeFinalRfid));
+        }
+        DelayBeforeRfidIndex = delayBeforeRfidIndex;
+        DelayBeforeRfid = delayBeforeRfid ?? TimeSpan.Zero;
+        if (DelayBeforeRfid < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(delayBeforeRfid));
+        }
+        if (DelayBeforeRfidIndex.HasValue &&
+            (DelayBeforeRfidIndex.Value < 0 || DelayBeforeRfidIndex.Value >= VehicleRfids.Count))
+        {
+            throw new ArgumentOutOfRangeException(nameof(delayBeforeRfidIndex));
         }
         if (VehicleRfids.Count == 0 || VehicleRfids.Count > 14)
         {
@@ -74,6 +93,10 @@ public sealed class AcceptanceTrainPlan
     public IReadOnlyList<int> OccupiedSlotIndexes { get; }
 
     public TimeSpan DelayBeforeFinalRfid { get; }
+
+    public int? DelayBeforeRfidIndex { get; }
+
+    public TimeSpan DelayBeforeRfid { get; }
 }
 
 public static class AcceptanceScenario
@@ -181,7 +204,34 @@ public static class AcceptanceScenario
                 Train(0x01, StandardVehicle(0x1001, 0x1101)),
                 Train(0x01, StandardVehicle(0x1002, 0x1201))
             },
-            sendNextTrainImmediatelyAfterClear: true)
+            sendNextTrainImmediatelyAfterClear: true),
+        new AcceptanceScenarioDefinition(
+            "U09_11CarMissingFive",
+            new[] { Train(0x01, AcceptanceVehicleCatalog.Test11Rfids.Take(6)) },
+            displayName: "11节缺5节"),
+        new AcceptanceScenarioDefinition(
+            "U10_11CarLateCompletion",
+            new[]
+            {
+                Train(
+                    0x01,
+                    AcceptanceVehicleCatalog.Test11Rfids,
+                    delayBeforeRfidIndex: 6,
+                    delayBeforeRfid: TimeSpan.FromSeconds(25))
+            },
+            displayName: "11节补扫完成"),
+        new AcceptanceScenarioDefinition(
+            "U11_CustomCountNotFixed11",
+            new[] { Train(0x01, AcceptanceVehicleCatalog.Test07Rfids) },
+            displayName: "7节正常通过"),
+        new AcceptanceScenarioDefinition(
+            "U12_Test11Normal",
+            new[] { Train(0x01, AcceptanceVehicleCatalog.Test11Rfids) },
+            displayName: "11节正常通过"),
+        new AcceptanceScenarioDefinition(
+            "U13_Test11MissingOne",
+            new[] { Train(0x01, AcceptanceVehicleCatalog.Test11Rfids.Take(10)) },
+            displayName: "11节缺1节")
     };
 
     public static AcceptanceScenarioDefinition Parse(string name)
@@ -199,8 +249,10 @@ public static class AcceptanceScenario
         byte stationAddress,
         IEnumerable<ushort> values,
         IEnumerable<int>? slots = null,
-        TimeSpan? delayBeforeFinalRfid = null) =>
-        new(stationAddress, values, slots, delayBeforeFinalRfid);
+        TimeSpan? delayBeforeFinalRfid = null,
+        int? delayBeforeRfidIndex = null,
+        TimeSpan? delayBeforeRfid = null) =>
+        new(stationAddress, values, slots, delayBeforeFinalRfid, delayBeforeRfidIndex, delayBeforeRfid);
 
     private static ushort[] StandardVehicle(ushort headRfid, ushort firstWagonRfid) =>
         new[] { headRfid }.Concat(Enumerable.Range(0, 10).Select(index => (ushort)(firstWagonRfid + index))).ToArray();

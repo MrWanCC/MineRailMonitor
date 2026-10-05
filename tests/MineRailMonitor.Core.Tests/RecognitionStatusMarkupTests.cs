@@ -33,8 +33,16 @@ public sealed class RecognitionStatusMarkupTests
         Assert.Contains("协议数据告警", mainWindowCode);
         Assert.Contains("脱节报警", mainWindowCode);
         Assert.Contains("ExpectedVehicleCount = project.RfidSettings.ExpectedVehicleCount", mainWindowCode);
-        Assert.DoesNotContain("ExpectedVehicleCount = 11", mainWindowCode);
-        Assert.Contains("LoadScenario(\"正常11节\"", simulatorCode);
+        Assert.Contains(
+            "if (_acceptanceOptions.Enabled)\n        {\n            result.Project.Vehicles = CreateAcceptanceVehicles();\n            result.Project.RfidSettings.ExpectedVehicleCount = 11;\n        }",
+            mainWindowCode.Replace("\r\n", "\n"));
+        Assert.Contains("LoadScenario(\"11节正常通过\"", simulatorCode);
+        Assert.Contains("11节缺5节", simulatorCode);
+        Assert.Contains("11节缺1节", simulatorCode);
+        Assert.Contains("11节补扫完成", simulatorCode);
+        Assert.Contains("7节正常通过", simulatorCode);
+        Assert.DoesNotContain("只有6节", simulatorMarkup);
+        Assert.DoesNotContain("只有10节", simulatorMarkup);
         Assert.Contains("SimulatorStationContext", simulatorCode);
         Assert.Contains("ScenarioPlaybackState", simulatorContextCode);
         Assert.Contains("多车头11节", simulatorMarkup);
@@ -56,7 +64,7 @@ public sealed class RecognitionStatusMarkupTests
 
         SimulatorStationPresets.ApplyAllNormal(new[] { station });
 
-        Assert.Equal("正常11节", station.ScenarioName);
+        Assert.Equal("11节正常通过", station.ScenarioName);
         Assert.Equal(11, station.Playback.Sequence.Count);
         Assert.Equal(11, station.Playback.Sequence.Distinct().Count());
         Assert.True(station.StartScenario(TimeSpan.FromMilliseconds(1)));

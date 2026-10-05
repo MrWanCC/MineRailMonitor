@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Windows;
@@ -11,6 +12,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using MineRailMonitor.Core.Acceptance;
 using MineRailMonitor.Simulator.Models;
 using MineRailMonitor.Simulator.Protocol;
 
@@ -18,11 +20,8 @@ namespace MineRailMonitor.Simulator;
 
 public partial class MainWindow : Window
 {
-    private static readonly ushort[] Normal11 =
-    {
-        0x03E9, 0x07D1, 0x07D2, 0x07D3, 0x07D4, 0x07D5,
-        0x07D6, 0x07D7, 0x07D8, 0x07D9, 0x07DA
-    };
+    private static readonly ushort[] Test11 = AcceptanceVehicleCatalog.Test11Rfids.ToArray();
+    private static readonly ushort[] Test07 = AcceptanceVehicleCatalog.Test07Rfids.ToArray();
 
     private readonly ObservableCollection<TextBox> _rfidTextBoxes = new();
     private readonly List<Ellipse> _rfidIndicators = new();
@@ -187,8 +186,10 @@ public partial class MainWindow : Window
         OneNormalFiveOfflinePresetButton.Click += (_, _) => ApplyOneNormalFiveOfflinePreset();
         SameAddressIsolationPresetButton.Click += (_, _) => ApplySameAddressIsolationPreset();
         NormalPresetButton.Click += (_, _) => ApplyNormalPreset();
-        TenWagonPresetButton.Click += (_, _) => ApplyTenWagonPreset();
-        ShortPresetButton.Click += (_, _) => ApplyShortPreset();
+        TenWagonPresetButton.Click += (_, _) => ApplyMissingOnePreset();
+        ShortPresetButton.Click += (_, _) => ApplyMissingFivePreset();
+        SupplementPresetButton.Click += (_, _) => ApplySupplementPreset();
+        Test07PresetButton.Click += (_, _) => ApplyTest07Preset();
         DuplicatePresetButton.Click += (_, _) => ApplyDuplicatePreset();
         MultiHeadPresetButton.Click += (_, _) => ApplyMultiHeadPreset();
         NoHeadPresetButton.Click += (_, _) => ApplyNoHeadPreset();
@@ -279,7 +280,7 @@ public partial class MainWindow : Window
         var context = new SimulatorStationContext(config);
         if (loadDefaultScenario)
         {
-            context.LoadScenario("正常11节", Normal11);
+            context.LoadScenario("11节正常通过", Test11);
         }
         Stations.Add(context);
     }
@@ -305,7 +306,7 @@ public partial class MainWindow : Window
             ProtocolAddress = address,
             Enabled = true
         });
-        context.LoadScenario("正常11节", Normal11);
+        context.LoadScenario("11节正常通过", Test11);
         Stations.Add(context);
         RefreshStationView();
         SelectStation(context);
@@ -529,18 +530,19 @@ public partial class MainWindow : Window
         UpdateStationSummaries();
     }
 
-    private void ApplyNormalPreset() => LoadSelectedScenario("正常11节", Normal11);
+    private void ApplyNormalPreset() => LoadSelectedScenario("11节正常通过", Test11);
 
-    private void ApplyTenWagonPreset() => LoadSelectedScenario("只有10节", new ushort[]
-    {
-        0x03EE, 0x07FE, 0x07FF, 0x0800, 0x0801,
-        0x0802, 0x0803, 0x0804, 0x0805, 0x0806
-    });
+    private void ApplyMissingFivePreset() => LoadSelectedScenario("11节缺5节", Test11.Take(6));
 
-    private void ApplyShortPreset() => LoadSelectedScenario("只有6节", new ushort[]
-    {
-        0x03ED, 0x07F9, 0x07FA, 0x07FB, 0x07FC, 0x07FD
-    });
+    private void ApplyMissingOnePreset() => LoadSelectedScenario("11节缺1节", Test11.Take(10));
+
+    private void ApplySupplementPreset() => LoadSelectedScenario(
+        "11节补扫完成",
+        Test11,
+        delayBeforeRfidIndex: 6,
+        delayBeforeRfid: TimeSpan.FromSeconds(25));
+
+    private void ApplyTest07Preset() => LoadSelectedScenario("7节正常通过", Test07);
 
     private void ApplyDuplicatePreset() => LoadSelectedScenario("重复RFID", new ushort[]
     {
@@ -565,14 +567,18 @@ public partial class MainWindow : Window
         0x07D6, 0x07D7, 0x07D8, 0x07D9, 0x07DA
     });
 
-    private void LoadSelectedScenario(string name, IEnumerable<ushort> sequence)
+    private void LoadSelectedScenario(
+        string name,
+        IEnumerable<ushort> sequence,
+        int? delayBeforeRfidIndex = null,
+        TimeSpan? delayBeforeRfid = null)
     {
         if (_selectedStation is null)
         {
             return;
         }
 
-        _selectedStation.LoadScenario(name, sequence);
+        _selectedStation.LoadScenario(name, sequence, delayBeforeRfidIndex, delayBeforeRfid);
         LoadSelectedSlotsIntoDetails();
         UpdateScenarioPlaybackStatus();
         UpdateStationSummaries();

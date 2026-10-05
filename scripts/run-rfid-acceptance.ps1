@@ -37,8 +37,26 @@ $scenarioNames = @(
     'UdpU05HeadAppearsLate',
     'UdpU06UnknownHeadFallback',
     'UdpU07ConsecutiveAfterClear',
-    'UdpU08ImmediateConsecutive'
+    'UdpU08ImmediateConsecutive',
+    'U09_11CarMissingFive',
+    'U10_11CarLateCompletion',
+    'U11_CustomCountNotFixed11',
+    'U12_Test11Normal',
+    'U13_Test11MissingOne'
 )
+
+function Get-AcceptanceScenarioLabel {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    switch ($Name) {
+        'U09_11CarMissingFive' { return '11节缺5节' }
+        'U10_11CarLateCompletion' { return '11节补扫完成' }
+        'U11_CustomCountNotFixed11' { return '7节正常通过' }
+        'U12_Test11Normal' { return '11节正常通过' }
+        'U13_Test11MissingOne' { return '11节缺1节' }
+        default { return $Name }
+    }
+}
 
 function Write-AtomicText {
     param(
@@ -457,6 +475,21 @@ function Get-ScenarioExpectation {
         'UdpU08ImmediateConsecutive' {
             return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = '1001'; VehicleHeadRfid = '1001'; VehicleNo = 'K001'; VehicleName = '11节验收车辆001'; Expected = 11; Detected = 11; Result = 'Completed'; AlarmStatus = $null; WarningContains = @(); Rfids = (Get-StandardTagSequence 0x1001 0x1101 10) }) }
         }
+        'U09_11CarMissingFive' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = 'A001'; VehicleHeadRfid = 'A001'; VehicleNo = 'TEST-11'; VehicleName = '11节验收车辆'; Expected = 11; Detected = 6; Missing = 5; Result = 'UncouplingAlarm'; AlarmStatus = 'Unconfirmed'; WarningContains = @('脱节报警'); Rfids = @('A001', 'A002', 'A003', 'A004', 'A005', 'A006') }) }
+        }
+        'U10_11CarLateCompletion' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = 'A001'; VehicleHeadRfid = 'A001'; VehicleNo = 'TEST-11'; VehicleName = '11节验收车辆'; Expected = 11; Detected = 11; Result = 'Completed'; AlarmStatus = $null; WarningContains = @(); Rfids = @('A001', 'A002', 'A003', 'A004', 'A005', 'A006', 'A007', 'A008', 'A009', 'A010', 'A011') }) }
+        }
+        'U11_CustomCountNotFixed11' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = 'B001'; VehicleHeadRfid = 'B001'; VehicleNo = 'TEST-07'; VehicleName = '7节验收车辆'; Expected = 7; Detected = 7; Result = 'Completed'; AlarmStatus = $null; WarningContains = @(); Rfids = @('B001', 'B002', 'B003', 'B004', 'B005', 'B006', 'B007') }) }
+        }
+        'U12_Test11Normal' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = 'A001'; VehicleHeadRfid = 'A001'; VehicleNo = 'TEST-11'; VehicleName = '11节验收车辆'; Expected = 11; Detected = 11; Result = 'Completed'; AlarmStatus = $null; WarningContains = @(); Rfids = @('A001', 'A002', 'A003', 'A004', 'A005', 'A006', 'A007', 'A008', 'A009', 'A010', 'A011') }) }
+        }
+        'U13_Test11MissingOne' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = 'A001'; VehicleHeadRfid = 'A001'; VehicleNo = 'TEST-11'; VehicleName = '11节验收车辆'; Expected = 11; Detected = 10; Missing = 1; Result = 'UncouplingAlarm'; AlarmStatus = 'Unconfirmed'; WarningContains = @('脱节报警'); Rfids = @('A001', 'A002', 'A003', 'A004', 'A005', 'A006', 'A007', 'A008', 'A009', 'A010') }) }
+        }
         default {
             throw "未知验收场景：$Name"
         }
@@ -577,6 +610,10 @@ function Test-ScenarioResult {
             (@($actual.Rfids) -join ',') -ne (@($expected.Rfids) -join ',')) {
             throw "SQLite记录内容不符：$Name index=$index。"
         }
+        if ($expected.PSObject.Properties.Match('Missing').Count -gt 0 -and
+            ($expected.Expected - $actual.Detected) -ne $expected.Missing) {
+            throw "脱节缺少数量不符：$Name expected=$($expected.Missing) actual=$($expected.Expected - $actual.Detected)。"
+        }
         foreach ($identityField in @('VehicleHeadRfid', 'VehicleNo', 'VehicleName', 'AlarmStatus')) {
             if ($expected.PSObject.Properties.Match($identityField).Count -gt 0 -and $actual.$identityField -ne $expected.$identityField) {
                 throw "SQLite车辆/报警快照不符：$Name index=$index field=$identityField expected=$($expected.$identityField) actual=$($actual.$identityField)。"
@@ -690,6 +727,60 @@ function Test-ScenarioResult {
                 throw "S03第11个标签没有在30秒超时前补到：delay=$lastTagDelay 秒。"
             }
         }
+        $lastNewVehicleRefreshed = $null
+        $supplementalTagDelaySeconds = $null
+        $supplementalTagElapsedSeconds = $null
+        if ($Name -eq 'U09_11CarMissingFive') {
+            if ($actual.Expected -ne 11 -or $actual.Detected -ne 6 -or
+                ($actual.Expected - $actual.Detected) -ne 5 -or
+                $actual.Result -ne 'UncouplingAlarm' -or
+                $actual.AlarmStatus -ne 'Unconfirmed' -or
+                $statistics.AlarmCount -ne 1 -or
+                @($passageEventTypes | Where-Object { $_ -eq 'PASSAGE_ALARM' }).Count -ne 1) {
+                throw '11节缺5节未验证Vehicle=TEST-11、Expected=11、Detected=6、Missing=5及未确认脱节报警。'
+            }
+        }
+        if ($Name -eq 'U13_Test11MissingOne' -and
+            ($actual.VehicleNo -ne 'TEST-11' -or $actual.Expected -ne 11 -or $actual.Detected -ne 10 -or
+                ($actual.Expected - $actual.Detected) -ne 1 -or
+                $actual.Result -ne 'UncouplingAlarm' -or
+                $actual.AlarmStatus -ne 'Unconfirmed' -or
+                $statistics.AlarmCount -ne 1 -or
+                @($passageEventTypes | Where-Object { $_ -eq 'PASSAGE_ALARM' }).Count -ne 1)) {
+            throw '11节缺1节未验证TEST-11的10/11未确认脱节报警。'
+        }
+        if ($Name -eq 'U10_11CarLateCompletion') {
+            $progressEvents = @($passageEventRows | Where-Object { $_.EventType -eq 'PASSAGE_PROGRESS' } | Sort-Object OccurredAt)
+            if ($progressEvents.Count -ne 11) {
+                throw "U10应只在ExpectedCount=11时完成：progress=$($progressEvents.Count)。"
+            }
+            $supplementalTagDelaySeconds = ([DateTimeOffset]::Parse([string]$progressEvents[6].OccurredAt) - [DateTimeOffset]::Parse([string]$progressEvents[5].OccurredAt)).TotalSeconds
+            $startEvent = @($passageEventRows | Where-Object { $_.EventType -eq 'PASSAGE_START' })[0]
+            $supplementalTagElapsedSeconds = ([DateTimeOffset]::Parse([string]$progressEvents[6].OccurredAt) - [DateTimeOffset]::Parse([string]$startEvent.OccurredAt)).TotalSeconds
+            if ($supplementalTagElapsedSeconds -lt 23 -or $supplementalTagElapsedSeconds -gt 28) {
+                throw "U10未在约25秒处开始补扫并以11个唯一RFID完成：progress=$($progressEvents.Count) delay=$supplementalTagDelaySeconds 秒。"
+            }
+            $supplementalAt = [DateTimeOffset]::Parse([string]$progressEvents[6].OccurredAt)
+            $lateSnapshots = @($history | Where-Object {
+                $_.LifecycleState -eq 'Recognizing' -and [int]$_.Detected -ge 7 -and
+                [DateTimeOffset]::Parse([string]$_.LastNewVehicleAt) -ge $supplementalAt
+            })
+            $lastNewVehicleRefreshed = $lateSnapshots.Count -gt 0
+            $lastConfiguredSupplementObserved = @($responses | Where-Object {
+                [int]$_.StationAddress -eq $actual.StationAddress -and
+                @($_.Slots | Where-Object { [int]$_ -eq 0xA011 }).Count -gt 0
+            }).Count -gt 0
+            if (-not $lastNewVehicleRefreshed -or -not $lastConfiguredSupplementObserved -or
+                $actual.Expected -ne 11 -or $actual.Detected -ne 11 -or
+                $actual.Result -ne 'Completed' -or $null -ne $actual.AlarmStatus -or
+                $statistics.AlarmCount -ne 0) {
+                throw "U10未验证迟到新标签刷新超时并保持单条11/11正常记录：LastNewRefreshed=$lastNewVehicleRefreshed lastSupplementObserved=$lastConfiguredSupplementObserved。"
+            }
+        }
+        if ($Name -eq 'U11_CustomCountNotFixed11' -and
+            ($actual.VehicleNo -ne 'TEST-07' -or $actual.Expected -ne 7 -or $actual.Detected -ne 7 -or $actual.Result -ne 'Completed')) {
+            throw 'U11未验证TEST-07按车辆配置的7节完成。'
+        }
 
         $clearCount = @($requests | Where-Object {
             [int]$_.StationAddress -eq $actual.StationAddress -and [int]$_.Command -eq 1
@@ -745,8 +836,12 @@ function Test-ScenarioResult {
             VehicleName = $actual.VehicleName
             Expected = $actual.Expected
             Detected = $actual.Detected
+            Missing = $actual.Expected - $actual.Detected
             Result = $actual.Result
             AlarmStatus = $actual.AlarmStatus
+            LastNewVehicleRefreshed = $lastNewVehicleRefreshed
+            SupplementalTagDelaySeconds = if ($null -eq $supplementalTagDelaySeconds) { $null } else { [Math]::Round($supplementalTagDelaySeconds, 3) }
+            SupplementalTagElapsedSeconds = if ($null -eq $supplementalTagElapsedSeconds) { $null } else { [Math]::Round($supplementalTagElapsedSeconds, 3) }
             PassageEvents = $passageEventTypes
             LifecycleDiagnostics = $passageLifecycleLines
             DiagnosticTransitions = $diagnosticStates
@@ -1013,7 +1108,7 @@ $infrastructureCheck = Invoke-DotnetCheck -Label 'Infrastructure Tests' -Argumen
 $scenarioResults = New-Object System.Collections.ArrayList
 $recordResults = New-Object System.Collections.ArrayList
 foreach ($name in $selectedScenarios) {
-    Write-Host "`n[$name] starting"
+    Write-Host "`n[$(Get-AcceptanceScenarioLabel -Name $name)] starting"
     if (-not $buildCheck.Pass -or -not $coreCheck.Pass -or -not $infrastructureCheck.Pass) {
         $scenarioResult = [pscustomobject]@{
             Scenario = $name
@@ -1088,7 +1183,16 @@ Write-AtomicJson -Path $reportPath -Value $finalReport
 Write-Host "`nRFID Acceptance"
 foreach ($scenarioResult in $scenarioResults) {
     $status = if ($scenarioResult.Pass) { 'PASS' } else { 'FAIL' }
-    Write-Host ("{0,-25} {1}" -f $scenarioResult.Scenario, $status)
+    $label = Get-AcceptanceScenarioLabel -Name $scenarioResult.Scenario
+    Write-Host ("{0,-25} {1}" -f $label, $status)
+}
+foreach ($record in $recordResults | Where-Object { $_.VehicleNo -like 'TEST-*' }) {
+    Write-Host ""
+    Write-Host (Get-AcceptanceScenarioLabel -Name $record.Scenario)
+    Write-Host "Vehicle: $($record.VehicleNo)"
+    Write-Host "Expected: $($record.Expected)"
+    Write-Host "Detected: $($record.Detected)"
+    Write-Host "Missing: $($record.Missing)"
 }
 Write-Host ""
 Write-Host ("{0}/{1} PASS" -f $finalReport.PassedScenarioCount, $finalReport.ScenarioCount)

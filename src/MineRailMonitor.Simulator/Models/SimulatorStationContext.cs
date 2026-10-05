@@ -23,6 +23,8 @@ public sealed class SimulatorStationContext : INotifyPropertyChanged, IDisposabl
     private CancellationTokenSource? _responderCts;
     private Task? _receiveTask;
     private DateTimeOffset? _nextScenarioStepAt;
+    private int? _delayBeforeRfidIndex;
+    private TimeSpan _delayBeforeRfid;
     private DateTimeOffset? _lastRequestAt;
     private string _lastCommand = "-";
     private string _requestSource = "-";
@@ -280,17 +282,39 @@ public sealed class SimulatorStationContext : INotifyPropertyChanged, IDisposabl
         }
     }
 
-    public void LoadScenario(string name, IEnumerable<ushort> sequence)
+    public void LoadScenario(
+        string name,
+        IEnumerable<ushort> sequence,
+        int? delayBeforeRfidIndex = null,
+        TimeSpan? delayBeforeRfid = null)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
             throw new ArgumentException("Scenario name must not be empty.", nameof(name));
         }
+        if (sequence is null)
+        {
+            throw new ArgumentNullException(nameof(sequence));
+        }
+
+        var values = sequence.ToArray();
+        var delay = delayBeforeRfid ?? TimeSpan.Zero;
+        if (delay < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(delayBeforeRfid));
+        }
+        if (delayBeforeRfidIndex.HasValue &&
+            (delayBeforeRfidIndex.Value < 0 || delayBeforeRfidIndex.Value >= values.Length))
+        {
+            throw new ArgumentOutOfRangeException(nameof(delayBeforeRfidIndex));
+        }
 
         lock (_syncRoot)
         {
-            Playback.Load(sequence ?? throw new ArgumentNullException(nameof(sequence)));
+            Playback.Load(values);
             ScenarioName = name;
+            _delayBeforeRfidIndex = delayBeforeRfidIndex;
+            _delayBeforeRfid = delay;
             NextScenarioStepAt = null;
             SyncStationSlotsNoLock(Playback.Slots);
             OnPropertyChanged(nameof(PlaybackProgress));
@@ -346,7 +370,7 @@ public sealed class SimulatorStationContext : INotifyPropertyChanged, IDisposabl
                 return false;
             }
 
-            NextScenarioStepAt = DateTimeOffset.UtcNow.Add(interval);
+            NextScenarioStepAt = DateTimeOffset.UtcNow.Add(GetNextStepDelayNoLock());
             return true;
         }
     }
@@ -372,7 +396,7 @@ public sealed class SimulatorStationContext : INotifyPropertyChanged, IDisposabl
             var stepped = StepScenario();
             if (stepped && Playback.IsPlaying)
             {
-                NextScenarioStepAt = now.Add(ScanInterval);
+                NextScenarioStepAt = now.Add(GetNextStepDelayNoLock());
             }
 
             return stepped;
@@ -587,6 +611,9 @@ public sealed class SimulatorStationContext : INotifyPropertyChanged, IDisposabl
         Array.Copy(slots.ToArray(), _station.Slots, ScenarioPlaybackState.SlotCapacity);
         _simulatorResponder?.UpdateSlots(_station.Address, _station.Slots);
     }
+
+    private TimeSpan GetNextStepDelayNoLock() =>
+        _delayBeforeRfidIndex == Playback.CurrentIndex ? _delayBeforeRfid : ScanInterval;
 
     private void ApplyConfig(SimulatorStationConfig updated)
     {

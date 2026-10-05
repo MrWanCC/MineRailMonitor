@@ -1,4 +1,5 @@
 using System.Net;
+using MineRailMonitor.Core.Acceptance;
 using MineRailMonitor.Core.Models;
 using MineRailMonitor.Core.Services;
 using MineRailMonitor.Simulator.Acceptance;
@@ -266,6 +267,147 @@ public sealed class SimulatorVehicleScenarioIntegrationTests
         Assert.DoesNotContain(store.Records, item => item.VehicleNo == "K002");
     }
 
+    [Fact]
+    public void U09_configured_eleven_tag_vehicle_missing_five_tags_alarms_and_is_recorded()
+    {
+        var plan = AcceptanceScenario.Parse("U09_11CarMissingFive").Trains.Single();
+        var station = CreateStation(expectedVehicleCount: 7);
+        var store = new InMemoryPassageRecordStore();
+        var events = new RecordingPassageEventLogger();
+        var coordinator = CreateCoordinator(station, store, new[] { CreateTest11Vehicle() }, eventLogger: events);
+
+        var session = coordinator.ProcessFrame(CreateFrame(station, Start, plan.VehicleRfids));
+        Assert.NotNull(session);
+        Assert.Equal(11, session!.ExpectedVehicleCount);
+        Assert.Equal(6, session.DetectedVehicleCount);
+        coordinator.Evaluate(Start.AddSeconds(30));
+
+        var passage = Assert.Single(store.Records);
+        Assert.Equal("TEST-11", passage.VehicleNo);
+        Assert.Equal("11节验收车辆", passage.VehicleName);
+        Assert.Equal(11, passage.ExpectedVehicleCount);
+        Assert.Equal(6, passage.DetectedVehicleCount);
+        Assert.Equal(5, passage.ExpectedVehicleCount - passage.DetectedVehicleCount);
+        Assert.Equal(PassageOutcome.UncouplingAlarm, passage.Outcome);
+        Assert.Equal(AlarmStatus.Unconfirmed, passage.AlarmStatus);
+        var alarmEvent = Assert.Single(events.Events, item => item.EventType == PassageEventTypes.Alarm);
+        Assert.Equal(passage.PassageId, alarmEvent.PassageId);
+        Assert.Equal(11, alarmEvent.ExpectedCount);
+        Assert.Equal(6, alarmEvent.DetectedCount);
+        Assert.Equal(5, alarmEvent.MissingCount);
+        Assert.Equal(1, store.GetStatistics(Start.AddSeconds(30)).TodayAlarmCount);
+    }
+
+    [Fact]
+    public void U10_new_tags_at_twenty_five_seconds_refresh_last_new_time_and_complete_once()
+    {
+        var plan = AcceptanceScenario.Parse("U10_11CarLateCompletion").Trains.Single();
+        var station = CreateStation(expectedVehicleCount: 7);
+        var store = new InMemoryPassageRecordStore();
+        var events = new RecordingPassageEventLogger();
+        var coordinator = CreateCoordinator(station, store, new[] { CreateTest11Vehicle() }, eventLogger: events);
+        var initialRfids = plan.VehicleRfids.Take(6).ToArray();
+        var session = coordinator.ProcessFrame(CreateFrame(station, Start, initialRfids));
+
+        Assert.NotNull(session);
+        Assert.Equal(11, session!.ExpectedVehicleCount);
+        Assert.Equal(6, session.DetectedVehicleCount);
+        foreach (var second in new[] { 5, 10, 20, 24 })
+        {
+            coordinator.ProcessFrame(CreateFrame(station, Start.AddSeconds(second), initialRfids));
+        }
+        Assert.Equal(Start, session.LastNewVehicleAt);
+
+        var observedRfids = initialRfids.ToList();
+        for (var index = 6; index < plan.VehicleRfids.Count; index++)
+        {
+            observedRfids.Add(plan.VehicleRfids[index]);
+            var receivedAt = Start.AddSeconds(25 + (index - 6) * 0.45);
+            coordinator.ProcessFrame(CreateFrame(station, receivedAt, observedRfids));
+        }
+
+        Assert.Equal(11, session.DetectedVehicleCount);
+        Assert.True(session.LastNewVehicleAt > Start.AddSeconds(24));
+        Assert.Equal(PassageLifecycleState.Completed, coordinator.States[station.ProtocolAddress].LifecycleState);
+        var passage = Assert.Single(store.Records);
+        Assert.Equal("TEST-11", passage.VehicleNo);
+        Assert.Equal(11, passage.ExpectedVehicleCount);
+        Assert.Equal(11, passage.DetectedVehicleCount);
+        Assert.Equal(PassageOutcome.Completed, passage.Outcome);
+        Assert.Null(passage.AlarmStatus);
+        Assert.DoesNotContain(events.Events, item => item.EventType == PassageEventTypes.Alarm);
+    }
+
+    [Fact]
+    public void U11_configured_seven_tag_vehicle_completes_without_a_fixed_eleven_tag_assumption()
+    {
+        var plan = AcceptanceScenario.Parse("U11_CustomCountNotFixed11").Trains.Single();
+        var station = CreateStation(expectedVehicleCount: 11);
+        var store = new InMemoryPassageRecordStore();
+        var coordinator = CreateCoordinator(station, store, new[] { CreateTest07Vehicle() });
+
+        var session = coordinator.ProcessFrame(CreateFrame(station, Start, plan.VehicleRfids));
+
+        Assert.NotNull(session);
+        Assert.Equal(7, session!.ExpectedVehicleCount);
+        Assert.Equal(7, session.DetectedVehicleCount);
+        Assert.Equal(PassageLifecycleState.Completed, coordinator.States[station.ProtocolAddress].LifecycleState);
+        var passage = Assert.Single(store.Records);
+        Assert.Equal("TEST-07", passage.VehicleNo);
+        Assert.Equal(7, passage.ExpectedVehicleCount);
+        Assert.Equal(7, passage.DetectedVehicleCount);
+        Assert.Equal(PassageOutcome.Completed, passage.Outcome);
+    }
+
+    [Fact]
+    public void U12_fixed_TEST11_vehicle_completes_with_eleven_tags_despite_station_and_global_defaults()
+    {
+        var plan = AcceptanceScenario.Parse("U12_Test11Normal").Trains.Single();
+        var station = CreateStation(expectedVehicleCount: 6);
+        var store = new InMemoryPassageRecordStore();
+        var coordinator = CreateCoordinator(station, store, new[] { CreateTest11Vehicle() }, globalExpectedCount: 6);
+
+        var session = coordinator.ProcessFrame(CreateFrame(station, Start, plan.VehicleRfids));
+
+        Assert.NotNull(session);
+        Assert.Equal(11, session!.ExpectedVehicleCount);
+        Assert.Equal(11, session.DetectedVehicleCount);
+        Assert.Equal(PassageLifecycleState.Completed, coordinator.States[station.ProtocolAddress].LifecycleState);
+        var passage = Assert.Single(store.Records);
+        Assert.Equal("TEST-11", passage.VehicleNo);
+        Assert.Equal(11, passage.ExpectedVehicleCount);
+        Assert.Equal(11, passage.DetectedVehicleCount);
+        Assert.Equal(PassageOutcome.Completed, passage.Outcome);
+    }
+
+    [Fact]
+    public void U13_fixed_TEST11_vehicle_missing_one_tag_always_alarms()
+    {
+        var plan = AcceptanceScenario.Parse("U13_Test11MissingOne").Trains.Single();
+        var station = CreateStation(expectedVehicleCount: 6);
+        var store = new InMemoryPassageRecordStore();
+        var events = new RecordingPassageEventLogger();
+        var coordinator = CreateCoordinator(station, store, new[] { CreateTest11Vehicle() }, globalExpectedCount: 6, eventLogger: events);
+
+        var session = coordinator.ProcessFrame(CreateFrame(station, Start, plan.VehicleRfids));
+        Assert.NotNull(session);
+        Assert.Equal(11, session!.ExpectedVehicleCount);
+        Assert.Equal(10, session.DetectedVehicleCount);
+        coordinator.Evaluate(Start.AddSeconds(30));
+
+        Assert.Equal(PassageLifecycleState.Alarm, coordinator.States[station.ProtocolAddress].LifecycleState);
+        var passage = Assert.Single(store.Records);
+        Assert.Equal("TEST-11", passage.VehicleNo);
+        Assert.Equal(11, passage.ExpectedVehicleCount);
+        Assert.Equal(10, passage.DetectedVehicleCount);
+        Assert.Equal(1, passage.ExpectedVehicleCount - passage.DetectedVehicleCount);
+        Assert.Equal(PassageOutcome.UncouplingAlarm, passage.Outcome);
+        var alarmEvent = Assert.Single(events.Events, item => item.EventType == PassageEventTypes.Alarm);
+        Assert.Equal(11, alarmEvent.ExpectedCount);
+        Assert.Equal(10, alarmEvent.DetectedCount);
+        Assert.Equal(1, alarmEvent.MissingCount);
+    }
+
     private static RfidRuntimeCoordinator CreateCoordinator(
         RfidStationConfig station,
         InMemoryPassageRecordStore store,
@@ -305,6 +447,12 @@ public sealed class SimulatorVehicleScenarioIntegrationTests
             })
             .ToList()
     };
+
+    private static VehicleConfig CreateTest11Vehicle() => AcceptanceVehicleCatalog.CreateVehicles()
+        .Single(vehicle => vehicle.VehicleNo == "TEST-11");
+
+    private static VehicleConfig CreateTest07Vehicle() => AcceptanceVehicleCatalog.CreateVehicles()
+        .Single(vehicle => vehicle.VehicleNo == "TEST-07");
 
     private static VehicleConfig CreateVehicle(ushort headRfid, string vehicleNo, string vehicleName, IReadOnlyList<ushort> rfids) => new()
     {

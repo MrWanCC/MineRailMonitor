@@ -226,11 +226,12 @@ public partial class MainWindow : Window
             ((App)Application.Current).Logger.Information(
                 $"RFID基站编号已规范化：{legacyStationIdMigration.Count} 个别名，历史记录更新 {migratedRecordCount} 条。");
         }
-        var runtimeSettings = GetRuntimeSettings(result.Project);
         if (_acceptanceOptions.Enabled)
         {
             result.Project.Vehicles = CreateAcceptanceVehicles();
+            result.Project.RfidSettings.ExpectedVehicleCount = 11;
         }
+        var runtimeSettings = GetRuntimeSettings(result.Project);
         _rfidFrameParser = new RfidFrameParser(new RfidFrameParserOptions
         {
             EmptyRfidValue = runtimeSettings.EmptyRfidValue
@@ -2305,19 +2306,22 @@ public partial class MainWindow : Window
     {
         CreateAcceptanceVehicle("K001", "11节验收车辆001", 0x1001, 0x1101),
         CreateAcceptanceVehicle("K002", "11节验收车辆002", 0x1002, 0x1201)
-    };
+    }
+        .Concat(AcceptanceVehicleCatalog.CreateVehicles())
+        .ToArray();
 
     private static VehicleConfig CreateAcceptanceVehicle(
         string vehicleNo,
         string vehicleName,
         ushort headRfid,
-        ushort firstWagonRfid)
+        ushort firstWagonRfid,
+        int wagonCount = 10)
     {
         var tags = new List<VehicleTagConfig>
         {
             new() { Position = 0, Rfid = headRfid, Type = VehicleTagType.Head }
         };
-        tags.AddRange(Enumerable.Range(0, 10).Select(index => new VehicleTagConfig
+        tags.AddRange(Enumerable.Range(0, wagonCount).Select(index => new VehicleTagConfig
         {
             Position = index + 1,
             Rfid = (ushort)(firstWagonRfid + index),

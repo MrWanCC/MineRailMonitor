@@ -1,12 +1,10 @@
+using MineRailMonitor.Core.Acceptance;
+
 namespace MineRailMonitor.Simulator.Models;
 
 public static class SimulatorStationPresets
 {
-    private static readonly ushort[] Normal11 =
-    {
-        0x03E9, 0x07D1, 0x07D2, 0x07D3, 0x07D4, 0x07D5,
-        0x07D6, 0x07D7, 0x07D8, 0x07D9, 0x07DA
-    };
+    private static readonly IReadOnlyList<ushort> Normal11 = AcceptanceVehicleCatalog.Test11Rfids;
 
     public static IReadOnlyList<SimulatorStationConfig> CreateDefaultSix()
     {
@@ -60,7 +58,7 @@ public static class SimulatorStationPresets
 
         foreach (var station in stations)
         {
-            station.LoadScenario("正常11节", Normal11);
+            station.LoadScenario("11节正常通过", Normal11);
         }
     }
 
@@ -81,7 +79,7 @@ public static class SimulatorStationPresets
         if (stationList.Length > 0)
         {
             stationList[0].Config.Enabled = true;
-            stationList[0].LoadScenario("正常11节", Normal11);
+            stationList[0].LoadScenario("11节正常通过", Normal11);
         }
     }
 

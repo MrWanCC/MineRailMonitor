@@ -232,10 +232,16 @@ public sealed class SimulatorScenarioRunner
         CancellationToken cancellationToken)
     {
         var station = stations.Single(item => item.Address == plan.StationAddress);
-        var nextInsertionAt = DateTimeOffset.UtcNow;
+        DateTimeOffset? previousObservedAt = null;
         foreach (var item in plan.VehicleRfids.Select((rfid, index) => new { rfid, index }))
         {
-            var scheduledAt = nextInsertionAt;
+            var scheduledAt = previousObservedAt.HasValue
+                ? previousObservedAt.Value.Add(VehicleInterval)
+                : DateTimeOffset.UtcNow;
+            if (item.index == plan.DelayBeforeRfidIndex)
+            {
+                scheduledAt = (previousObservedAt ?? DateTimeOffset.UtcNow).Add(plan.DelayBeforeRfid);
+            }
             if (item.index == plan.VehicleRfids.Count - 1)
             {
                 scheduledAt += plan.DelayBeforeFinalRfid;
@@ -258,7 +264,7 @@ public sealed class SimulatorScenarioRunner
                     response.Slots.Contains(item.rfid)),
                 cancellationToken,
                 $"基站 {plan.StationAddress:X2} 未通过UDP响应观察到 RFID {item.rfid:X4}。").ConfigureAwait(false);
-            nextInsertionAt = DateTimeOffset.UtcNow + VehicleInterval;
+            previousObservedAt = DateTimeOffset.UtcNow;
         }
     }
 

@@ -1,4 +1,5 @@
 using System.Net;
+using MineRailMonitor.Core.Acceptance;
 using MineRailMonitor.Core.Communication;
 using MineRailMonitor.Core.Models;
 using MineRailMonitor.Core.Protocol;
@@ -47,7 +48,7 @@ public sealed class SimulatorScenarioRunnerTests
     }
 
     [Fact]
-    public void Canonical_scenario_list_contains_fourteen_names()
+    public void Canonical_scenario_list_contains_existing_scenarios_and_U09_to_U13()
     {
         Assert.Equal(new[]
         {
@@ -57,7 +58,9 @@ public sealed class SimulatorScenarioRunnerTests
             "VehicleLateSeventh7", "VehicleRepeatedTagReads", "VehicleHeadAppearsLate7",
             "UdpU01Normal11", "UdpU02Uncoupling10Of11", "UdpU03LateEleventhCompletes",
             "UdpU04RepeatedTagsTimeout", "UdpU05HeadAppearsLate", "UdpU06UnknownHeadFallback",
-            "UdpU07ConsecutiveAfterClear", "UdpU08ImmediateConsecutive"
+            "UdpU07ConsecutiveAfterClear", "UdpU08ImmediateConsecutive",
+            "U09_11CarMissingFive", "U10_11CarLateCompletion", "U11_CustomCountNotFixed11",
+            "U12_Test11Normal", "U13_Test11MissingOne"
         }, AcceptanceScenario.All.Select(item => item.Name));
     }
 
@@ -88,6 +91,34 @@ public sealed class SimulatorScenarioRunnerTests
     }
 
     [Fact]
+    public void Simulator_supplement_preset_waits_twenty_five_seconds_before_the_seventh_tag()
+    {
+        using var station = new SimulatorStationContext(new SimulatorStationConfig
+        {
+            StationName = "验收模拟基站",
+            ListenIp = "127.0.0.1",
+            ListenPort = 62101,
+            ProtocolAddress = 1
+        });
+        station.LoadScenario(
+            "11节补扫完成",
+            AcceptanceVehicleCatalog.Test11Rfids,
+            delayBeforeRfidIndex: 6,
+            delayBeforeRfid: TimeSpan.FromSeconds(25));
+
+        Assert.True(station.StartScenario(TimeSpan.FromMilliseconds(450)));
+        DateTimeOffset sixthTagAt = default;
+        while (station.Playback.CurrentIndex < 6)
+        {
+            sixthTagAt = station.NextScenarioStepAt!.Value;
+            Assert.True(station.TickScenario(sixthTagAt));
+        }
+
+        Assert.Equal(6, station.Playback.CurrentIndex);
+        Assert.Equal(TimeSpan.FromSeconds(25), station.NextScenarioStepAt!.Value - sixthTagAt);
+    }
+
+    [Fact]
     public void Vehicle_scenario_inputs_use_a_known_seven_tag_train_and_an_unknown_head()
     {
         var normal = AcceptanceScenario.Parse("VehicleNormal7").Trains.Single();
@@ -112,6 +143,36 @@ public sealed class SimulatorScenarioRunnerTests
         Assert.Equal((ushort)0x1001, lateHead.VehicleRfids[6]);
         Assert.Equal(0, lateHead.OccupiedSlotIndexes[6]);
         Assert.Equal(new[] { 1, 2, 3, 4, 5, 6, 0 }, lateHead.OccupiedSlotIndexes);
+    }
+
+    [Fact]
+    public void U09_to_U13_use_fixed_acceptance_vehicle_RFID_sequences()
+    {
+        var missingFive = AcceptanceScenario.Parse("U09_11CarMissingFive").Trains.Single();
+        var lateCompletion = AcceptanceScenario.Parse("U10_11CarLateCompletion").Trains.Single();
+        var customCount = AcceptanceScenario.Parse("U11_CustomCountNotFixed11").Trains.Single();
+        var normalEleven = AcceptanceScenario.Parse("U12_Test11Normal").Trains.Single();
+        var missingOne = AcceptanceScenario.Parse("U13_Test11MissingOne").Trains.Single();
+
+        var test11 = new ushort[] { 0xA001, 0xA002, 0xA003, 0xA004, 0xA005, 0xA006, 0xA007, 0xA008, 0xA009, 0xA010, 0xA011 };
+        var test07 = new ushort[] { 0xB001, 0xB002, 0xB003, 0xB004, 0xB005, 0xB006, 0xB007 };
+        Assert.Equal(test11.Take(6), missingFive.VehicleRfids);
+        Assert.Equal(test11, lateCompletion.VehicleRfids);
+        Assert.Equal(6, lateCompletion.DelayBeforeRfidIndex);
+        Assert.Equal(TimeSpan.FromSeconds(25), lateCompletion.DelayBeforeRfid);
+        Assert.Equal(test07, customCount.VehicleRfids);
+        Assert.Equal(test11, normalEleven.VehicleRfids);
+        Assert.Equal(test11.Take(10), missingOne.VehicleRfids);
+        Assert.Equal("11节缺5节", AcceptanceScenario.Parse("U09_11CarMissingFive").DisplayName);
+        Assert.Equal("11节补扫完成", AcceptanceScenario.Parse("U10_11CarLateCompletion").DisplayName);
+        Assert.Equal("7节正常通过", AcceptanceScenario.Parse("U11_CustomCountNotFixed11").DisplayName);
+        Assert.Equal("11节正常通过", AcceptanceScenario.Parse("U12_Test11Normal").DisplayName);
+        Assert.Equal("11节缺1节", AcceptanceScenario.Parse("U13_Test11MissingOne").DisplayName);
+
+        var acceptanceVehicles = AcceptanceVehicleCatalog.CreateVehicles();
+        Assert.Equal(new[] { "TEST-11", "TEST-07" }, acceptanceVehicles.Select(vehicle => vehicle.VehicleNo));
+        Assert.Equal(test11, acceptanceVehicles[0].Tags.Select(tag => tag.Rfid));
+        Assert.Equal(test07, acceptanceVehicles[1].Tags.Select(tag => tag.Rfid));
     }
 
     [Fact]

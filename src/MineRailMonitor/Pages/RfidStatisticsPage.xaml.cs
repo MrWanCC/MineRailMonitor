@@ -6,22 +6,27 @@ using System.Windows;
 using System.Windows.Controls;
 using MineRailMonitor.Core.Interfaces;
 using MineRailMonitor.Core.Models;
+using MineRailMonitor.Core.Services;
 
 namespace MineRailMonitor.Pages;
 
 public partial class RfidStatisticsPage : UserControl
 {
     private readonly IStatisticsService _statisticsService;
+    private readonly PassageOverviewQueryService _passageOverviewQueryService;
     private readonly ObservableCollection<VehicleStatisticsDisplayItem> _vehicleItems = new();
+    private readonly ObservableCollection<RecentPassageDisplayItem> _recentPassageItems = new();
     private IReadOnlyList<string>? _displayScopeStationIds;
     private string? _displayScopeYardId;
 
-    public RfidStatisticsPage(IStatisticsService statisticsService)
+    public RfidStatisticsPage(IStatisticsService statisticsService, IPassageRecordStore passageRecordStore)
     {
         _statisticsService = statisticsService ?? throw new ArgumentNullException(nameof(statisticsService));
+        _passageOverviewQueryService = new PassageOverviewQueryService(passageRecordStore);
 
         InitializeComponent();
         VehicleStatisticsGrid.ItemsSource = _vehicleItems;
+        RecentPassagesGrid.ItemsSource = _recentPassageItems;
         Loaded += (_, _) => Refresh();
     }
 
@@ -39,6 +44,7 @@ public partial class RfidStatisticsPage : UserControl
         {
             var overview = _statisticsService.GetOverview(todayStart, tomorrowStart, stationIds: _displayScopeStationIds);
             var vehicles = _statisticsService.GetVehicleStatistics(todayStart, tomorrowStart, stationIds: _displayScopeStationIds);
+            var passageOverview = _passageOverviewQueryService.QueryToday(todayStart, tomorrowStart, _displayScopeStationIds);
 
             PassageMetricValue.Text = overview.TotalCount.ToString(CultureInfo.CurrentCulture);
             NormalMetricValue.Text = overview.NormalCount.ToString(CultureInfo.CurrentCulture);
@@ -48,10 +54,25 @@ public partial class RfidStatisticsPage : UserControl
                 ? FormatPercentage(overview.AlarmRatePercent)
                 : "—";
             AverageMetricValue.Text = $"{overview.AverageDurationSeconds:0.0} 秒";
-            OverviewEmptyText.Visibility = overview.TotalCount == 0 ? Visibility.Visible : Visibility.Collapsed;
-            OverviewSummaryText.Text = overview.TotalCount == 0
-                ? "统计时间范围内尚无完成的车辆通行记录。"
-                : "总记录数包含全部已结束Passage；报警率按脱节报警/(正常通过+脱节报警)计算，不含完整性未判定。";
+            OverviewEmptyPanel.Visibility = overview.TotalCount == 0 ? Visibility.Visible : Visibility.Collapsed;
+            if (overview.TotalCount == 0)
+            {
+                var hasEmptyStationScope = _displayScopeStationIds is { Count: 0 };
+                OverviewEmptyTitleText.Text = hasEmptyStationScope ? "当前站场未配置 RFID 基站" : "今日暂无通行记录";
+                OverviewSummaryText.Text = hasEmptyStationScope
+                    ? "该站场没有绑定 RFID 基站，因此当前统计范围内没有通行数据。"
+                    : "通行次数按完成时间统计；报警率按脱节报警/(正常通过+脱节报警)计算，不含完整性未判定。";
+            }
+
+            _recentPassageItems.Clear();
+            foreach (var record in passageOverview.RecentPassages)
+            {
+                _recentPassageItems.Add(new RecentPassageDisplayItem(record));
+            }
+
+            UnconfirmedAlarmCountValue.Text = passageOverview.UnconfirmedAlarmCount.ToString(CultureInfo.CurrentCulture);
+            AcknowledgedAlarmCountValue.Text = passageOverview.AcknowledgedAlarmCount.ToString(CultureInfo.CurrentCulture);
+            RecoveredAlarmCountValue.Text = passageOverview.RecoveredAlarmCount.ToString(CultureInfo.CurrentCulture);
 
             _vehicleItems.Clear();
             foreach (var item in vehicles)
@@ -65,7 +86,11 @@ public partial class RfidStatisticsPage : UserControl
         {
             SetEmptyValues();
             _vehicleItems.Clear();
-            OverviewEmptyText.Visibility = Visibility.Collapsed;
+            _recentPassageItems.Clear();
+            UnconfirmedAlarmCountValue.Text = "—";
+            AcknowledgedAlarmCountValue.Text = "—";
+            RecoveredAlarmCountValue.Text = "—";
+            OverviewEmptyPanel.Visibility = Visibility.Collapsed;
             VehicleGridEmptyText.Visibility = Visibility.Collapsed;
             StatisticsSubtitleText.Visibility = Visibility.Collapsed;
             StatisticsErrorText.Text = $"统计查询失败：{exception.Message}";
@@ -114,6 +139,45 @@ public partial class RfidStatisticsPage : UserControl
             ? "统计范围：全部站场"
             : $"统计范围：{_displayScopeYardId}站场";
     }
+}
+
+public sealed class RecentPassageDisplayItem
+{
+    public RecentPassageDisplayItem(PassageRecord record)
+    {
+        if (record is null) throw new ArgumentNullException(nameof(record));
+
+        TimeText = record.CompletedAt.ToLocalTime().ToString("HH:mm:ss", CultureInfo.CurrentCulture);
+        VehicleNoText = string.IsNullOrWhiteSpace(record.VehicleNo) ? "未配置" : record.VehicleNo!;
+        VehicleNameText = string.IsNullOrWhiteSpace(record.VehicleName) ? "未配置车辆" : record.VehicleName!;
+        OutcomeText = record.Outcome switch
+        {
+            PassageOutcome.Completed => "正常通过",
+            PassageOutcome.UncouplingAlarm => "脱节报警",
+            PassageOutcome.Unverified => "完整性未判定",
+            _ => "—"
+        };
+        CountText = $"{record.DetectedVehicleCount}/{record.ExpectedVehicleCount?.ToString(CultureInfo.CurrentCulture) ?? "—"}";
+        AlarmStatusText = record.AlarmStatus switch
+        {
+            AlarmStatus.Unconfirmed => "未确认",
+            AlarmStatus.Acknowledged => "已确认",
+            AlarmStatus.Recovered => "已恢复",
+            _ => "—"
+        };
+    }
+
+    public string TimeText { get; }
+
+    public string VehicleNoText { get; }
+
+    public string VehicleNameText { get; }
+
+    public string OutcomeText { get; }
+
+    public string CountText { get; }
+
+    public string AlarmStatusText { get; }
 }
 
 public sealed class VehicleStatisticsDisplayItem

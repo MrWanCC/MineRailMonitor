@@ -266,6 +266,15 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("Text=\"完整性未判定\"", markup, StringComparison.Ordinal);
         Assert.Contains("Text=\"报警率\"", markup, StringComparison.Ordinal);
         Assert.Contains("Text=\"平均通行时长\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"最近通行记录\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"时间\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"判定结果\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"实际/理论\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"报警状态\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"报警状态\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"未确认\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"已确认\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"已恢复\"", markup, StringComparison.Ordinal);
         Assert.Contains("VehicleStatisticsGrid", markup, StringComparison.Ordinal);
         Assert.Contains("Header=\"车辆编号\"", markup, StringComparison.Ordinal);
         Assert.Contains("Header=\"车辆名称\"", markup, StringComparison.Ordinal);
@@ -278,6 +287,12 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("Text=\"统计范围：全部站场\"", markup, StringComparison.Ordinal);
         Assert.Contains("VerticalAlignment=\"Stretch\"", markup, StringComparison.Ordinal);
         Assert.Contains("IStatisticsService", code, StringComparison.Ordinal);
+        Assert.Contains("IPassageRecordStore", code, StringComparison.Ordinal);
+        Assert.Contains("PassageOverviewQueryService", code, StringComparison.Ordinal);
+        Assert.Contains("QueryToday", code, StringComparison.Ordinal);
+        Assert.Contains("OverviewEmptyPanel.Visibility = overview.TotalCount == 0", code, StringComparison.Ordinal);
+        Assert.Contains("record.Outcome switch", code, StringComparison.Ordinal);
+        Assert.Contains("AlarmStatus.Unconfirmed", code, StringComparison.Ordinal);
         Assert.Contains("public void SetDisplayScope", code, StringComparison.Ordinal);
         Assert.Contains("FormatDisplayScope", code, StringComparison.Ordinal);
         Assert.Contains("GetOverview", code, StringComparison.Ordinal);
@@ -304,7 +319,7 @@ public sealed class OperationalPagesMarkupTests
         var code = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml.cs"));
 
         Assert.Contains("RfidStatisticsPage", code, StringComparison.Ordinal);
-        Assert.Contains("new RfidStatisticsPage(_passageRecordStore)", code, StringComparison.Ordinal);
+        Assert.Contains("new RfidStatisticsPage(_passageRecordStore, _passageRecordStore)", code, StringComparison.Ordinal);
         Assert.Contains("_statisticsPage.Refresh()", code, StringComparison.Ordinal);
         Assert.DoesNotContain("_statisticsPage?.SetRuntimeStates", code, StringComparison.Ordinal);
         Assert.Contains("_communicationPage.ConfigureStations", code, StringComparison.Ordinal);

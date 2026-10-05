@@ -276,7 +276,7 @@ public partial class MainWindow : Window
             _passageRecordStore,
             _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations,
             AcknowledgeAlarm);
-        _statisticsPage = new RfidStatisticsPage(_passageRecordStore);
+        _statisticsPage = new RfidStatisticsPage(_passageRecordStore, _passageRecordStore);
         _historyPage.SetYardOptions(result.Project.Stations);
         _alarmHistoryPage.SetYardOptions(result.Project.Stations);
         _communicationPage.SetYardOptions(result.Project.Stations);

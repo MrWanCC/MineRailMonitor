@@ -499,7 +499,7 @@
                             </Grid>
                             <Grid Grid.Row="0" Grid.Column="1">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                <TextBlock Text="StationId" Style="{StaticResource RfidDetailFieldLabelStyle}" />
+                                <TextBlock Text="基站编号" Style="{StaticResource RfidDetailFieldLabelStyle}" />
                                 <TextBlock x:Name="SelectedRfidStationIdText" Grid.Column="1" Text="-" Style="{StaticResource RfidDetailFieldValueStyle}" FontFamily="Consolas" />
                             </Grid>
                             <Grid Grid.Row="1" Grid.Column="0">

@@ -76,7 +76,7 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <TextBlock Text="PassageId" Style="{StaticResource DialogFieldLabelStyle}" />
+                        <TextBlock Text="通行编号" Style="{StaticResource DialogFieldLabelStyle}" />
                         <TextBlock x:Name="PassageIdValue" Grid.Column="1" Style="{StaticResource DialogFieldValueStyle}" />
                         <TextBlock Text="基站" Grid.Column="2" Style="{StaticResource DialogFieldLabelStyle}" />
                         <TextBlock x:Name="StationValue" Grid.Column="3" Style="{StaticResource DialogFieldValueStyle}" />

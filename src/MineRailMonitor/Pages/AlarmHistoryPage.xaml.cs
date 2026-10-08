@@ -324,8 +324,15 @@ public partial class AlarmHistoryPage : UserControl
         var displayId = station is null
             ? normalized
             : RfidStationIdentity.GetDisplayId(station.StationId, station.YardId);
-        return _stationNames.TryGetValue(normalized, out var name) && name.Length > 0
-            ? $"{displayId} · {name}"
+        var binding = RfidStationBindingRules.FindBindings(_yardConfigs, normalized).FirstOrDefault();
+        var mapPointName = binding?.DeviceName?.Trim();
+        var displayName = !string.IsNullOrWhiteSpace(mapPointName)
+            ? mapPointName
+            : _stationNames.TryGetValue(normalized, out var stationName) && stationName.Length > 0
+                ? stationName
+                : null;
+        return !string.IsNullOrWhiteSpace(displayName)
+            ? $"{displayId} · {displayName}"
             : displayId;
     }
 

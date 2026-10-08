@@ -1763,11 +1763,7 @@ public partial class MainWindow : Window
         }
 
         var states = FilterCurrentYardStates(GetAllRuntimeStates()).ToArray();
-        var alarm = states.FirstOrDefault(state =>
-            state.VisualState == RfidStationVisualState.Alarm ||
-            state.LifecycleState == PassageLifecycleState.Alarm ||
-            state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm ||
-            !string.IsNullOrWhiteSpace(state.AlarmMessage));
+        var alarm = states.FirstOrDefault(IsCurrentAlarmState);
         if (alarm is not null)
         {
             _monitorPage.SetRecognitionStatus(
@@ -1793,6 +1789,22 @@ public partial class MainWindow : Window
         }
 
         _monitorPage.SetRecognitionStatus(null, isAlarm: false);
+    }
+
+    private static bool IsCurrentAlarmState(StationRuntimeState state)
+    {
+        if (state.HasUnacknowledgedAlarms || state.LifecycleState == PassageLifecycleState.Alarm)
+        {
+            return true;
+        }
+
+        if (state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm)
+        {
+            return state.LastPassageRecord.AlarmStatus != AlarmStatus.Recovered;
+        }
+
+        return state.VisualState == RfidStationVisualState.Alarm ||
+               !string.IsNullOrWhiteSpace(state.AlarmMessage);
     }
 
     private void UpdateRfidRuntimeUi()

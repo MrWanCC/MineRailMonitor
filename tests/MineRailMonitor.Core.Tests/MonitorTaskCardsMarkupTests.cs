@@ -47,7 +47,8 @@ public sealed class MonitorTaskCardsMarkupTests
             markup.IndexOf("Text=\"{Binding StationDisplayId}\"", StringComparison.Ordinal),
             "任务卡应优先显示地图点位名称，再显示 RFID 编号。");
         Assert.Contains("hasPassage", code);
-        Assert.Contains("hasPassage ? state?.CurrentHeadRfid", code);
+        Assert.Contains(": state?.CurrentHeadRfid;", code);
+        Assert.Contains("hasPassage ? headRfid?.ToString(\"X4\") ?? \"-\" : \"--\"", code);
         Assert.Contains("isOffline || !hasPassage", code);
         Assert.Contains("ProgressVisibility", code);
         Assert.Contains(": \"--\"", code);

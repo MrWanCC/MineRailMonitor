@@ -559,22 +559,30 @@ public partial class MonitorPage : UserControl
             : RfidStationIdentity.GetDisplayId(configuration.StationId, configuration.YardId);
         var statusText = GetTaskStatusText(configuration, state);
         var statusBrush = GetTaskStatusBrush(statusText);
-        var expected = state?.ExpectedVehicleCount ?? 0;
-        var detected = state?.DetectedVehicleCount ?? 0;
         var isOffline = state is null || state.CommunicationState == StationCommunicationState.Offline;
-        var hasPassage = state is not null && state.LifecycleState != PassageLifecycleState.Idle;
+        var hasActivePassage = state is not null && state.LifecycleState != PassageLifecycleState.Idle;
+        var alarmRecord = state is not null && IsUncouplingAlarm(state)
+            ? FindAlarmPassageRecord(state)
+            : null;
+        var showAlarmSnapshot = !hasActivePassage && alarmRecord is not null;
+        var hasPassage = hasActivePassage || showAlarmSnapshot;
+        var expected = showAlarmSnapshot ? alarmRecord?.ExpectedVehicleCount ?? 0 : state?.ExpectedVehicleCount ?? 0;
+        var detected = showAlarmSnapshot ? alarmRecord?.DetectedVehicleCount ?? 0 : state?.DetectedVehicleCount ?? 0;
+        var headRfid = showAlarmSnapshot
+            ? alarmRecord?.VehicleHeadRfid ?? alarmRecord?.HeadRfid
+            : state?.CurrentHeadRfid;
         var progressValue = !isOffline && hasPassage && expected > 0 ? Math.Min(100, detected * 100d / expected) : 0;
-        var latestAt = state?.LastNewVehicleAt ?? state?.LastResponseAt;
+        var latestAt = showAlarmSnapshot ? alarmRecord?.CompletedAt : state?.LastNewVehicleAt ?? state?.LastResponseAt;
         var isActive = state is not null && state.CommunicationState == StationCommunicationState.Online &&
-                       state.LifecycleState != PassageLifecycleState.Idle;
+                       hasActivePassage;
 
         return new RfidTaskCardViewModel(
             stationId,
             stationDisplayId,
             GetRfidMapPointName(stationId),
             statusText,
-            hasPassage ? state?.CurrentHeadRfid?.ToString("X4") ?? "-" : "--",
-            hasPassage ? FormatVehicleProgress(detected, state?.ExpectedVehicleCount) : "--",
+            hasPassage ? headRfid?.ToString("X4") ?? "-" : "--",
+            hasPassage ? FormatVehicleProgress(detected, expected > 0 ? expected : null) : "--",
             progressValue,
             isOffline ? "等待连接" : latestAt?.ToLocalTime().ToString("HH:mm:ss") ?? "-",
             isActive,
@@ -586,9 +594,7 @@ public partial class MonitorPage : UserControl
 
     private string GetRfidMapPointName(string stationId)
     {
-        var binding = _currentStation is null
-            ? null
-            : RfidStationBindingRules.FindBindings(new[] { _currentStation }, stationId).FirstOrDefault();
+        var binding = FindRfidMapBinding(stationId);
         if (binding is not null)
         {
             return string.IsNullOrWhiteSpace(binding.DeviceName) ? binding.DeviceId : binding.DeviceName;
@@ -597,17 +603,51 @@ public partial class MonitorPage : UserControl
         return "未绑定地图点位";
     }
 
+    private RfidStationBindingLocation? FindRfidMapBinding(string stationId) =>
+        _currentStation is null
+            ? null
+            : RfidStationBindingRules.FindBindings(new[] { _currentStation }, stationId).FirstOrDefault();
+
+    private string GetRfidAlarmStationName(string stationId, string? fallbackName = null)
+    {
+        var binding = FindRfidMapBinding(stationId);
+        if (binding is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(binding.DeviceName))
+            {
+                return binding.DeviceName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(fallbackName))
+            {
+                return fallbackName!;
+            }
+
+            if (!string.IsNullOrWhiteSpace(binding.DeviceId))
+            {
+                return binding.DeviceId;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(fallbackName))
+        {
+            return fallbackName!;
+        }
+
+        return GetDisplayRfidStationId(stationId);
+    }
+
     private void RefreshRfidAlarmDisplay()
     {
         var alarms = new List<RfidAlarmDisplayItem>();
         alarms.AddRange(_rfidRuntimeStates
             .Where(IsAlertState)
-            .Select(CreateRuntimeAlertItem));
+            .Select(state => CreateRuntimeAlertItem(state, FindAlarmPassageRecord(state))));
         alarms.AddRange(_recentAlarmRecords
             .Where(record => _visibleRfidStationIds.Contains(record.StationId))
             .Select(record => new RfidAlarmDisplayItem(
                 record.CompletedAt.ToLocalTime().ToString("HH:mm:ss"),
-                GetDisplayRfidStationId(record.StationId),
+                GetRfidAlarmStationName(record.StationId),
                 record.IsWarningOnly ? "警告" : record.AlarmMessage ?? "报警",
                 record.IsWarningOnly
                     ? $"{string.Join("；", record.WarningMessages)}；已识别 {record.DetectedVehicleCount}/{record.ExpectedVehicleCount} 节"
@@ -653,7 +693,27 @@ public partial class MonitorPage : UserControl
         state.PersistenceState == PassagePersistenceState.PersistenceFault ||
         state.WarningMessages.Count > 0;
 
-    private static RfidAlarmDisplayItem CreateRuntimeAlertItem(StationRuntimeState state)
+    private PassageRecord? FindAlarmPassageRecord(StationRuntimeState state)
+    {
+        if (state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm)
+        {
+            return state.LastPassageRecord;
+        }
+
+        var unacknowledgedPassageIds = state.UnacknowledgedAlarmPassageIds.ToHashSet();
+        if (unacknowledgedPassageIds.Count == 0)
+        {
+            return null;
+        }
+
+        return _recentAlarmRecords
+            .Where(record => record.Outcome == PassageOutcome.UncouplingAlarm &&
+                             unacknowledgedPassageIds.Contains(record.PassageId))
+            .OrderByDescending(record => record.CompletedAt)
+            .FirstOrDefault();
+    }
+
+    private RfidAlarmDisplayItem CreateRuntimeAlertItem(StationRuntimeState state, PassageRecord? alarmRecord)
     {
         if (state.PersistenceState == PassagePersistenceState.PersistenceFault)
         {
@@ -665,7 +725,7 @@ public partial class MonitorPage : UserControl
                 : string.Empty;
             return new RfidAlarmDisplayItem(
                 fault.LastAttemptAt.ToLocalTime().ToString("HH:mm:ss"),
-                state.StationName,
+                GetRfidAlarmStationName(state.StationId, state.StationName),
                 "数据库保存失败",
                 $"{state.PersistenceErrorMessage ?? fault.ToDiagnosticMessage()}{originalAlarm}",
                 fault.LastAttemptAt,
@@ -674,18 +734,21 @@ public partial class MonitorPage : UserControl
 
         var isAlarm = IsUncouplingAlarm(state);
         var warningText = string.Join("；", state.WarningMessages);
-        var passageAlarmSummary = state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm
-            ? PassageAlarmDisplayFormatter.FormatSummary(state.LastPassageRecord)
+        var passageAlarmSummary = alarmRecord is not null
+            ? PassageAlarmDisplayFormatter.FormatSummary(alarmRecord)
             : null;
+        var occurredAt = isAlarm
+            ? alarmRecord?.CompletedAt ?? DateTimeOffset.MinValue
+            : state.LastResponseAt ?? state.SessionStartedAt ?? DateTimeOffset.MinValue;
         return new RfidAlarmDisplayItem(
-            state.LastResponseAt?.ToLocalTime().ToString("HH:mm:ss") ?? "-",
-            state.StationName,
+            occurredAt == DateTimeOffset.MinValue ? "-" : occurredAt.ToLocalTime().ToString("HH:mm:ss"),
+            GetRfidAlarmStationName(state.StationId, state.StationName),
             isAlarm ? "脱节报警" : "警告",
             isAlarm
                 ? passageAlarmSummary ?? (string.IsNullOrWhiteSpace(state.AlarmMessage) ? "状态进入报警" : state.AlarmMessage!)
                 : warningText,
-            state.LastResponseAt ?? state.SessionStartedAt ?? DateTimeOffset.MinValue,
-            state.LastPassageRecord?.PassageId);
+            occurredAt,
+            isAlarm ? alarmRecord?.PassageId ?? state.LastPassageRecord?.PassageId : state.LastPassageRecord?.PassageId);
     }
 
     private void OnRfidAlarmMoreClick(object sender, RoutedEventArgs e)
@@ -759,11 +822,21 @@ public partial class MonitorPage : UserControl
     private static Brush GetResourceBrush(string key) =>
         Application.Current?.TryFindResource(key) as Brush ?? Brushes.Gray;
 
-    private static bool IsUncouplingAlarm(StationRuntimeState state) =>
-        state.VisualState == RfidStationVisualState.Alarm ||
-        state.LifecycleState == PassageLifecycleState.Alarm ||
-        !string.IsNullOrWhiteSpace(state.AlarmMessage) ||
-        state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm;
+    private static bool IsUncouplingAlarm(StationRuntimeState state)
+    {
+        if (state.HasUnacknowledgedAlarms || state.LifecycleState == PassageLifecycleState.Alarm)
+        {
+            return true;
+        }
+
+        if (state.LastPassageRecord?.Outcome == PassageOutcome.UncouplingAlarm)
+        {
+            return state.LastPassageRecord.AlarmStatus != AlarmStatus.Recovered;
+        }
+
+        return state.VisualState == RfidStationVisualState.Alarm ||
+               !string.IsNullOrWhiteSpace(state.AlarmMessage);
+    }
 
     private static Brush CreateStatusBackground(Brush brush)
     {

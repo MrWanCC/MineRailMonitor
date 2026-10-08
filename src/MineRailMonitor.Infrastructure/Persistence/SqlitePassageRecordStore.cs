@@ -4,7 +4,7 @@ using MineRailMonitor.Core.Models;
 
 namespace MineRailMonitor.Infrastructure.Persistence;
 
-public sealed class SqlitePassageRecordStore : IPassageRecordStore, IStatisticsService, IDisposable
+public sealed class SqlitePassageRecordStore : IPassageRecordStore, IStatisticsService, IStationTagStatisticsReader, IDisposable
 {
     public const int CurrentSchemaVersion = 6;
     private const string ConnectionPragmas =
@@ -269,19 +269,29 @@ LIMIT $limit OFFSET $offset;";
         return LoadRecord(connection, passageId);
     }
 
-    public PassageStatistics GetStatistics(DateTimeOffset localNow)
+    public PassageStatistics GetStatistics(DateTimeOffset localNow, IEnumerable<string>? stationIds = null)
     {
         var dayStart = new DateTimeOffset(localNow.Date, localNow.Offset).ToUniversalTime();
         var dayEnd = dayStart.AddDays(1);
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
+        var stationFilter = AddStatisticsStationFilter(command, stationIds);
+        const string stationExpression = @"CASE
+            WHEN station_id IS NULL OR TRIM(station_id) = '' THEN $legacy_station_id
+            ELSE TRIM(station_id) END";
         command.CommandText = @"
-SELECT station_id, result, COUNT(*)
+SELECT CASE
+           WHEN station_id IS NULL OR TRIM(station_id) = '' THEN $legacy_station_id
+           ELSE TRIM(station_id) END,
+       result,
+       COUNT(*)
 FROM passage_record
-WHERE completed_at >= $day_start AND completed_at < $day_end
-GROUP BY station_id, result;";
-        command.Parameters.AddWithValue("$day_start", ToUnixMilliseconds(dayStart));
-        command.Parameters.AddWithValue("$day_end", ToUnixMilliseconds(dayEnd));
+WHERE completed_at >= $start AND completed_at < $end
+  " + stationFilter + @"
+GROUP BY " + stationExpression + @", result;";
+        command.Parameters.AddWithValue("$start", ToUnixMilliseconds(dayStart));
+        command.Parameters.AddWithValue("$end", ToUnixMilliseconds(dayEnd));
+        command.Parameters.AddWithValue("$legacy_station_id", PassageRecord.LegacyStationId);
 
         var byStation = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var normal = 0;
@@ -317,7 +327,8 @@ SELECT COUNT(*),
        COALESCE(SUM(CASE WHEN result = $normal_result THEN 1 ELSE 0 END), 0),
        COALESCE(SUM(CASE WHEN result = $alarm_result THEN 1 ELSE 0 END), 0),
        COALESCE(SUM(CASE WHEN result = $unverified_result THEN 1 ELSE 0 END), 0),
-       COALESCE(AVG(CASE WHEN completed_at >= started_at THEN completed_at - started_at END), 0)
+       COALESCE(AVG(CASE WHEN completed_at >= started_at THEN completed_at - started_at END), 0),
+       COALESCE(SUM(CASE WHEN completed_at >= started_at THEN 1 ELSE 0 END), 0)
 FROM passage_record
 WHERE completed_at >= $start AND completed_at < $end
   {stationFilter};";
@@ -337,7 +348,8 @@ WHERE completed_at >= $start AND completed_at < $end
             reader.GetInt32(1),
             reader.GetInt32(2),
             reader.GetDouble(4) / 1000d,
-            reader.GetInt32(3));
+            reader.GetInt32(3),
+            reader.GetInt32(5));
     }
 
     public IReadOnlyList<VehicleStatisticsItem> GetVehicleStatistics(
@@ -419,6 +431,355 @@ ORDER BY {alarmStatusExpression};";
         }
 
         return result;
+    }
+
+    public IReadOnlyList<StatisticsTrendBucket> GetTrend(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        StatisticsBucketSize bucketSize,
+        IEnumerable<string>? stationIds = null)
+    {
+        ValidateRange(start, end);
+        var bucketMilliseconds = bucketSize switch
+        {
+            StatisticsBucketSize.Hour => 60L * 60L * 1000L,
+            StatisticsBucketSize.Day => 24L * 60L * 60L * 1000L,
+            _ => throw new ArgumentOutOfRangeException(nameof(bucketSize))
+        };
+
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        var stationFilter = AddStatisticsStationFilter(command, stationIds);
+        command.CommandText = $@"
+SELECT (((completed_at + $offset_ms) / $bucket_ms) * $bucket_ms) - $offset_ms AS bucket_start,
+       SUM(CASE WHEN result = $normal_result THEN 1 ELSE 0 END),
+       SUM(CASE WHEN result = $alarm_result THEN 1 ELSE 0 END),
+       SUM(CASE WHEN result = $unverified_result THEN 1 ELSE 0 END)
+FROM passage_record
+WHERE completed_at >= $start AND completed_at < $end
+  {stationFilter}
+GROUP BY bucket_start
+ORDER BY bucket_start;";
+        AddTimeRangeParameters(command, start, end);
+        command.Parameters.AddWithValue("$offset_ms", (long)start.Offset.TotalMilliseconds);
+        command.Parameters.AddWithValue("$bucket_ms", bucketMilliseconds);
+        command.Parameters.AddWithValue("$normal_result", (int)PassageOutcome.Completed);
+        command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
+        command.Parameters.AddWithValue("$unverified_result", (int)PassageOutcome.Unverified);
+
+        var result = new List<StatisticsTrendBucket>();
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                var bucketStart = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(0)).ToOffset(start.Offset);
+                result.Add(new StatisticsTrendBucket(
+                    bucketStart,
+                    reader.GetInt32(1),
+                    reader.GetInt32(2),
+                    reader.GetInt32(3)));
+            }
+        }
+
+        return result;
+    }
+
+    public StationTagStatisticsQueryResult GetStationTagStatistics(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        IEnumerable<string>? stationIds = null)
+    {
+        ValidateRange(start, end);
+
+        var stationItems = new List<StationQualityStatisticsItem>();
+        var tags = new List<StationTagStatisticsItem>();
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            var stationFilter = AddStatisticsStationFilter(command, stationIds);
+            const string stationExpression = @"CASE
+                WHEN p.station_id IS NULL OR TRIM(p.station_id) = '' THEN $legacy_station_id
+                ELSE TRIM(p.station_id) END";
+            command.CommandText = $@"
+WITH passage_observations AS
+(
+    SELECT p.passage_id,
+           {stationExpression} AS station_id,
+           p.expected_vehicle_count,
+           p.result,
+           COUNT(DISTINCT r.rfid_value) AS detected_count
+    FROM passage_record p
+    LEFT JOIN passage_rfid r ON r.passage_id = p.passage_id
+    WHERE p.completed_at >= $start AND p.completed_at < $end
+      {stationFilter}
+    GROUP BY p.passage_id
+)
+SELECT station_id,
+       COUNT(*),
+       SUM(CASE WHEN result = $alarm_result THEN 1 ELSE 0 END),
+       SUM(CASE WHEN result <> $unverified_result AND expected_vehicle_count IS NOT NULL THEN 1 ELSE 0 END),
+       SUM(CASE WHEN result <> $unverified_result AND expected_vehicle_count IS NOT NULL THEN expected_vehicle_count ELSE 0 END),
+       SUM(CASE WHEN result <> $unverified_result AND expected_vehicle_count IS NOT NULL THEN detected_count ELSE 0 END),
+       SUM(CASE WHEN result <> $unverified_result AND expected_vehicle_count IS NOT NULL
+                THEN MAX(expected_vehicle_count - detected_count, 0) ELSE 0 END)
+FROM passage_observations
+GROUP BY station_id
+ORDER BY station_id COLLATE NOCASE, station_id;";
+            AddTimeRangeParameters(command, start, end);
+            command.Parameters.AddWithValue("$legacy_station_id", PassageRecord.LegacyStationId);
+            command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
+            command.Parameters.AddWithValue("$unverified_result", (int)PassageOutcome.Unverified);
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var stationId = reader.GetString(0);
+                var passageCount = reader.GetInt32(1);
+                var verifiablePassageCount = reader.GetInt32(3);
+                var expectedCount = verifiablePassageCount > 0 ? reader.GetInt64(4) : (long?)null;
+                var detectedCount = verifiablePassageCount > 0 ? reader.GetInt64(5) : (long?)null;
+                var missingCount = verifiablePassageCount > 0 ? reader.GetInt64(6) : (long?)null;
+                var completenessPercent = expectedCount is > 0
+                    ? detectedCount!.Value * 100d / expectedCount.Value
+                    : (double?)null;
+                stationItems.Add(new StationQualityStatisticsItem(
+                    stationId,
+                    passageCount,
+                    expectedCount,
+                    detectedCount,
+                    missingCount,
+                    completenessPercent,
+                    reader.GetInt32(2),
+                    tagKinds: 0,
+                    tagOccurrences: 0));
+            }
+        }
+
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            var stationFilter = AddStatisticsStationFilter(command, stationIds);
+            const string stationExpression = @"CASE
+                WHEN p.station_id IS NULL OR TRIM(p.station_id) = '' THEN $legacy_station_id
+                ELSE TRIM(p.station_id) END";
+            command.CommandText = $@"
+SELECT {stationExpression} AS station_id,
+       r.rfid_value,
+       COUNT(DISTINCT p.passage_id),
+       MIN(r.first_seen_at),
+       MAX(r.first_seen_at)
+FROM passage_record p
+JOIN passage_rfid r ON r.passage_id = p.passage_id
+WHERE p.completed_at >= $start AND p.completed_at < $end
+  {stationFilter}
+GROUP BY station_id, r.rfid_value
+ORDER BY station_id COLLATE NOCASE, COUNT(DISTINCT p.passage_id) DESC, r.rfid_value;";
+            AddTimeRangeParameters(command, start, end);
+            command.Parameters.AddWithValue("$legacy_station_id", PassageRecord.LegacyStationId);
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                tags.Add(new StationTagStatisticsItem(
+                    reader.GetString(0),
+                    checked((ushort)reader.GetInt32(1)),
+                    reader.GetInt32(2),
+                    FromUnixMilliseconds(reader.GetInt64(3)),
+                    FromUnixMilliseconds(reader.GetInt64(4))));
+            }
+        }
+
+        var tagsByStation = tags
+            .GroupBy(item => item.StationId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+        var stations = stationItems
+            .Select(station =>
+            {
+                var stationTags = tagsByStation.TryGetValue(station.StationId, out var foundTags)
+                    ? foundTags
+                    : Array.Empty<StationTagStatisticsItem>();
+                return new StationQualityStatisticsItem(
+                    station.StationId,
+                    station.PassageCount,
+                    station.ExpectedCount,
+                    station.DetectedCount,
+                    station.MissingCount,
+                    station.CompletenessPercent,
+                    station.UncouplingAlarmCount,
+                    stationTags.Length,
+                    stationTags.Sum(item => (long)item.PassageCount));
+            })
+            .ToArray();
+
+        transaction.Commit();
+        return new StationTagStatisticsQueryResult(stations, tags);
+    }
+
+    public IReadOnlyList<StatisticsRankingItem> GetAlarmStationRanking(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        IEnumerable<string>? stationIds = null,
+        int limit = 5)
+    {
+        const string keyExpression = "CASE WHEN station_id IS NULL OR TRIM(station_id) = '' THEN $legacy_station_id ELSE TRIM(station_id) END";
+        return GetRanking(
+            start,
+            end,
+            stationIds,
+            limit,
+            keyExpression,
+            "NULL",
+            $"result = {(int)PassageOutcome.UncouplingAlarm}");
+    }
+
+    public IReadOnlyList<StatisticsRankingItem> GetAlarmVehicleRanking(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        IEnumerable<string>? stationIds = null,
+        int limit = 5) =>
+        GetRanking(
+            start,
+            end,
+            stationIds,
+            limit,
+            "vehicle_no",
+            "MAX(vehicle_name)",
+            $"result = {(int)PassageOutcome.UncouplingAlarm}");
+
+    public IReadOnlyList<StatisticsRankingItem> GetPassageVehicleRanking(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        IEnumerable<string>? stationIds = null,
+        int limit = 5) =>
+        GetRanking(start, end, stationIds, limit, "vehicle_no", "MAX(vehicle_name)", null);
+
+    public IReadOnlyList<PassageRecord> GetRecentAlarms(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        IEnumerable<string>? stationIds = null,
+        int limit = 3) =>
+        GetRecentStatisticsRecords(start, end, stationIds, limit, "result = $alarm_result", "completed_at DESC, created_at DESC");
+
+    public IReadOnlyList<PassageRecord> GetRecentExceptions(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        IEnumerable<string>? stationIds = null,
+        int limit = 8) =>
+        GetRecentStatisticsRecords(
+            start,
+            end,
+            stationIds,
+            limit,
+            "result IN ($alarm_result, $unverified_result)",
+            "CASE WHEN result = $alarm_result AND alarm_acknowledged_at IS NULL THEN 0 ELSE 1 END, completed_at DESC, created_at DESC");
+
+    private IReadOnlyList<StatisticsRankingItem> GetRanking(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        IEnumerable<string>? stationIds,
+        int limit,
+        string keyExpression,
+        string nameExpression,
+        string? additionalFilter)
+    {
+        ValidateRange(start, end);
+        ValidateLimit(limit);
+
+        using var connection = OpenConnection();
+        using var totalCommand = connection.CreateCommand();
+        var totalStationFilter = AddStatisticsStationFilter(totalCommand, stationIds);
+        totalCommand.CommandText = $@"
+SELECT COUNT(*)
+FROM passage_record
+WHERE completed_at >= $start AND completed_at < $end
+  {totalStationFilter}
+  {(additionalFilter is null ? string.Empty : $"AND {additionalFilter}")};";
+        AddTimeRangeParameters(totalCommand, start, end);
+        var totalCount = Convert.ToInt32(totalCommand.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+        if (totalCount == 0)
+        {
+            return Array.Empty<StatisticsRankingItem>();
+        }
+
+        using var command = connection.CreateCommand();
+        var stationFilter = AddStatisticsStationFilter(command, stationIds);
+        command.CommandText = $@"
+SELECT {keyExpression}, {nameExpression}, COUNT(*)
+FROM passage_record
+WHERE completed_at >= $start AND completed_at < $end
+  {stationFilter}
+  {(additionalFilter is null ? string.Empty : $"AND {additionalFilter}")}
+GROUP BY {keyExpression}
+ORDER BY COUNT(*) DESC, {keyExpression} COLLATE NOCASE
+LIMIT $limit;";
+        AddTimeRangeParameters(command, start, end);
+        command.Parameters.AddWithValue("$limit", limit);
+        command.Parameters.AddWithValue("$legacy_station_id", PassageRecord.LegacyStationId);
+
+        var result = new List<StatisticsRankingItem>();
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                var count = reader.GetInt32(2);
+                result.Add(new StatisticsRankingItem(
+                    reader.IsDBNull(0) ? null : reader.GetString(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    count,
+                    totalCount == 0 ? 0d : count * 100d / totalCount));
+            }
+        }
+
+        return result;
+    }
+
+    private IReadOnlyList<PassageRecord> GetRecentStatisticsRecords(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        IEnumerable<string>? stationIds,
+        int limit,
+        string additionalFilter,
+        string orderBy)
+    {
+        ValidateRange(start, end);
+        ValidateLimit(limit);
+
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        var stationFilter = AddStatisticsStationFilter(command, stationIds);
+        command.CommandText = $@"
+SELECT passage_id
+FROM passage_record
+WHERE completed_at >= $start AND completed_at < $end
+  {stationFilter}
+  AND {additionalFilter}
+ORDER BY {orderBy}
+LIMIT $limit;";
+        AddTimeRangeParameters(command, start, end);
+        command.Parameters.AddWithValue("$alarm_result", (int)PassageOutcome.UncouplingAlarm);
+        command.Parameters.AddWithValue("$unverified_result", (int)PassageOutcome.Unverified);
+        command.Parameters.AddWithValue("$limit", limit);
+        var ids = new List<Guid>();
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                ids.Add(Guid.Parse(reader.GetString(0)));
+            }
+        }
+
+        return ids.Select(id => LoadRecord(connection, id)!).ToArray();
+    }
+
+    private static void ValidateLimit(int limit)
+    {
+        if (limit < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit));
+        }
     }
 
     public void Dispose()

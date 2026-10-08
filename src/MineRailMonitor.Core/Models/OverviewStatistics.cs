@@ -7,13 +7,15 @@ public sealed class OverviewStatistics
         int normalCount,
         int alarmCount,
         double averageDurationSeconds = 0d,
-        int unverifiedCount = 0)
+        int unverifiedCount = 0,
+        int averageDurationSampleCount = -1)
     {
         TotalCount = totalCount;
         NormalCount = normalCount;
         AlarmCount = alarmCount;
         UnverifiedCount = unverifiedCount;
         VerifiableCount = normalCount + alarmCount;
+        AverageDurationSampleCount = averageDurationSampleCount < 0 ? totalCount : averageDurationSampleCount;
         AlarmRatePercent = VerifiableCount == 0 ? 0d : alarmCount * 100d / VerifiableCount;
         AverageDurationSeconds = Math.Max(0d, averageDurationSeconds);
     }
@@ -33,4 +35,8 @@ public sealed class OverviewStatistics
     public double AlarmRatePercent { get; }
 
     public double AverageDurationSeconds { get; }
+
+    public int AverageDurationSampleCount { get; }
+
+    public bool HasAverageDurationSamples => AverageDurationSampleCount > 0;
 }

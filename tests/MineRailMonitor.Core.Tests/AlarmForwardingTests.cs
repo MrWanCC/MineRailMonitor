@@ -182,6 +182,6 @@ public sealed class AlarmForwardingTests
         public IReadOnlyList<PassageRecord> GetUnacknowledgedAlarms() => _inner.GetUnacknowledgedAlarms();
         public PassageQueryResult Query(PassageQuery query) => _inner.Query(query);
         public PassageRecord? GetDetails(Guid passageId) => _inner.GetDetails(passageId);
-        public PassageStatistics GetStatistics(DateTimeOffset localNow) => _inner.GetStatistics(localNow);
+        public PassageStatistics GetStatistics(DateTimeOffset localNow, IEnumerable<string>? stationIds = null) => _inner.GetStatistics(localNow, stationIds);
     }
 }

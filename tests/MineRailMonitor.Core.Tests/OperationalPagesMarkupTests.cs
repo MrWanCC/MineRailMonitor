@@ -251,56 +251,227 @@ public sealed class OperationalPagesMarkupTests
     }
 
     [Fact]
-    public void Statistics_analysis_page_exposes_today_and_vehicle_tabs()
+    public void Statistics_analysis_page_exposes_the_operations_dashboard_without_internal_codes()
     {
         var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml"));
         var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml.cs"));
 
         Assert.Contains("统计分析", markup, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"StatisticsTabs\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Header=\"今日概览\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Header=\"车辆统计\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"通行次数\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"正常通过\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"脱节报警\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"完整性未判定\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"报警率\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"平均通行时长\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"TimeRangeSelector\"", markup, StringComparison.Ordinal);
+        Assert.Contains("今日", markup, StringComparison.Ordinal);
+        Assert.Contains("昨日", markup, StringComparison.Ordinal);
+        Assert.Contains("最近7天", markup, StringComparison.Ordinal);
+        Assert.Contains("最近30天", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"UpdatedAtText\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"KpiMetricsItemsControl\"", markup, StringComparison.Ordinal);
+        Assert.Contains("\"通行次数\"", code, StringComparison.Ordinal);
+        Assert.Contains("\"正常通过\"", code, StringComparison.Ordinal);
+        Assert.Contains("\"脱节报警\"", code, StringComparison.Ordinal);
+        Assert.Contains("\"完整性未判定\"", code, StringComparison.Ordinal);
+        Assert.Contains("\"报警率\"", code, StringComparison.Ordinal);
+        Assert.Contains("\"平均通行时长\"", code, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"TrendChartCanvas\"", markup, StringComparison.Ordinal);
+        Assert.Contains("通行趋势", markup, StringComparison.Ordinal);
+        Assert.Contains("告警状态概况", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AlarmStatusItemsControl\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecentAlarmsItemsControl\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RankingTabs\"", markup, StringComparison.Ordinal);
+        Assert.Contains("报警最多基站", markup, StringComparison.Ordinal);
+        Assert.Contains("报警最多车辆", markup, StringComparison.Ordinal);
+        Assert.Contains("通行最多车辆", markup, StringComparison.Ordinal);
         Assert.Contains("Text=\"最近通行记录\"", markup, StringComparison.Ordinal);
         Assert.Contains("Header=\"时间\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"基站\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"车辆编号\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"车辆名称\"", markup, StringComparison.Ordinal);
         Assert.Contains("Header=\"判定结果\"", markup, StringComparison.Ordinal);
         Assert.Contains("Header=\"实际/理论\"", markup, StringComparison.Ordinal);
         Assert.Contains("Header=\"报警状态\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"报警状态\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"未确认\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"已确认\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Text=\"已恢复\"", markup, StringComparison.Ordinal);
-        Assert.Contains("VehicleStatisticsGrid", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"通行时长\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecentExceptionsItemsControl\"", markup, StringComparison.Ordinal);
         Assert.Contains("Header=\"车辆编号\"", markup, StringComparison.Ordinal);
         Assert.Contains("Header=\"车辆名称\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Header=\"通行次数\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Header=\"报警次数\"", markup, StringComparison.Ordinal);
-        Assert.Contains("Header=\"报警率\"", markup, StringComparison.Ordinal);
-        Assert.Contains("今日暂无通行记录", markup, StringComparison.Ordinal);
-        Assert.Contains("暂无车辆统计数据", markup, StringComparison.Ordinal);
+        Assert.Contains("未匹配车辆", code, StringComparison.Ordinal);
+        Assert.Contains("Completed => \"正常通过\"", code, StringComparison.Ordinal);
+        Assert.Contains("UncouplingAlarm => \"脱节报警\"", code, StringComparison.Ordinal);
+        Assert.Contains("Unverified => \"完整性未判定\"", code, StringComparison.Ordinal);
+        Assert.Contains("string.IsNullOrWhiteSpace(number)", code, StringComparison.Ordinal);
+        Assert.Contains("return \"未匹配车辆\";", code, StringComparison.Ordinal);
+        Assert.Contains("string.IsNullOrWhiteSpace(record.VehicleNo) ? \"—\"", code, StringComparison.Ordinal);
+        Assert.Contains("StatisticsDashboardQueryService", code, StringComparison.Ordinal);
+        Assert.Contains("StatisticsComparisonRange.ForPreset", code, StringComparison.Ordinal);
+        Assert.Contains("includeDate ? \"MM-dd HH:mm:ss\" : \"HH:mm:ss\"", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"UncouplingAlarm\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"Unverified\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"null\"", markup, StringComparison.Ordinal);
         Assert.Contains("StatisticsPageGrid", markup, StringComparison.Ordinal);
         Assert.Contains("Text=\"统计范围：全部站场\"", markup, StringComparison.Ordinal);
         Assert.Contains("VerticalAlignment=\"Stretch\"", markup, StringComparison.Ordinal);
         Assert.Contains("IStatisticsService", code, StringComparison.Ordinal);
         Assert.Contains("IPassageRecordStore", code, StringComparison.Ordinal);
-        Assert.Contains("PassageOverviewQueryService", code, StringComparison.Ordinal);
-        Assert.Contains("QueryToday", code, StringComparison.Ordinal);
-        Assert.Contains("OverviewEmptyPanel.Visibility = overview.TotalCount == 0", code, StringComparison.Ordinal);
-        Assert.Contains("record.Outcome switch", code, StringComparison.Ordinal);
-        Assert.Contains("AlarmStatus.Unconfirmed", code, StringComparison.Ordinal);
         Assert.Contains("public void SetDisplayScope", code, StringComparison.Ordinal);
         Assert.Contains("FormatDisplayScope", code, StringComparison.Ordinal);
-        Assert.Contains("GetOverview", code, StringComparison.Ordinal);
-        Assert.Contains("GetVehicleStatistics", code, StringComparison.Ordinal);
+        Assert.Contains("AlarmRatePercent", code, StringComparison.Ordinal);
         Assert.Contains("AverageDurationSeconds", code, StringComparison.Ordinal);
-        Assert.Contains("overview.HasVerifiablePassages", code, StringComparison.Ordinal);
-        Assert.Contains("UnverifiedCount", code, StringComparison.Ordinal);
-        Assert.Contains(": \"—\"", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Statistics_dashboard_places_trend_alarm_summary_and_rankings_in_primary_zone()
+    {
+        var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml"));
+        var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml.cs"));
+
+        System.Xml.Linq.XNamespace presentationNamespace = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        System.Xml.Linq.XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var document = System.Xml.Linq.XDocument.Parse(markup);
+        var mainZone = document.Descendants(presentationNamespace + "Grid")
+            .Single(element => (string?)element.Attribute(xamlNamespace + "Name") == "DashboardMainGrid");
+        var primaryPanels = mainZone.Elements()
+            .Select(element => (string?)element.Attribute(xamlNamespace + "Name"))
+            .Where(name => name is not null)
+            .ToArray();
+
+        Assert.Equal(new[] { "TrendPanel", "AlarmSummaryColumn", "RankingPanel" }, primaryPanels);
+        Assert.Contains(mainZone.Descendants(presentationNamespace + "Border"), element =>
+            (string?)element.Attribute(xamlNamespace + "Name") == "AlarmSummaryPanel");
+        Assert.Contains(mainZone.Descendants(presentationNamespace + "Border"), element =>
+            (string?)element.Attribute(xamlNamespace + "Name") == "RecentAlarmsPanel");
+        Assert.Contains("Text=\"总告警\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AlarmTotalText\"", markup, StringComparison.Ordinal);
+        Assert.Contains("AlarmStatus.Unconfirmed => \"未确认\"", code, StringComparison.Ordinal);
+        Assert.Contains("AlarmStatus.Acknowledged => \"已确认\"", code, StringComparison.Ordinal);
+        Assert.Contains("AlarmStatus.Recovered => \"已恢复\"", code, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"TrendPeakPeriodText\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"TrendPeakPassageText\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"TrendAlarmPeakText\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Statistics_dashboard_keeps_recent_limits_and_uses_compact_exception_list()
+    {
+        var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml"));
+        var pageCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml.cs"));
+        var queryCode = File.ReadAllText(Locate("src", "MineRailMonitor.Core", "Services", "StatisticsDashboardQueryService.cs"));
+
+        Assert.Contains("x:Name=\"RecentPassagesGrid\"", markup, StringComparison.Ordinal);
+        Assert.Contains("RecentPassageLimit = 10", queryCode, StringComparison.Ordinal);
+        Assert.Contains("RecentExceptionDisplayLimit = 5", pageCode, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecentExceptionsItemsControl\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecentAlarmsItemsControl\"", markup, StringComparison.Ordinal);
+        const string oneWayBarWidthBinding = "Value=\"{Binding BarWidth, Mode=OneWay}\"";
+        Assert.Equal(2, markup.Split(new[] { oneWayBarWidthBinding }, StringSplitOptions.None).Length - 1);
+        Assert.DoesNotContain("Text=\"TOP5\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"UncouplingAlarm\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"Unverified\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Statistics_dashboard_fills_tall_viewports_and_keeps_small_window_scroll_limits()
+    {
+        var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml"));
+        System.Xml.Linq.XNamespace presentationNamespace = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        System.Xml.Linq.XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var document = System.Xml.Linq.XDocument.Parse(markup);
+        var scrollViewer = document.Descendants(presentationNamespace + "ScrollViewer")
+            .Single(element => (string?)element.Attribute(xamlNamespace + "Name") == "StatisticsScrollViewer");
+        var contentGrid = scrollViewer.Elements(presentationNamespace + "Grid").Single();
+        var rowDefinitions = contentGrid.Element(presentationNamespace + "Grid.RowDefinitions")!
+            .Elements(presentationNamespace + "RowDefinition")
+            .Select(element => (string?)element.Attribute("Height"))
+            .ToArray();
+        var tabs = contentGrid.Elements(presentationNamespace + "TabControl").Single();
+        var overviewTab = tabs.Elements(presentationNamespace + "TabItem")
+            .Single(element => (string?)element.Attribute("Header") == "统计总览");
+        var overviewGrid = overviewTab.Elements(presentationNamespace + "Grid").Single();
+        var overviewRows = overviewGrid.Element(presentationNamespace + "Grid.RowDefinitions")!
+            .Elements(presentationNamespace + "RowDefinition")
+            .Select(element => (string?)element.Attribute("Height"))
+            .ToArray();
+
+        Assert.Equal("{Binding ViewportHeight, ElementName=StatisticsScrollViewer}",
+            (string?)contentGrid.Attribute("MinHeight"));
+        Assert.Equal(new[] { "Auto", "Auto", "*" }, rowDefinitions);
+        Assert.Equal(new[] { "Auto", "1.2*", "1*" }, overviewRows);
+        Assert.Contains(overviewGrid.Elements(), element =>
+            (string?)element.Attribute(xamlNamespace + "Name") == "DashboardMainGrid");
+        Assert.Contains(overviewGrid.Elements(), element =>
+            (string?)element.Attribute(xamlNamespace + "Name") is null &&
+            element.Name == presentationNamespace + "Grid" &&
+            (string?)element.Attribute("MinHeight") == "240");
+    }
+
+    [Fact]
+    public void Statistics_dashboard_empty_states_hide_empty_chart_and_table_chrome()
+    {
+        var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml"));
+        var code = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml.cs"));
+        var mainWindow = File.ReadAllText(Locate("src", "MineRailMonitor", "MainWindow.xaml"));
+        var renderStart = code.IndexOf("private void RenderTrendChart()", StringComparison.Ordinal);
+        var noDataGuard = code.IndexOf("_currentTrend.All(bucket => bucket.TotalCount == 0)", renderStart, StringComparison.Ordinal);
+        var firstAxisLabel = code.IndexOf("AddChartText(\"0\"", renderStart, StringComparison.Ordinal);
+
+        Assert.True(noDataGuard >= renderStart && noDataGuard < firstAxisLabel);
+        Assert.Contains("RecentPassagesGrid.Visibility = _recentPassageItems.Count == 0 ? Visibility.Collapsed : Visibility.Visible;",
+            code, StringComparison.Ordinal);
+        Assert.Contains("var hasComparison = previous != 0 || current != 0;", code, StringComparison.Ordinal);
+        Assert.Contains("hasComparison ? deltaBrush : MutedBrush", code, StringComparison.Ordinal);
+        Assert.Contains("无对比数据", code, StringComparison.Ordinal);
+        Assert.Contains("currentRate.HasValue && previousRate.HasValue", code, StringComparison.Ordinal);
+        Assert.Contains("StatisticsEmptyStateTextStyle", markup, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"Foreground\" Value=\"{StaticResource TextSecondaryBrush}\" />", markup, StringComparison.Ordinal);
+        Assert.Contains("TrendAlarmPeakText.Foreground = peakAlarm is null ? MutedBrush : AlarmBrush;",
+            code, StringComparison.Ordinal);
+        Assert.Contains("Text=\"暂无可排名数据\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"暂无通行记录\"", markup, StringComparison.Ordinal);
+        Assert.Contains("<ContentControl x:Name=\"PageContent\" Grid.Column=\"1\" FocusVisualStyle=\"{x:Null}\" />",
+            mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Statistics_dashboard_shows_station_tag_statistics_before_the_existing_overview()
+    {
+        var markup = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "RfidStatisticsPage.xaml"));
+        System.Xml.Linq.XNamespace presentationNamespace = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        System.Xml.Linq.XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var document = System.Xml.Linq.XDocument.Parse(markup);
+        var tabs = document.Descendants(presentationNamespace + "TabControl")
+            .Single(element => (string?)element.Attribute(xamlNamespace + "Name") == "StatisticsPageTabs");
+        var tabItems = tabs.Elements(presentationNamespace + "TabItem").ToArray();
+        var qualityTab = tabItems[0];
+        var visibleCopy = string.Join(" ", document.Descendants()
+            .SelectMany(element => element.Attributes("Text"))
+            .Concat(document.Descendants().SelectMany(element => element.Attributes("Header")))
+            .Where(attribute => !attribute.Value.StartsWith("{Binding", StringComparison.Ordinal))
+            .Select(attribute => attribute.Value));
+        var tagGrid = tabItems[0].Descendants(presentationNamespace + "DataGrid")
+            .Single(element => (string?)element.Attribute(xamlNamespace + "Name") == "StationTagStatisticsGrid");
+
+        Assert.Equal(new[] { "基站标签统计", "统计总览" },
+            tabItems.Select(element => (string?)element.Attribute("Header")));
+        Assert.Equal(new[] { "车辆 / 标签类型", "出现通行趟数", "首次观察", "最近观察" },
+            tagGrid.Element(presentationNamespace + "DataGrid.Columns")!
+                .Elements(presentationNamespace + "DataGridTextColumn")
+                .Select(element => (string?)element.Attribute("Header")));
+        Assert.Contains(qualityTab.Descendants(presentationNamespace + "ItemsControl"), element =>
+            (string?)element.Attribute(xamlNamespace + "Name") == "StationQualityKpisItemsControl");
+        Assert.Contains(qualityTab.Descendants(presentationNamespace + "ListBox"), element =>
+            (string?)element.Attribute(xamlNamespace + "Name") == "StationQualityListBox");
+        Assert.Contains(qualityTab.Descendants(presentationNamespace + "TextBlock"), element =>
+            (string?)element.Attribute("Text") == "重点关注基站");
+        Assert.Contains(qualityTab.Descendants(presentationNamespace + "ItemsControl"), element =>
+            (string?)element.Attribute(xamlNamespace + "Name") == "StationProfileItemsControl");
+        Assert.Contains(qualityTab.Descendants(presentationNamespace + "ItemsControl"), element =>
+            (string?)element.Attribute(xamlNamespace + "Name") == "StationTagRankingItemsControl");
+        Assert.Contains("统计口径 ⓘ", markup, StringComparison.Ordinal);
+        Assert.Contains("同一趟中同一 RFID 仅计一次", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("效果示意", markup, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Demo", markup, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("演示", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Expected Count", visibleCopy, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Detected Count", visibleCopy, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Completeness", visibleCopy, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(tabItems[1].Descendants(presentationNamespace + "ItemsControl"), element =>
+            (string?)element.Attribute(xamlNamespace + "Name") == "KpiMetricsItemsControl");
     }
 
     [Fact]
@@ -334,7 +505,7 @@ public sealed class OperationalPagesMarkupTests
         Assert.Contains("FilterCurrentYardStates(GetAllRuntimeStates()).ToArray()", code, StringComparison.Ordinal);
         Assert.Contains("SendCommunicationTestAsync", code, StringComparison.Ordinal);
         Assert.Contains("page == \"Rfid\"", code, StringComparison.Ordinal);
-        Assert.Contains("_statisticsPage?.Refresh()", code, StringComparison.Ordinal);
+        Assert.Contains("ReferenceEquals(PageContent.Content, _statisticsPage)", code, StringComparison.Ordinal);
         Assert.Contains("FindRemovedReferencedStationIds", code, StringComparison.Ordinal);
         Assert.Contains("请先解除地图绑定后再删除", code, StringComparison.Ordinal);
     }

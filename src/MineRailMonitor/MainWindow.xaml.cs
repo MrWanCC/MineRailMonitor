@@ -278,6 +278,8 @@ public partial class MainWindow : Window
             _acceptanceOptions.Enabled ? settingsStations : result.Project.RfidStations,
             AcknowledgeAlarm);
         _statisticsPage = new RfidStatisticsPage(_passageRecordStore, _passageRecordStore);
+        _statisticsPage.SetRfidStations(settingsStations);
+        _statisticsPage.SetVehicles(result.Project.Vehicles);
         _historyPage.SetYardOptions(result.Project.Stations);
         _alarmHistoryPage.SetYardOptions(result.Project.Stations);
         _communicationPage.SetYardOptions(result.Project.Stations);
@@ -499,6 +501,7 @@ public partial class MainWindow : Window
 
         _loadedProject.Vehicles = vehicles.ToArray();
         RecordOperationChanges(ConfigurationOperationRecordFormatter.GetVehicleChanges(previousVehicles, _loadedProject.Vehicles));
+        _statisticsPage?.SetVehicles(_loadedProject.Vehicles);
         _yardCommunicationManager?.UpdateVehicleConfigurations(_loadedProject.Vehicles);
         _settingsPage.SetVehicleSaveResult("车辆编组配置已保存。", false);
         return true;
@@ -634,6 +637,7 @@ public partial class MainWindow : Window
         RecordOperationChanges(ConfigurationOperationRecordFormatter.GetStationChanges(previousStations, _loadedProject.RfidStations));
         _yardRfidStationResolver = new YardRfidStationResolver(_loadedProject.Stations, _loadedProject.RfidStations);
         _runLogPage.SetRfidStations(_loadedProject.RfidStations);
+        _statisticsPage?.SetRfidStations(_loadedProject.RfidStations);
         ApplyCurrentYardDisplayScope();
         _communicationPage.ConfigureStations(_loadedProject.RfidStations, SendCommunicationTestAsync);
         _historyPage?.SetRfidStations(_loadedProject.RfidStations);
@@ -1999,12 +2003,14 @@ public partial class MainWindow : Window
 
         try
         {
-            _monitorPage.SetHistoricalStatistics(YardPassageFilter.BuildStatistics(
-                _passageRecordStore.Records,
+            _monitorPage.SetHistoricalStatistics(_passageRecordStore.GetStatistics(
                 DateTimeOffset.Now,
                 GetCurrentYardStationIds()));
             RefreshRecentAlarmHistory();
-            _statisticsPage?.Refresh();
+            if (ReferenceEquals(PageContent.Content, _statisticsPage))
+            {
+                _statisticsPage.Refresh();
+            }
             _lastStatisticsRefresh = DateTimeOffset.Now;
         }
         catch (Exception exception)
@@ -2075,6 +2081,7 @@ public partial class MainWindow : Window
         _runLogPage.SetDisplayScope(stationIds, selectedYardId);
         _historyPage?.SetDisplayScope(stationIds, selectedYardId);
         _alarmHistoryPage?.SetDisplayScope(stationIds, selectedYardId);
+        _statisticsPage?.SetMapPointNames(_loadedProject?.Stations);
         _statisticsPage?.SetDisplayScope(stationIds, selectedYardId);
         RefreshRecentAlarmHistory();
     }

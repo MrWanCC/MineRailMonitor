@@ -47,16 +47,19 @@ public sealed class YardContextMarkupTests
         Assert.Contains("_statisticsPage?.SetDisplayScope(stationIds, selectedYardId)", code, StringComparison.Ordinal);
         Assert.Contains("_communicationPage.SetDisplayScope", code, StringComparison.Ordinal);
         Assert.Contains("FilterCurrentYardStates(GetAllRuntimeStates()).ToArray()", code, StringComparison.Ordinal);
-        Assert.Contains("YardPassageFilter.BuildStatistics", code, StringComparison.Ordinal);
+        Assert.Contains("_passageRecordStore.GetStatistics(", code, StringComparison.Ordinal);
+        Assert.Contains("GetCurrentYardStationIds()", code, StringComparison.Ordinal);
         Assert.Contains("_visibleRfidStationIds", monitorCode, StringComparison.Ordinal);
         Assert.Contains("SelectedRfidStation", monitorCode, StringComparison.Ordinal);
         Assert.Contains("ClearDetails", monitorCode, StringComparison.Ordinal);
         Assert.Contains("StationIds = _displayScopeStationIds", historyCode, StringComparison.Ordinal);
         Assert.Contains("StationIds = _displayScopeStationIds", alarmCode, StringComparison.Ordinal);
-        Assert.Contains("GetVehicleStatistics", statisticsCode, StringComparison.Ordinal);
+        Assert.Contains("StatisticsDashboardQueryService", statisticsCode, StringComparison.Ordinal);
+        Assert.Contains("_dashboardQueryService.Query(range, stationIds)", statisticsCode, StringComparison.Ordinal);
+        Assert.Contains("_displayScopeStationIds?.ToArray()", statisticsCode, StringComparison.Ordinal);
         Assert.Contains("public void SetDisplayScope", statisticsCode, StringComparison.Ordinal);
         Assert.Contains("_displayScopeStationIds", statisticsCode, StringComparison.Ordinal);
-        Assert.Contains("stationIds: _displayScopeStationIds", statisticsCode, StringComparison.Ordinal);
+        Assert.Contains("IEnumerable<string>? stationIds", statisticsCode, StringComparison.Ordinal);
         Assert.DoesNotContain("YardPassageFilter.Filter", statisticsCode, StringComparison.Ordinal);
     }
 

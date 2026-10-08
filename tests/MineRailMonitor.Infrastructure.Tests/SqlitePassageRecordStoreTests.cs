@@ -495,6 +495,7 @@ PRAGMA user_version=4;";
             PageSize = 1
         });
         var statistics = database.Store.GetStatistics(Today);
+        var stationStatistics = database.Store.GetStatistics(Today, new[] { "RFID-01" });
 
         Assert.Equal(2, query.TotalCount);
         Assert.Equal(Guid.Parse("f1111111-1111-1111-1111-111111111111"), Assert.Single(query.Items).PassageId);
@@ -502,6 +503,10 @@ PRAGMA user_version=4;";
         Assert.Equal(2, statistics.TodayNormalCount);
         Assert.Equal(1, statistics.TodayAlarmCount);
         Assert.Equal(2, statistics.ByStation["RFID-01"]);
+        Assert.Equal(2, stationStatistics.TodayPassageCount);
+        Assert.Equal(2, stationStatistics.TodayNormalCount);
+        Assert.Equal(0, stationStatistics.TodayAlarmCount);
+        Assert.Equal(new[] { "RFID-01" }, stationStatistics.ByStation.Keys);
     }
 
     [Fact]

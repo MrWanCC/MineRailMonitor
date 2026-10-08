@@ -355,7 +355,7 @@ public sealed class Phase32RecoveryTests
 
         public PassageRecord? GetDetails(Guid passageId) => _inner.GetDetails(passageId);
 
-        public PassageStatistics GetStatistics(DateTimeOffset localNow) => _inner.GetStatistics(localNow);
+        public PassageStatistics GetStatistics(DateTimeOffset localNow, IEnumerable<string>? stationIds = null) => _inner.GetStatistics(localNow, stationIds);
     }
 
     private sealed class RecordingPassageEventLogger : IPassageEventLogger

@@ -144,14 +144,22 @@ public sealed class InMemoryPassageRecordStore : IPassageRecordStore
         }
     }
 
-    public PassageStatistics GetStatistics(DateTimeOffset localNow)
+    public PassageStatistics GetStatistics(DateTimeOffset localNow, IEnumerable<string>? stationIds = null)
     {
         var localDate = localNow.Date;
         var dayStart = new DateTimeOffset(localDate, localNow.Offset);
         var dayEnd = dayStart.AddDays(1);
+        var allowedStationIds = stationIds is null
+            ? null
+            : new HashSet<string>(stationIds
+                .Where(stationId => !string.IsNullOrWhiteSpace(stationId))
+                .Select(NormalizeStationId), StringComparer.OrdinalIgnoreCase);
         lock (_syncRoot)
         {
-            var today = _records.Where(record => record.CompletedAt >= dayStart && record.CompletedAt < dayEnd).ToArray();
+            var today = _records
+                .Where(record => record.CompletedAt >= dayStart && record.CompletedAt < dayEnd)
+                .Where(record => allowedStationIds is null || allowedStationIds.Contains(NormalizeStationId(record.StationId)))
+                .ToArray();
             return new PassageStatistics(
                 today.Length,
                 today.Count(record => record.Outcome == PassageOutcome.Completed),

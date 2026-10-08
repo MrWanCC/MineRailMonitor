@@ -65,6 +65,28 @@ public sealed class SqliteStatisticsServiceTests
     }
 
     [Fact]
+    public void Overview_reports_no_average_duration_when_all_completed_durations_are_invalid()
+    {
+        using var database = new TemporaryDatabase();
+        database.Store.Save(new PassageRecord(
+            Guid.NewGuid(),
+            "RFID-01",
+            1,
+            1,
+            new ushort[] { 1 },
+            1,
+            PassageOutcome.Completed,
+            Start.AddMinutes(2),
+            Start.AddMinutes(1)));
+
+        var result = database.Store.GetOverview(Start, End);
+
+        Assert.Equal(1, result.TotalCount);
+        Assert.Equal(0d, result.AverageDurationSeconds);
+        Assert.False(result.HasAverageDurationSamples);
+    }
+
+    [Fact]
     public void Ten_passage_acceptance_batch_reports_eight_normal_two_alarms_and_station_scopes_do_not_mix()
     {
         using var database = new TemporaryDatabase();

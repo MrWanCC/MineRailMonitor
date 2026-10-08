@@ -22,5 +22,5 @@ public interface IPassageRecordStore
 
     PassageRecord? GetDetails(Guid passageId);
 
-    PassageStatistics GetStatistics(DateTimeOffset localNow);
+    PassageStatistics GetStatistics(DateTimeOffset localNow, IEnumerable<string>? stationIds = null);
 }

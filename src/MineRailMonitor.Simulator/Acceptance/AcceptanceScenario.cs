@@ -231,7 +231,11 @@ public static class AcceptanceScenario
         new AcceptanceScenarioDefinition(
             "U13_Test11MissingOne",
             new[] { Train(0x01, AcceptanceVehicleCatalog.Test11Rfids.Take(10)) },
-            displayName: "11节缺1节")
+            displayName: "11节缺1节"),
+        new AcceptanceScenarioDefinition(
+            "U14_UnverifiedNoFallback",
+            new[] { Train(0x01, new ushort[] { 0xC001, 0xC101, 0xC102, 0xC103 }) },
+            displayName: "未知车辆 · 无回退未判定")
     };
 
     public static AcceptanceScenarioDefinition Parse(string name)

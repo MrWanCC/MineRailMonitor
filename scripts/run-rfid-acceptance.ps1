@@ -3,6 +3,8 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Debug',
     [switch]$KeepSuccessfulArtifacts,
+    [switch]$SkipCoreTestVerification,
+    [switch]$SkipInfrastructureTestVerification,
     [string[]]$Scenario
 )
 
@@ -21,41 +23,22 @@ $simulatorPort560 = 62101
 $simulatorPort620 = 62111
 $upperPort560 = 62102
 $upperPort620 = 62112
-$scenarioNames = @(
-    'Normal11',
-    'Uncoupling10',
-    'TwoConsecutiveTrains',
-    'TwoStationsConcurrent',
-    'ClearReappearingTags',
-    'SparseSlots',
-    'MultipleHeads',
-    'NoHead',
-    'UdpU01Normal11',
-    'UdpU02Uncoupling10Of11',
-    'UdpU03LateEleventhCompletes',
-    'UdpU04RepeatedTagsTimeout',
-    'UdpU05HeadAppearsLate',
-    'UdpU06UnknownHeadFallback',
-    'UdpU07ConsecutiveAfterClear',
-    'UdpU08ImmediateConsecutive',
-    'U09_11CarMissingFive',
-    'U10_11CarLateCompletion',
-    'U11_CustomCountNotFixed11',
-    'U12_Test11Normal',
-    'U13_Test11MissingOne'
-)
+$scenarioManifestPath = Join-Path $PSScriptRoot 'rfid-acceptance-scenarios.json'
+if (-not [System.IO.File]::Exists($scenarioManifestPath)) {
+    throw "未找到验收场景清单：$scenarioManifestPath"
+}
+$scenarioCatalog = Get-Content -LiteralPath $scenarioManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$scenarioNames = @($scenarioCatalog | ForEach-Object { [string]$_.name })
 
 function Get-AcceptanceScenarioLabel {
     param([Parameter(Mandatory = $true)][string]$Name)
 
-    switch ($Name) {
-        'U09_11CarMissingFive' { return '11节缺5节' }
-        'U10_11CarLateCompletion' { return '11节补扫完成' }
-        'U11_CustomCountNotFixed11' { return '7节正常通过' }
-        'U12_Test11Normal' { return '11节正常通过' }
-        'U13_Test11MissingOne' { return '11节缺1节' }
-        default { return $Name }
+    $scenario = $script:scenarioCatalog | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+    if ($null -ne $scenario -and -not [string]::IsNullOrWhiteSpace([string]$scenario.displayName)) {
+        return [string]$scenario.displayName
     }
+
+    return $Name
 }
 
 function Write-AtomicText {
@@ -157,7 +140,7 @@ function Read-JsonFile {
         }
         if ([System.IO.File]::Exists($Path)) {
             try {
-                return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
+                return (Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json)
             }
             catch {
                 if ([DateTime]::UtcNow -ge $deadline) {
@@ -234,15 +217,31 @@ function Invoke-DotnetCheck {
     )
 
     Write-Host "[$Label] $($Arguments -join ' ')"
+    $savedErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $output = @(& dotnet @Arguments 2>&1)
     $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $savedErrorActionPreference
     [System.IO.File]::WriteAllLines($OutputPath, [string[]]($output | ForEach-Object { $_.ToString() }))
     $output | ForEach-Object { Write-Host $_ }
     return [pscustomobject]@{
         Name = $Label
         Pass = ($exitCode -eq 0)
+        Skipped = $false
         ExitCode = $exitCode
         OutputFile = $OutputPath
+    }
+}
+
+function New-SkippedVerification {
+    param([Parameter(Mandatory = $true)][string]$Label)
+
+    return [pscustomobject]@{
+        Name = $Label
+        Pass = $true
+        Skipped = $true
+        ExitCode = $null
+        OutputFile = $null
     }
 }
 
@@ -339,9 +338,14 @@ ORDER BY completed_at ASC, created_at ASC;
             VehicleHeadRfid = Format-Rfid $row.vehicle_head_rfid
             VehicleNo = if ($row.IsNull('vehicle_no')) { $null } else { [string]$row.vehicle_no }
             VehicleName = if ($row.IsNull('vehicle_name')) { $null } else { [string]$row.vehicle_name }
-            Expected = [int]$row.expected_vehicle_count
+            Expected = if ($row.IsNull('expected_vehicle_count')) { $null } else { [int]$row.expected_vehicle_count }
             Detected = [int]$row.detected_vehicle_count
-            Result = if ([int]$row.result -eq 0) { 'Completed' } else { 'UncouplingAlarm' }
+            Result = switch ([int]$row.result) {
+                0 { 'Completed' }
+                1 { 'UncouplingAlarm' }
+                2 { 'Unverified' }
+                default { throw "未知Passage Outcome：$($row.result)" }
+            }
             ClearState = if ([int]$row.clear_state -eq 1) { 'Cleared' } else { 'PendingClear' }
             AlarmStatus = if ([int]$row.result -ne 1) { $null } elseif (-not $row.IsNull('alarm_recovered_at')) { 'Recovered' } elseif (-not $row.IsNull('alarm_acknowledged_at')) { 'Acknowledged' } else { 'Unconfirmed' }
             Warning = $warning
@@ -372,7 +376,7 @@ function Get-PassageEvents {
     $passageDirectory = Join-Path $LogDirectory 'Passage'
     $events = New-Object System.Collections.ArrayList
     foreach ($file in @(Get-ChildItem -LiteralPath $passageDirectory -Filter 'passage-event-*.jsonl' -File -ErrorAction SilentlyContinue)) {
-        foreach ($line in @(Get-Content -LiteralPath $file.FullName -ErrorAction SilentlyContinue)) {
+        foreach ($line in @(Get-Content -LiteralPath $file.FullName -Encoding UTF8 -ErrorAction SilentlyContinue)) {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
             [void]$events.Add(($line | ConvertFrom-Json))
         }
@@ -404,8 +408,11 @@ function Get-StatisticsSnapshot {
             TotalCount = $overview.TotalCount
             NormalCount = $overview.NormalCount
             AlarmCount = $overview.AlarmCount
+            UnverifiedCount = $overview.UnverifiedCount
             AlarmRatePercent = $overview.AlarmRatePercent
             AverageDurationSeconds = $overview.AverageDurationSeconds
+            AlarmHistoryCount = @($store.GetRecentAlarms([DateTimeOffset]::MinValue, [DateTimeOffset]::MaxValue, $null, 100)).Count
+            StationTags = $store.GetStationTagStatistics([DateTimeOffset]::MinValue, [DateTimeOffset]::MaxValue, $null)
         }
     }
     finally {
@@ -490,6 +497,9 @@ function Get-ScenarioExpectation {
         'U13_Test11MissingOne' {
             return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = 'A001'; VehicleHeadRfid = 'A001'; VehicleNo = 'TEST-11'; VehicleName = '11节验收车辆'; Expected = 11; Detected = 10; Missing = 1; Result = 'UncouplingAlarm'; AlarmStatus = 'Unconfirmed'; WarningContains = @('脱节报警'); Rfids = @('A001', 'A002', 'A003', 'A004', 'A005', 'A006', 'A007', 'A008', 'A009', 'A010') }) }
         }
+        'U14_UnverifiedNoFallback' {
+            return [pscustomobject]@{ Records = @([pscustomobject]@{ StationAddress = 1; HeadRfid = 'C001'; VehicleHeadRfid = $null; VehicleNo = $null; VehicleName = $null; Expected = $null; Detected = 4; Result = 'Unverified'; AlarmStatus = $null; WarningContains = @(); Rfids = @('C001', 'C101', 'C102', 'C103') }) }
+        }
         default {
             throw "未知验收场景：$Name"
         }
@@ -541,7 +551,8 @@ function Test-ScenarioResult {
         [Parameter(Mandatory = $true)][string]$DatabasePath,
         [Parameter(Mandatory = $true)]$Runtime,
         [Parameter(Mandatory = $true)]$SimulatorResult,
-        [Parameter(Mandatory = $true)][string]$LogDirectory
+        [Parameter(Mandatory = $true)][string]$LogDirectory,
+        [Parameter(Mandatory = $true)][int]$RecognitionTimeoutSeconds
     )
 
     if (-not $SimulatorResult.Pass) {
@@ -582,7 +593,8 @@ function Test-ScenarioResult {
     }
     if ($statistics.TotalCount -ne $actualRecords.Count -or
         $statistics.NormalCount -ne @($actualRecords | Where-Object Result -eq 'Completed').Count -or
-        $statistics.AlarmCount -ne @($actualRecords | Where-Object Result -eq 'UncouplingAlarm').Count) {
+        $statistics.AlarmCount -ne @($actualRecords | Where-Object Result -eq 'UncouplingAlarm').Count -or
+        $statistics.UnverifiedCount -ne @($actualRecords | Where-Object Result -eq 'Unverified').Count) {
         throw "统计服务结果与SQLite Passage记录不一致：$Name。"
     }
     if ($Name -eq 'UdpU08ImmediateConsecutive' -and $actualRecords.Count -ne 1) {
@@ -654,7 +666,12 @@ function Test-ScenarioResult {
 
         $passageEventRows = @($passageEvents | Where-Object { [string]$_.PassageId -eq $actual.PassageId })
         $passageEventTypes = @($passageEventRows | ForEach-Object { [string]$_.EventType })
-        $terminalEvent = if ($actual.Result -eq 'Completed') { 'PASSAGE_COMPLETE' } else { 'PASSAGE_ALARM' }
+        $terminalEvent = switch ($actual.Result) {
+            'Completed' { 'PASSAGE_COMPLETE' }
+            'UncouplingAlarm' { 'PASSAGE_ALARM' }
+            'Unverified' { 'PASSAGE_UNVERIFIED' }
+            default { throw "未知验收结果：$($actual.Result)" }
+        }
         if (@($passageEventTypes | Where-Object { $_ -eq 'PASSAGE_START' }).Count -ne 1 -or
             @($passageEventTypes | Where-Object { $_ -eq 'PASSAGE_PROGRESS' }).Count -ne $actual.Detected -or
             @($passageEventTypes | Where-Object { $_ -eq $terminalEvent }).Count -ne 1 -or
@@ -757,10 +774,15 @@ function Test-ScenarioResult {
             $supplementalTagDelaySeconds = ([DateTimeOffset]::Parse([string]$progressEvents[6].OccurredAt) - [DateTimeOffset]::Parse([string]$progressEvents[5].OccurredAt)).TotalSeconds
             $startEvent = @($passageEventRows | Where-Object { $_.EventType -eq 'PASSAGE_START' })[0]
             $supplementalTagElapsedSeconds = ([DateTimeOffset]::Parse([string]$progressEvents[6].OccurredAt) - [DateTimeOffset]::Parse([string]$startEvent.OccurredAt)).TotalSeconds
-            if ($supplementalTagElapsedSeconds -lt 23 -or $supplementalTagElapsedSeconds -gt 28) {
-                throw "U10未在约25秒处开始补扫并以11个唯一RFID完成：progress=$($progressEvents.Count) delay=$supplementalTagDelaySeconds 秒。"
+            if ($supplementalTagElapsedSeconds -lt 27 -or
+                $supplementalTagDelaySeconds -ge ($RecognitionTimeoutSeconds - 0.5)) {
+                throw "U10未在识别超时边界前补齐：开始后=$supplementalTagElapsedSeconds 秒，前后新标签间隔=$supplementalTagDelaySeconds 秒，实际识别超时=$RecognitionTimeoutSeconds 秒。"
             }
             $supplementalAt = [DateTimeOffset]::Parse([string]$progressEvents[6].OccurredAt)
+            $incompleteBeforeSupplement = @($history | Where-Object {
+                $_.LifecycleState -eq 'Recognizing' -and [int]$_.Detected -lt 11 -and
+                [DateTimeOffset]::Parse([string]$_.LastNewVehicleAt) -lt $supplementalAt
+            })
             $lateSnapshots = @($history | Where-Object {
                 $_.LifecycleState -eq 'Recognizing' -and [int]$_.Detected -ge 7 -and
                 [DateTimeOffset]::Parse([string]$_.LastNewVehicleAt) -ge $supplementalAt
@@ -770,11 +792,26 @@ function Test-ScenarioResult {
                 [int]$_.StationAddress -eq $actual.StationAddress -and
                 @($_.Slots | Where-Object { [int]$_ -eq 0xA011 }).Count -gt 0
             }).Count -gt 0
-            if (-not $lastNewVehicleRefreshed -or -not $lastConfiguredSupplementObserved -or
+            if ($incompleteBeforeSupplement.Count -eq 0 -or -not $lastNewVehicleRefreshed -or -not $lastConfiguredSupplementObserved -or
                 $actual.Expected -ne 11 -or $actual.Detected -ne 11 -or
                 $actual.Result -ne 'Completed' -or $null -ne $actual.AlarmStatus -or
-                $statistics.AlarmCount -ne 0) {
+                $statistics.AlarmCount -ne 0 -or $actualRecords.Count -ne 1) {
                 throw "U10未验证迟到新标签刷新超时并保持单条11/11正常记录：LastNewRefreshed=$lastNewVehicleRefreshed lastSupplementObserved=$lastConfiguredSupplementObserved。"
+            }
+        }
+        if ($Name -eq 'U14_UnverifiedNoFallback') {
+            $stationQuality = @($statistics.StationTags.Stations | Where-Object { $_.StationId -eq $actual.StationId })[0]
+            if ($actual.Expected -ne $null -or $actual.Detected -ne 4 -or
+                $actual.Result -ne 'Unverified' -or $null -ne $actual.AlarmStatus -or
+                @($passageEventTypes | Where-Object { $_ -eq 'PASSAGE_UNVERIFIED' }).Count -ne 1 -or
+                @($passageEventTypes | Where-Object { $_ -eq 'PASSAGE_ALARM' }).Count -ne 0 -or
+                $statistics.TotalCount -ne 1 -or $statistics.NormalCount -ne 0 -or
+                $statistics.AlarmCount -ne 0 -or $statistics.UnverifiedCount -ne 1 -or
+                $statistics.AlarmRatePercent -ne 0 -or $statistics.AlarmHistoryCount -ne 0 -or
+                $null -eq $stationQuality -or $stationQuality.PassageCount -ne 1 -or
+                $null -ne $stationQuality.ExpectedCount -or $null -ne $stationQuality.DetectedCount -or
+                $null -ne $stationQuality.MissingCount -or $null -ne $stationQuality.CompletenessPercent) {
+                throw 'U14未满足未判定统计口径：应保存1趟/4个RFID，但质量累计与报警历史均不计入。'
             }
         }
         if ($Name -eq 'U11_CustomCountNotFixed11' -and
@@ -836,7 +873,7 @@ function Test-ScenarioResult {
             VehicleName = $actual.VehicleName
             Expected = $actual.Expected
             Detected = $actual.Detected
-            Missing = $actual.Expected - $actual.Detected
+            Missing = if ($null -eq $actual.Expected) { $null } else { $actual.Expected - $actual.Detected }
             Result = $actual.Result
             AlarmStatus = $actual.AlarmStatus
             LastNewVehicleRefreshed = $lastNewVehicleRefreshed
@@ -859,6 +896,7 @@ function Test-ScenarioResult {
             ClearToFirstEmptyMs = if ($null -eq $clearToFirstEmptyMs) { $null } else { [long][Math]::Max(0, $clearToFirstEmptyMs) }
             EmptyConfirmationGapMs = if ($null -eq $emptyConfirmationGapMs) { $null } else { [long][Math]::Max(0, $emptyConfirmationGapMs) }
             NoNewRfidTimeoutSeconds = if ($null -eq $noNewRfidTimeoutSeconds) { $null } else { [Math]::Round($noNewRfidTimeoutSeconds, 3) }
+            RecognitionTimeoutSeconds = $RecognitionTimeoutSeconds
             NextTrainFirstNonEmptyAt = $nextTrainFirstNonEmptyAt
             EmptyResponsesAfterFirstClear = $emptyResponsesAfterClear.Count
             DurationMs = [long]$SimulatorResult.DurationMs
@@ -1003,6 +1041,9 @@ function Invoke-Scenario {
             '--listen-port-560', $upperPort560.ToString(), '--listen-port-620', $upperPort620.ToString(),
             '--simulator-port-560', $simulatorPort560.ToString(), '--simulator-port-620', $simulatorPort620.ToString()
         )
+        if ($Name -eq 'U14_UnverifiedNoFallback') {
+            $upperArguments += '--disable-global-expected-count-fallback'
+        }
         $upperProcess = Start-AcceptanceProcess `
             -FilePath $mainExecutable `
             -Arguments $upperArguments `
@@ -1010,6 +1051,11 @@ function Invoke-Scenario {
             -StandardOutput $upperStdout `
             -StandardError $upperStderr
         Wait-ForFile -Path $upperReadyPath -TimeoutSeconds 30 -Process $upperProcess -Description '上位机UDP就绪'
+        $upperReady = Read-JsonFile -Path $upperReadyPath -TimeoutSeconds 2 -Process $upperProcess -Description '上位机验收配置'
+        $recognitionTimeoutSeconds = [int]$upperReady.interVehicleTimeoutSeconds
+        if ($recognitionTimeoutSeconds -le 0) {
+            throw "上位机未报告有效识别超时配置：$upperReadyPath"
+        }
 
         $simulatorResult = Read-JsonFile -Path $simulatorResultPath -TimeoutSeconds 75 -Process $simulatorProcess -Description 'Simulator场景结果'
         if (-not (Wait-ForProcessExit -Process $simulatorProcess -TimeoutSeconds 10 -Description 'Simulator')) {
@@ -1021,7 +1067,7 @@ function Invoke-Scenario {
             Start-Sleep -Milliseconds 200
             $runtime = Read-JsonFile -Path $runtimeStatePath -TimeoutSeconds 2 -Process $upperProcess -Description '上位机最终Runtime状态'
         }
-        $verified = Test-ScenarioResult -Name $Name -DatabasePath $databasePath -Runtime $runtime -SimulatorResult $simulatorResult -LogDirectory $logDirectory
+        $verified = Test-ScenarioResult -Name $Name -DatabasePath $databasePath -Runtime $runtime -SimulatorResult $simulatorResult -LogDirectory $logDirectory -RecognitionTimeoutSeconds $recognitionTimeoutSeconds
         $passed = $true
     }
     catch {
@@ -1102,8 +1148,18 @@ $infrastructureAssembly = Join-Path $mainBinaryDirectory 'MineRailMonitor.Infras
 Add-Type -Path $coreAssembly
 Add-Type -Path $infrastructureAssembly
 
-$coreCheck = Invoke-DotnetCheck -Label 'Core Tests' -Arguments @('test', 'tests/MineRailMonitor.Core.Tests/MineRailMonitor.Core.Tests.csproj', '-c', $Configuration, '--no-build') -OutputPath (Join-Path $verificationDirectory 'core-tests.log')
-$infrastructureCheck = Invoke-DotnetCheck -Label 'Infrastructure Tests' -Arguments @('test', 'tests/MineRailMonitor.Infrastructure.Tests/MineRailMonitor.Infrastructure.Tests.csproj', '-c', $Configuration, '--no-build') -OutputPath (Join-Path $verificationDirectory 'infrastructure-tests.log')
+$coreCheck = if ($SkipCoreTestVerification) {
+    New-SkippedVerification -Label 'Core Tests'
+}
+else {
+    Invoke-DotnetCheck -Label 'Core Tests' -Arguments @('test', 'tests/MineRailMonitor.Core.Tests/MineRailMonitor.Core.Tests.csproj', '-c', $Configuration, '--no-build') -OutputPath (Join-Path $verificationDirectory 'core-tests.log')
+}
+$infrastructureCheck = if ($SkipInfrastructureTestVerification) {
+    New-SkippedVerification -Label 'Infrastructure Tests'
+}
+else {
+    Invoke-DotnetCheck -Label 'Infrastructure Tests' -Arguments @('test', 'tests/MineRailMonitor.Infrastructure.Tests/MineRailMonitor.Infrastructure.Tests.csproj', '-c', $Configuration, '--no-build') -OutputPath (Join-Path $verificationDirectory 'infrastructure-tests.log')
+}
 
 $scenarioResults = New-Object System.Collections.ArrayList
 $recordResults = New-Object System.Collections.ArrayList

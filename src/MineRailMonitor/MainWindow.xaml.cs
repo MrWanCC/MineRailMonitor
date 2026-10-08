@@ -229,7 +229,9 @@ public partial class MainWindow : Window
         if (_acceptanceOptions.Enabled)
         {
             result.Project.Vehicles = CreateAcceptanceVehicles();
-            result.Project.RfidSettings.ExpectedVehicleCount = 11;
+            result.Project.RfidSettings.ExpectedVehicleCount = _acceptanceOptions.DisableGlobalExpectedCountFallback
+                ? null
+                : 11;
         }
         var runtimeSettings = GetRuntimeSettings(result.Project);
         _rfidFrameParser = new RfidFrameParser(new RfidFrameParserOptions
@@ -318,7 +320,9 @@ public partial class MainWindow : Window
         RefreshHistoricalStatistics();
         if (_acceptanceOptions.Enabled)
         {
-            AtomicFileWriter.WriteAllText(_acceptanceOptions.ReadyFile!, "{\"status\":\"ready\"}");
+            AtomicFileWriter.WriteAllText(
+                _acceptanceOptions.ReadyFile!,
+                $"{{\"status\":\"ready\",\"interVehicleTimeoutSeconds\":{_acceptanceOptions.InterVehicleTimeoutSeconds}}}");
         }
     }
 

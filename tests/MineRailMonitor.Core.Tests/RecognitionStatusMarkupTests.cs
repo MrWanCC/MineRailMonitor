@@ -34,7 +34,7 @@ public sealed class RecognitionStatusMarkupTests
         Assert.Contains("脱节报警", mainWindowCode);
         Assert.Contains("ExpectedVehicleCount = project.RfidSettings.ExpectedVehicleCount", mainWindowCode);
         Assert.Contains(
-            "if (_acceptanceOptions.Enabled)\n        {\n            result.Project.Vehicles = CreateAcceptanceVehicles();\n            result.Project.RfidSettings.ExpectedVehicleCount = 11;\n        }",
+            "if (_acceptanceOptions.Enabled)\n        {\n            result.Project.Vehicles = CreateAcceptanceVehicles();\n            result.Project.RfidSettings.ExpectedVehicleCount = _acceptanceOptions.DisableGlobalExpectedCountFallback\n                ? null\n                : 11;\n        }",
             mainWindowCode.Replace("\r\n", "\n"));
         Assert.Contains("LoadScenario(\"11节正常通过\"", simulatorCode);
         Assert.Contains("11节缺5节", simulatorCode);

@@ -60,8 +60,17 @@ public sealed class SimulatorScenarioRunnerTests
             "UdpU04RepeatedTagsTimeout", "UdpU05HeadAppearsLate", "UdpU06UnknownHeadFallback",
             "UdpU07ConsecutiveAfterClear", "UdpU08ImmediateConsecutive",
             "U09_11CarMissingFive", "U10_11CarLateCompletion", "U11_CustomCountNotFixed11",
-            "U12_Test11Normal", "U13_Test11MissingOne"
+            "U12_Test11Normal", "U13_Test11MissingOne", "U14_UnverifiedNoFallback"
         }, AcceptanceScenario.All.Select(item => item.Name));
+    }
+
+    [Fact]
+    public void U14_uses_an_unmatched_head_and_distinct_tags_to_reach_unverified_without_fallback()
+    {
+        var train = AcceptanceScenario.Parse("U14_UnverifiedNoFallback").Trains.Single();
+
+        Assert.Equal(new ushort[] { 0xC001, 0xC101, 0xC102, 0xC103 }, train.VehicleRfids);
+        Assert.Equal(4, train.OccupiedSlotIndexes.Count);
     }
 
     [Fact]

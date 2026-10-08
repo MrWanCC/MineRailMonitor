@@ -21,7 +21,8 @@ public sealed class AcceptanceCommandLineOptions
         int listenPort,
         int listenPort620,
         int simulatorPort,
-        int simulatorPort620)
+        int simulatorPort620,
+        bool disableGlobalExpectedCountFallback)
     {
         Enabled = enabled;
         DatabasePath = databasePath;
@@ -33,6 +34,7 @@ public sealed class AcceptanceCommandLineOptions
         ListenPort620 = listenPort620;
         SimulatorPort = simulatorPort;
         SimulatorPort620 = simulatorPort620;
+        DisableGlobalExpectedCountFallback = disableGlobalExpectedCountFallback;
     }
 
     public static AcceptanceCommandLineOptions Disabled { get; } = new(
@@ -45,7 +47,8 @@ public sealed class AcceptanceCommandLineOptions
         listenPort: 0,
         listenPort620: 0,
         simulatorPort: 0,
-        simulatorPort620: 0);
+        simulatorPort620: 0,
+        disableGlobalExpectedCountFallback: false);
 
     public bool Enabled { get; }
 
@@ -62,6 +65,8 @@ public sealed class AcceptanceCommandLineOptions
     public int SimulatorPort620 { get; }
 
     public int InterVehicleTimeoutSeconds => AcceptanceInterVehicleTimeoutSeconds;
+
+    public bool DisableGlobalExpectedCountFallback { get; }
 
     public string? DatabasePath { get; }
 
@@ -91,6 +96,7 @@ public sealed class AcceptanceCommandLineOptions
         var listenPort620 = DefaultListenPort620;
         var simulatorPort = DefaultSimulatorPort;
         var simulatorPort620 = DefaultSimulatorPort620;
+        var disableGlobalExpectedCountFallback = false;
 
         for (var index = 0; index < values.Length; index++)
         {
@@ -132,6 +138,9 @@ public sealed class AcceptanceCommandLineOptions
                     break;
                 case "--stop-file":
                     stopFile = ReadValue(values, ref index, argument);
+                    break;
+                case "--disable-global-expected-count-fallback":
+                    disableGlobalExpectedCountFallback = true;
                     break;
                 case "--listen-port":
                     listenPort = ParsePort(ReadValue(values, ref index, argument), argument);
@@ -188,7 +197,8 @@ public sealed class AcceptanceCommandLineOptions
             listenPort: listenPort,
             listenPort620: listenPort620,
             simulatorPort: simulatorPort,
-            simulatorPort620: simulatorPort620);
+            simulatorPort620: simulatorPort620,
+            disableGlobalExpectedCountFallback: disableGlobalExpectedCountFallback);
     }
 
     public override string ToString() => Enabled

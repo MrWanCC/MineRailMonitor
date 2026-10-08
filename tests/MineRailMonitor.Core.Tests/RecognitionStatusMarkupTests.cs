@@ -36,18 +36,19 @@ public sealed class RecognitionStatusMarkupTests
         Assert.Contains(
             "if (_acceptanceOptions.Enabled)\n        {\n            result.Project.Vehicles = CreateAcceptanceVehicles();\n            result.Project.RfidSettings.ExpectedVehicleCount = _acceptanceOptions.DisableGlobalExpectedCountFallback\n                ? null\n                : 11;\n        }",
             mainWindowCode.Replace("\r\n", "\n"));
-        Assert.Contains("LoadScenario(\"11节正常通过\"", simulatorCode);
-        Assert.Contains("11节缺5节", simulatorCode);
-        Assert.Contains("11节缺1节", simulatorCode);
-        Assert.Contains("11节补扫完成", simulatorCode);
-        Assert.Contains("7节正常通过", simulatorCode);
+        Assert.Contains("x:Name=\"ProjectVehicleComboBox\"", simulatorMarkup);
+        Assert.Contains("x:Name=\"LoadProjectVehiclesButton\"", simulatorMarkup);
+        Assert.Contains("x:Name=\"UnconfiguredVehiclePresetButton\"", simulatorMarkup);
+        Assert.Contains("SimulatorProjectVehicleLoader.Load", simulatorCode);
+        Assert.Contains("SimulatorVehicleScenarioFactory.CreateNormal", simulatorCode);
+        Assert.Contains("SimulatorVehicleScenarioFactory.CreateUnconfiguredVehicle", simulatorCode);
         Assert.DoesNotContain("只有6节", simulatorMarkup);
         Assert.DoesNotContain("只有10节", simulatorMarkup);
         Assert.Contains("SimulatorStationContext", simulatorCode);
         Assert.Contains("ScenarioPlaybackState", simulatorContextCode);
-        Assert.Contains("多车头11节", simulatorMarkup);
-        Assert.Contains("无车头11节", simulatorMarkup);
-        Assert.Contains("首位异常11节", simulatorMarkup);
+        Assert.Contains("x:Name=\"MultiHeadPresetButton\"", simulatorMarkup);
+        Assert.Contains("x:Name=\"NoHeadPresetButton\"", simulatorMarkup);
+        Assert.Contains("x:Name=\"FirstNonHeadPresetButton\"", simulatorMarkup);
         Assert.Contains("ApplyMultiHeadPreset", simulatorCode);
         Assert.Contains("ApplyNoHeadPreset", simulatorCode);
         Assert.Contains("ApplyFirstNonHeadPreset", simulatorCode);
@@ -62,7 +63,13 @@ public sealed class RecognitionStatusMarkupTests
     {
         using var station = new SimulatorStationContext(SimulatorStationPresets.CreateDefaultSix().First());
 
-        SimulatorStationPresets.ApplyAllNormal(new[] { station });
+        SimulatorStationPresets.ApplyAllNormal(
+            new[] { station },
+            new SimulatorVehicleScenario("11节正常通过", new ushort[]
+            {
+                0x1001, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005,
+                0x2006, 0x2007, 0x2008, 0x2009, 0x2010
+            }));
 
         Assert.Equal("11节正常通过", station.ScenarioName);
         Assert.Equal(11, station.Playback.Sequence.Count);

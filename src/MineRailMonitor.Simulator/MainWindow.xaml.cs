@@ -1,10 +1,12 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -12,7 +14,10 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using MineRailMonitor.Core.Acceptance;
+using MineRailMonitor.Core.Models;
+using MineRailMonitor.Simulator.Acceptance;
 using MineRailMonitor.Simulator.Models;
 using MineRailMonitor.Simulator.Protocol;
 
@@ -20,12 +25,10 @@ namespace MineRailMonitor.Simulator;
 
 public partial class MainWindow : Window
 {
-    private static readonly ushort[] Test11 = AcceptanceVehicleCatalog.Test11Rfids.ToArray();
-    private static readonly ushort[] Test07 = AcceptanceVehicleCatalog.Test07Rfids.ToArray();
-
     private readonly ObservableCollection<TextBox> _rfidTextBoxes = new();
     private readonly List<Ellipse> _rfidIndicators = new();
     private readonly ObservableCollection<SimulatorStationContext> _stations = new();
+    private readonly ObservableCollection<ProjectVehicleChoice> _projectVehicleChoices = new();
     private readonly DispatcherTimer _slotHighlightTimer;
     private readonly DispatcherTimer _scenarioPlaybackTimer;
     private readonly string _stationPersistencePath;
@@ -34,8 +37,10 @@ public partial class MainWindow : Window
     private SimulatorStationContext? _selectedStation;
     private SimulatorStationContext? _stationDeleteTarget;
     private string _selectedYardId = "560";
+    private int? _projectExpectedVehicleCount;
     private bool _loadingStation;
     private bool _loaded;
+    private Process? _acceptanceRunnerProcess;
 
     public MainWindow()
     {
@@ -60,7 +65,10 @@ public partial class MainWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         BuildRfidInputs();
+        ProjectVehicleComboBox.ItemsSource = _projectVehicleChoices;
         HookButtons();
+        ConfigureAcceptanceScenarioSelector();
+        LoadDefaultProjectVehiclesIfAvailable();
         _stationsView = new ListCollectionView(Stations);
         _stationsView.Filter = IsStationInSelectedYard;
         VirtualStationsListBox.ItemsSource = _stationsView;
@@ -81,6 +89,8 @@ public partial class MainWindow : Window
         {
             station.Dispose();
         }
+        _acceptanceRunnerProcess?.Dispose();
+        _acceptanceRunnerProcess = null;
     }
 
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -206,8 +216,334 @@ public partial class MainWindow : Window
         SendOnceButton.Click += async (_, _) => await StartSelectedStation();
         StartLoopButton.Click += async (_, _) => await StartSelectedStation();
         StopLoopButton.Click += (_, _) => StopSelectedStation();
+        RunAcceptanceScenarioButton.Click += (_, _) => RunSelectedAcceptanceScenario();
+        LoadProjectVehiclesButton.Click += (_, _) => SelectProjectVehicleConfiguration();
+        ProjectVehicleComboBox.SelectionChanged += OnProjectVehicleSelectionChanged;
+        UnconfiguredVehiclePresetButton.Click += (_, _) => ApplyUnconfiguredVehiclePreset();
         ClearLogButton.Click += (_, _) => ClearLogs();
         SaveLogButton.Click += (_, _) => SaveLog();
+    }
+
+    private void SelectProjectVehicleConfiguration()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "选择项目车辆配置",
+            Filter = "MineRailMonitor项目配置 (project.json)|project.json|JSON文件 (*.json)|*.json",
+            CheckFileExists = true,
+            FileName = "project.json"
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            LoadProjectVehicleConfiguration(dialog.FileName);
+        }
+    }
+
+    private void LoadDefaultProjectVehiclesIfAvailable()
+    {
+        var manifestPath = FindDefaultProjectManifest();
+        if (manifestPath is null)
+        {
+            UpdateScenarioPresetAvailability();
+            return;
+        }
+
+        LoadProjectVehicleConfiguration(manifestPath);
+    }
+
+    private static string? FindDefaultProjectManifest()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = System.IO.Path.Combine(directory.FullName, "Projects", "Default", "project.json");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
+    }
+
+    private void LoadProjectVehicleConfiguration(string manifestPath)
+    {
+        try
+        {
+            var project = SimulatorProjectVehicleLoader.Load(manifestPath);
+            _projectVehicleChoices.Clear();
+            foreach (var vehicle in project.Vehicles)
+            {
+                _projectVehicleChoices.Add(new ProjectVehicleChoice(vehicle));
+            }
+
+            _projectExpectedVehicleCount = project.ExpectedVehicleCount;
+            ProjectVehicleStatusTextBlock.ToolTip = manifestPath;
+            ProjectVehicleComboBox.SelectedIndex = _projectVehicleChoices.Count > 0 ? 0 : -1;
+            ProjectVehicleStatusTextBlock.Text = _projectVehicleChoices.Count == 0
+                ? $"{project.ProjectName}未配置已启用车辆；未配置车辆场景使用{_projectExpectedVehicleCount ?? 11}节回退数。"
+                : $"{project.ProjectName} · 已读取{_projectVehicleChoices.Count}辆车辆；未知车辆回退数：{_projectExpectedVehicleCount?.ToString(CultureInfo.InvariantCulture) ?? "未配置"}。";
+            UpdateScenarioPresetAvailability();
+
+            if (_loaded && _selectedStation is not null && ProjectVehicleComboBox.SelectedItem is not null)
+            {
+                LoadDefaultVehicleScenario(_selectedStation);
+                LoadSelectedSlotsIntoDetails();
+                UpdateScenarioPlaybackStatus();
+                UpdateStationSummaries();
+            }
+        }
+        catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException ||
+                                          exception is System.Text.Json.JsonException || exception is InvalidDataException)
+        {
+            ProjectVehicleStatusTextBlock.Text = $"读取项目车辆配置失败：{exception.Message}";
+        }
+    }
+
+    private void OnProjectVehicleSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateScenarioPresetAvailability();
+        if (_loaded && _selectedStation is not null)
+        {
+            LoadDefaultVehicleScenario(_selectedStation);
+            LoadSelectedSlotsIntoDetails();
+            UpdateScenarioPlaybackStatus();
+            UpdateStationSummaries();
+        }
+    }
+
+    private void UpdateScenarioPresetAvailability()
+    {
+        var vehicle = (ProjectVehicleComboBox?.SelectedItem as ProjectVehicleChoice)?.Vehicle;
+        var count = vehicle?.Tags.Count ?? 0;
+        NormalPresetButton.IsEnabled = vehicle is not null;
+        ShortPresetButton.IsEnabled = count > 5;
+        TenWagonPresetButton.IsEnabled = count > 1;
+        SupplementPresetButton.IsEnabled = count > 1;
+        Test07PresetButton.IsEnabled = _projectVehicleChoices.Any(choice => choice.Vehicle.Tags.Count == 7);
+        DuplicatePresetButton.IsEnabled = vehicle is not null;
+        MultiHeadPresetButton.IsEnabled = vehicle is not null;
+        NoHeadPresetButton.IsEnabled = count > 1;
+        FirstNonHeadPresetButton.IsEnabled = count > 1;
+        UnconfiguredVehiclePresetButton.IsEnabled = true;
+
+        NormalPresetButton.Content = count > 0 ? $"{count}节正常通过" : "车辆正常通过";
+        ShortPresetButton.Content = count > 0 ? $"{count}节缺5节" : "缺5节报警";
+        TenWagonPresetButton.Content = count > 0 ? $"{count}节缺1节" : "缺1节报警";
+        SupplementPresetButton.Content = count > 0 ? $"{count}节补扫完成" : "延迟补扫完成";
+        MultiHeadPresetButton.Content = count > 0 ? $"多车头{count}节" : "多车头11节";
+        NoHeadPresetButton.Content = count > 0 ? $"无车头{count}节" : "无车头11节";
+        FirstNonHeadPresetButton.Content = count > 0 ? $"首位异常{count}节" : "首位异常11节";
+    }
+
+    private void LoadDefaultVehicleScenario(SimulatorStationContext station)
+    {
+        if (ProjectVehicleComboBox.SelectedItem is ProjectVehicleChoice choice)
+        {
+            var scenario = SimulatorVehicleScenarioFactory.CreateNormal(choice.Vehicle);
+            station.LoadScenario(scenario.Name, scenario.Rfids);
+            return;
+        }
+
+        station.LoadScenario("未加载车辆", Array.Empty<ushort>());
+    }
+
+    private SimulatorVehicleScenario? CreateSelectedVehicleScenario(Func<VehicleConfig, SimulatorVehicleScenario> createScenario)
+    {
+        if (!TryGetSelectedVehicle(out var vehicle))
+        {
+            return null;
+        }
+
+        try
+        {
+            return createScenario(vehicle);
+        }
+        catch (InvalidOperationException exception)
+        {
+            ProjectVehicleStatusTextBlock.Text = exception.Message;
+            return null;
+        }
+    }
+
+    private void ConfigureAcceptanceScenarioSelector()
+    {
+        var scriptPath = FindAcceptanceRunnerScript();
+        if (scriptPath is null)
+        {
+            RunAcceptanceScenarioButton.IsEnabled = false;
+            AcceptanceScenarioInfoTextBlock.Text = "验收脚本仅在源码工作区提供；普通基站模拟仍可使用。";
+            return;
+        }
+
+        try
+        {
+            var scriptDirectory = System.IO.Path.GetDirectoryName(scriptPath)!;
+            var manifestPath = System.IO.Path.Combine(scriptDirectory, "rfid-acceptance-scenarios.json");
+            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            var choices = document.RootElement.EnumerateArray()
+                .Select(item => new AcceptanceScenarioChoice(
+                    item.GetProperty("name").GetString()!,
+                    item.GetProperty("displayName").GetString()!))
+                .ToArray();
+            foreach (var choice in choices)
+            {
+                _ = AcceptanceScenario.Parse(choice.Name);
+            }
+
+            AcceptanceScenarioComboBox.ItemsSource = choices;
+            AcceptanceScenarioComboBox.SelectedItem = choices.FirstOrDefault(item => item.Name == "U12_Test11Normal");
+            AcceptanceScenarioComboBox.SelectionChanged += OnAcceptanceScenarioSelectionChanged;
+            UpdateAcceptanceScenarioInfo();
+        }
+        catch (Exception exception)
+        {
+            RunAcceptanceScenarioButton.IsEnabled = false;
+            AcceptanceScenarioDetailTextBlock.Text = $"验收场景清单不可用：{exception.Message}";
+        }
+    }
+
+    private void OnAcceptanceScenarioSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateAcceptanceScenarioInfo();
+
+    private void UpdateAcceptanceScenarioInfo()
+    {
+        if (AcceptanceScenarioComboBox.SelectedItem is not AcceptanceScenarioChoice choice)
+        {
+            return;
+        }
+
+        AcceptanceScenarioDetailTextBlock.Text = GetAcceptanceScenarioDetails(AcceptanceScenario.Parse(choice.Name));
+    }
+
+    private void RunSelectedAcceptanceScenario()
+    {
+        if (AcceptanceScenarioComboBox.SelectedItem is not AcceptanceScenarioChoice choice)
+        {
+            StatusTextBlock.Text = "请先选择一个端到端验收场景。";
+            return;
+        }
+
+        if (_acceptanceRunnerProcess is not null && !_acceptanceRunnerProcess.HasExited)
+        {
+            StatusTextBlock.Text = "验收窗口仍在运行，请先完成或关闭该窗口。";
+            return;
+        }
+        _acceptanceRunnerProcess?.Dispose();
+        _acceptanceRunnerProcess = null;
+
+        var scriptPath = FindAcceptanceRunnerScript();
+        if (scriptPath is null)
+        {
+            StatusTextBlock.Text = "未找到验收脚本；请从 MineRailMonitor 源码工作区运行此功能。";
+            return;
+        }
+
+        var repositoryRoot = System.IO.Path.GetDirectoryName(System.IO.Path.GetDirectoryName(scriptPath));
+        if (string.IsNullOrWhiteSpace(repositoryRoot))
+        {
+            StatusTextBlock.Text = "无法定位 MineRailMonitor 工作区。";
+            return;
+        }
+
+        try
+        {
+            var arguments = new[]
+            {
+                "-NoProfile",
+                "-NoExit",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                QuoteProcessArgument(scriptPath),
+                "-Configuration",
+                "Release",
+                "-Scenario",
+                QuoteProcessArgument(choice.Name)
+            };
+            var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = string.Join(" ", arguments),
+                WorkingDirectory = repositoryRoot,
+                UseShellExecute = true,
+                WindowStyle = ProcessWindowStyle.Normal
+            });
+
+            if (process is null)
+            {
+                StatusTextBlock.Text = "无法启动验收窗口。";
+                return;
+            }
+
+            _acceptanceRunnerProcess = process;
+            StatusTextBlock.Text = $"已启动验收场景：{choice.DisplayName}。上位机使用隔离 TEST 车辆和 loopback 配置。";
+        }
+        catch (Exception exception)
+        {
+            StatusTextBlock.Text = $"启动验收场景失败：{exception.Message}";
+        }
+    }
+
+    private static string? FindAcceptanceRunnerScript()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = System.IO.Path.Combine(directory.FullName, "scripts", "run-rfid-acceptance.ps1");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
+    }
+
+    private static string QuoteProcessArgument(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
+
+    private static string GetAcceptanceScenarioDetails(AcceptanceScenarioDefinition scenario) => scenario.Name switch
+    {
+        "U09_11CarMissingFive" => "Vehicle: TEST-11 · Expected: 11 · Detected: 6 · Missing: 5 · 预期脱节报警",
+        "U10_11CarLateCompletion" => "Vehicle: TEST-11 · 前6张后延迟25秒补扫剩余RFID · 预期正常通过",
+        "U11_CustomCountNotFixed11" => "Vehicle: TEST-07 · Expected: 7 · Detected: 7 · 预期正常通过",
+        "U12_Test11Normal" => "Vehicle: TEST-11 · Expected: 11 · Detected: 11 · 预期正常通过",
+        "U13_Test11MissingOne" => "Vehicle: TEST-11 · Expected: 11 · Detected: 10 · Missing: 1 · 预期脱节报警",
+        "U14_UnverifiedNoFallback" => "未知车头 · 无车辆/基站/全局节数回退 · 30秒无新RFID后预期完整性未判定",
+        "UdpU06UnknownHeadFallback" => "未知车头测试：此场景预期回退匹配并显示未配置车辆。",
+        _ => $"验收场景 · {scenario.Trains.Count} 列车计划 · 使用独立 acceptance 数据库与 loopback 通信。"
+    };
+
+    private sealed class AcceptanceScenarioChoice
+    {
+        public AcceptanceScenarioChoice(string name, string displayName)
+        {
+            Name = name;
+            DisplayName = displayName;
+        }
+
+        public string Name { get; }
+
+        public string DisplayName { get; }
+
+        public override string ToString() => DisplayName;
+    }
+
+    private sealed class ProjectVehicleChoice
+    {
+        public ProjectVehicleChoice(VehicleConfig vehicle)
+        {
+            Vehicle = vehicle;
+            var name = SimulatorVehicleScenarioFactory.GetVehicleName(vehicle);
+            DisplayName = $"{name} · {vehicle.Tags.Count}节 · 车头RFID {vehicle.HeadRfid:X4}";
+        }
+
+        public VehicleConfig Vehicle { get; }
+
+        public string DisplayName { get; }
     }
 
     private void LoadStationsFromPersistence()
@@ -280,7 +616,7 @@ public partial class MainWindow : Window
         var context = new SimulatorStationContext(config);
         if (loadDefaultScenario)
         {
-            context.LoadScenario("11节正常通过", Test11);
+            LoadDefaultVehicleScenario(context);
         }
         Stations.Add(context);
     }
@@ -306,7 +642,7 @@ public partial class MainWindow : Window
             ProtocolAddress = address,
             Enabled = true
         });
-        context.LoadScenario("11节正常通过", Test11);
+        LoadDefaultVehicleScenario(context);
         Stations.Add(context);
         RefreshStationView();
         SelectStation(context);
@@ -321,14 +657,26 @@ public partial class MainWindow : Window
 
     private void ApplyAllNormalPreset()
     {
-        SimulatorStationPresets.ApplyAllNormal(Stations);
+        var scenario = CreateSelectedVehicleScenario(SimulatorVehicleScenarioFactory.CreateNormal);
+        if (scenario is null)
+        {
+            return;
+        }
+
+        SimulatorStationPresets.ApplyAllNormal(Stations, scenario);
         UpdateSelectedStationDetails();
         UpdateStationSummaries();
     }
 
     private void ApplyOneNormalFiveOfflinePreset()
     {
-        SimulatorStationPresets.ApplyOneNormalFiveOffline(Stations);
+        var scenario = CreateSelectedVehicleScenario(SimulatorVehicleScenarioFactory.CreateNormal);
+        if (scenario is null)
+        {
+            return;
+        }
+
+        SimulatorStationPresets.ApplyOneNormalFiveOffline(Stations, scenario);
         UpdateSelectedStationDetails();
         UpdateStationSummaries();
         SaveStationConfiguration();
@@ -530,42 +878,124 @@ public partial class MainWindow : Window
         UpdateStationSummaries();
     }
 
-    private void ApplyNormalPreset() => LoadSelectedScenario("11节正常通过", Test11);
+    private void ApplyNormalPreset() => ApplyConfiguredVehicleScenario(SimulatorVehicleScenarioFactory.CreateNormal);
 
-    private void ApplyMissingFivePreset() => LoadSelectedScenario("11节缺5节", Test11.Take(6));
+    private void ApplyMissingFivePreset() => ApplyConfiguredVehicleScenario(SimulatorVehicleScenarioFactory.CreateMissingFive);
 
-    private void ApplyMissingOnePreset() => LoadSelectedScenario("11节缺1节", Test11.Take(10));
+    private void ApplyMissingOnePreset() => ApplyConfiguredVehicleScenario(SimulatorVehicleScenarioFactory.CreateMissingOne);
 
-    private void ApplySupplementPreset() => LoadSelectedScenario(
-        "11节补扫完成",
-        Test11,
-        delayBeforeRfidIndex: 6,
-        delayBeforeRfid: TimeSpan.FromSeconds(25));
+    private void ApplySupplementPreset() => ApplyConfiguredVehicleScenario(SimulatorVehicleScenarioFactory.CreateLateCompletion);
 
-    private void ApplyTest07Preset() => LoadSelectedScenario("7节正常通过", Test07);
-
-    private void ApplyDuplicatePreset() => LoadSelectedScenario("重复RFID", new ushort[]
+    private void ApplyTest07Preset()
     {
-        0x03E9, 0x07D1, 0x07D2, 0x07D3, 0x07D3, 0x07D4, 0x07D5
-    });
+        var sevenSectionVehicle = _projectVehicleChoices.FirstOrDefault(choice => choice.Vehicle.Tags.Count == 7);
+        if (sevenSectionVehicle is null)
+        {
+            ProjectVehicleStatusTextBlock.Text = "当前项目没有7节车辆配置；请选择一个已导入的车辆测试。";
+            return;
+        }
 
-    private void ApplyMultiHeadPreset() => LoadSelectedScenario("多车头11节", new ushort[]
-    {
-        0x03E9, 0x03EA, 0x07D1, 0x07D2, 0x07D3, 0x07D4,
-        0x07D5, 0x07D6, 0x07D7, 0x07D8, 0x07D9
-    });
+        ProjectVehicleComboBox.SelectedItem = sevenSectionVehicle;
+        ApplyConfiguredVehicleScenario(SimulatorVehicleScenarioFactory.CreateNormal);
+    }
 
-    private void ApplyNoHeadPreset() => LoadSelectedScenario("无车头11节", new ushort[]
+    private void ApplyDuplicatePreset()
     {
-        0x07D1, 0x07D2, 0x07D3, 0x07D4, 0x07D5, 0x07D6,
-        0x07D7, 0x07D8, 0x07D9, 0x07DA, 0x07DB
-    });
+        if (!TryGetSelectedVehicle(out var vehicle))
+        {
+            return;
+        }
 
-    private void ApplyFirstNonHeadPreset() => LoadSelectedScenario("首位异常11节", new ushort[]
+        var rfids = SimulatorVehicleScenarioFactory.GetOrderedRfids(vehicle);
+        var repeated = rfids.Take(Math.Min(rfids.Length - 1, 12))
+            .Concat(new[] { rfids[rfids.Length - 1], rfids[rfids.Length - 1] });
+        LoadSelectedScenario($"{SimulatorVehicleScenarioFactory.GetVehicleName(vehicle)} · 重复RFID", repeated);
+    }
+
+    private void ApplyMultiHeadPreset()
     {
-        0x07D1, 0x03E9, 0x07D2, 0x07D3, 0x07D4, 0x07D5,
-        0x07D6, 0x07D7, 0x07D8, 0x07D9, 0x07DA
-    });
+        if (!TryGetSelectedVehicle(out var vehicle))
+        {
+            return;
+        }
+
+        var rfids = SimulatorVehicleScenarioFactory.GetOrderedRfids(vehicle);
+        var secondHead = SimulatorVehicleScenarioFactory.CreateUnconfiguredVehicle(_projectVehicleChoices.Select(choice => choice.Vehicle), 1).Rfids[0];
+        var sequence = new[] { rfids[0], secondHead }.Concat(rfids.Skip(1)).Take(14);
+        LoadSelectedScenario($"{SimulatorVehicleScenarioFactory.GetVehicleName(vehicle)} · 多车头", sequence);
+    }
+
+    private void ApplyNoHeadPreset()
+    {
+        if (!TryGetSelectedVehicle(out var vehicle))
+        {
+            return;
+        }
+
+        var rfids = SimulatorVehicleScenarioFactory.GetOrderedRfids(vehicle);
+        LoadSelectedScenario($"{SimulatorVehicleScenarioFactory.GetVehicleName(vehicle)} · 无车头", rfids.Skip(1));
+    }
+
+    private void ApplyFirstNonHeadPreset()
+    {
+        if (!TryGetSelectedVehicle(out var vehicle))
+        {
+            return;
+        }
+
+        var rfids = SimulatorVehicleScenarioFactory.GetOrderedRfids(vehicle);
+        if (rfids.Length < 2)
+        {
+            ProjectVehicleStatusTextBlock.Text = "所选车辆没有车节标签，不能测试车头顺序异常。";
+            return;
+        }
+
+        var sequence = new[] { rfids[1], rfids[0] }.Concat(rfids.Skip(2));
+        LoadSelectedScenario($"{SimulatorVehicleScenarioFactory.GetVehicleName(vehicle)} · 车头顺序异常", sequence);
+    }
+
+    private void ApplyUnconfiguredVehiclePreset()
+    {
+        var scenario = SimulatorVehicleScenarioFactory.CreateUnconfiguredVehicle(
+            _projectVehicleChoices.Select(choice => choice.Vehicle),
+            _projectExpectedVehicleCount ?? 11);
+        LoadSelectedScenario(scenario.Name, scenario.Rfids);
+    }
+
+    private void ApplyConfiguredVehicleScenario(Func<VehicleConfig, SimulatorVehicleScenario> createScenario)
+    {
+        if (!TryGetSelectedVehicle(out var vehicle))
+        {
+            return;
+        }
+
+        try
+        {
+            var scenario = createScenario(vehicle);
+            LoadSelectedScenario(
+                scenario.Name,
+                scenario.Rfids,
+                scenario.DelayBeforeRfidIndex,
+                scenario.DelayBeforeRfid);
+        }
+        catch (InvalidOperationException exception)
+        {
+            ProjectVehicleStatusTextBlock.Text = exception.Message;
+        }
+    }
+
+    private bool TryGetSelectedVehicle(out VehicleConfig vehicle)
+    {
+        if (ProjectVehicleComboBox.SelectedItem is ProjectVehicleChoice choice)
+        {
+            vehicle = choice.Vehicle;
+            return true;
+        }
+
+        vehicle = null!;
+        ProjectVehicleStatusTextBlock.Text = "请先读取项目 project.json 并选择车辆；未配置车辆测试可直接单独使用。";
+        return false;
+    }
 
     private void LoadSelectedScenario(
         string name,

@@ -3,6 +3,7 @@ using MineRailMonitor.Core.Acceptance;
 using MineRailMonitor.Core.Models;
 using MineRailMonitor.Core.Services;
 using MineRailMonitor.Simulator.Acceptance;
+using MineRailMonitor.Simulator.Models;
 
 namespace MineRailMonitor.Core.Tests;
 
@@ -35,6 +36,26 @@ public sealed class SimulatorVehicleScenarioIntegrationTests
         Assert.Equal("K001", passage.VehicleNo);
         Assert.Equal((ushort)1, passage.VehicleHeadRfid);
         Assert.DoesNotContain(events.Events, item => item.EventType == PassageEventTypes.Alarm);
+    }
+
+    [Fact]
+    public void Simulator_normal_preset_generated_from_project_vehicle_matches_and_completes()
+    {
+        var vehicle = CreateSevenSectionVehicle();
+        var scenario = SimulatorVehicleScenarioFactory.CreateNormal(vehicle);
+        var station = CreateStation(expectedVehicleCount: 6);
+        var store = new InMemoryPassageRecordStore();
+        var coordinator = CreateCoordinator(station, store, new[] { vehicle });
+
+        var session = coordinator.ProcessFrame(CreateFrame(station, Start, scenario.Rfids));
+
+        Assert.NotNull(session);
+        Assert.Equal(new ushort[] { 1, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16 }, scenario.Rfids);
+        Assert.True(session!.VehicleMatchResult!.IsMatched);
+        Assert.Equal("K001", session.VehicleNo);
+        Assert.Equal(7, session.ExpectedVehicleCount);
+        Assert.Equal(PassageLifecycleState.Completed, coordinator.States[station.ProtocolAddress].LifecycleState);
+        Assert.Equal(PassageOutcome.Completed, Assert.Single(store.Records).Outcome);
     }
 
     [Fact]

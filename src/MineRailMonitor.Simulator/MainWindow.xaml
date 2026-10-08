@@ -741,29 +741,70 @@
                                             <TextBlock x:Name="ValidRfidCountTextBlock" Text="0" Foreground="#63E6B0" FontSize="16" FontWeight="SemiBold" />
                                         </StackPanel>
                                     </Grid>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="项目车辆" Foreground="#83AFC1" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                        <ComboBox x:Name="ProjectVehicleComboBox" Grid.Column="1" Height="30" Margin="0,0,8,0"
+                                                  DisplayMemberPath="DisplayName" />
+                                        <Button x:Name="LoadProjectVehiclesButton" Grid.Column="2" Content="读取配置" Padding="10,5"
+                                                ToolTip="读取当前项目的 project.json 车辆配置" />
+                                    </Grid>
+                                    <TextBlock x:Name="ProjectVehicleStatusTextBlock" Text="未加载项目车辆配置；可读取 project.json，或直接测试未配置车辆。"
+                                               Foreground="#83AFC1" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8" />
                                     <Grid Margin="0,8,0,9">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="当前场景" Foreground="#83AFC1" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="CurrentScenarioTextBlock" Grid.Column="1" Text="11节正常通过"
+                                        <TextBlock x:Name="CurrentScenarioTextBlock" Grid.Column="1" Text="未加载车辆"
                                                    Foreground="#F1FAFF" FontWeight="SemiBold" HorizontalAlignment="Right" />
                                     </Grid>
                                     <UniformGrid Columns="3">
-                                        <Button x:Name="NormalPresetButton" Content="11节正常通过" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,4,6" />
-                                        <Button x:Name="ShortPresetButton" Content="11节缺5节" Margin="2,0,2,6" />
-                                        <Button x:Name="TenWagonPresetButton" Content="11节缺1节" Margin="4,0,0,6" />
-                                        <Button x:Name="SupplementPresetButton" Content="11节补扫完成" Margin="0,0,4,6" />
-                                        <Button x:Name="Test07PresetButton" Content="7节正常通过" Margin="2,0,2,6" />
+                                        <Button x:Name="NormalPresetButton" Content="车辆正常通过" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,4,6" />
+                                        <Button x:Name="ShortPresetButton" Content="缺5节报警" Margin="2,0,2,6" />
+                                        <Button x:Name="TenWagonPresetButton" Content="缺1节报警" Margin="4,0,0,6" />
+                                        <Button x:Name="SupplementPresetButton" Content="延迟补扫完成" Margin="0,0,4,6" />
+                                        <Button x:Name="Test07PresetButton" Content="项目7节车辆" Margin="2,0,2,6" />
                                         <Button x:Name="DuplicatePresetButton" Content="重复RFID" Margin="4,0,0,6" />
-                                        <Button x:Name="MultiHeadPresetButton" Content="多车头11节" Margin="0,0,4,6" />
-                                        <Button x:Name="NoHeadPresetButton" Content="无车头11节" Margin="2,0,2,6" />
-                                        <Button x:Name="FirstNonHeadPresetButton" Content="首位异常11节" Margin="4,0,0,6" />
+                                        <Button x:Name="MultiHeadPresetButton" Content="多车头" Margin="0,0,4,6" />
+                                        <Button x:Name="NoHeadPresetButton" Content="无车头" Margin="2,0,2,6" />
+                                        <Button x:Name="FirstNonHeadPresetButton" Content="车头顺序异常" Margin="4,0,0,6" />
                                         <Button x:Name="ScenarioClearButton" Content="清空槽位" Margin="0,0,4,0" />
-                                        <Button Content="" IsEnabled="False" Opacity="0" Margin="2,0,2,0" />
+                                        <Button x:Name="UnconfiguredVehiclePresetButton" Content="未配置车辆" Margin="2,0,2,0" />
                                         <Button Content="" IsEnabled="False" Opacity="0" Margin="4,0,0,0" />
                                     </UniformGrid>
+                                    <Border Background="#071A2B" BorderBrush="#1B4965" BorderThickness="1" CornerRadius="4"
+                                            Padding="8" Margin="0,10,0,0">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Text="端到端验收联调" Style="{StaticResource SectionTitleStyle}" FontSize="13" />
+                                            <Grid Grid.Row="1" Margin="0,6,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <ComboBox x:Name="AcceptanceScenarioComboBox" Height="30" Margin="0,0,8,0"
+                                                          DisplayMemberPath="DisplayName" />
+                                                <Button x:Name="RunAcceptanceScenarioButton" Grid.Column="1" Content="运行验收"
+                                                        Style="{StaticResource PrimaryButtonStyle}" Padding="10,5" />
+                                            </Grid>
+                                            <TextBlock x:Name="AcceptanceScenarioInfoTextBlock" Grid.Row="2"
+                                                       Text="上位机以 --acceptance 加载固定测试车辆；独立窗口先做 Release 构建和 Core/Infrastructure 验证。数据写入 artifacts/acceptance，仅使用 loopback。"
+                                                       Style="{StaticResource InfoTextStyle}" Margin="0,6,0,0" />
+                                            <TextBlock x:Name="AcceptanceScenarioDetailTextBlock" Grid.Row="3"
+                                                       Style="{StaticResource InfoTextStyle}" Foreground="#9CEBFF" Margin="0,4,0,0" />
+                                        </Grid>
+                                    </Border>
                                     <TextBlock Text="场景播放" Style="{StaticResource SectionTitleStyle}" Margin="0,12,0,7" />
                                     <Grid>
                                         <Grid.ColumnDefinitions>

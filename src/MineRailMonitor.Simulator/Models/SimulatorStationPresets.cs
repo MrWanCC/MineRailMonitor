@@ -1,11 +1,7 @@
-using MineRailMonitor.Core.Acceptance;
-
 namespace MineRailMonitor.Simulator.Models;
 
 public static class SimulatorStationPresets
 {
-    private static readonly IReadOnlyList<ushort> Normal11 = AcceptanceVehicleCatalog.Test11Rfids;
-
     public static IReadOnlyList<SimulatorStationConfig> CreateDefaultSix()
     {
         var ports = new[] { 62001, 62003, 62004, 62005, 62006, 62007 };
@@ -49,24 +45,32 @@ public static class SimulatorStationPresets
         }
     }
 
-    public static void ApplyAllNormal(IEnumerable<SimulatorStationContext> stations)
+    public static void ApplyAllNormal(IEnumerable<SimulatorStationContext> stations, SimulatorVehicleScenario scenario)
     {
         if (stations is null)
         {
             throw new ArgumentNullException(nameof(stations));
+        }
+        if (scenario is null)
+        {
+            throw new ArgumentNullException(nameof(scenario));
         }
 
         foreach (var station in stations)
         {
-            station.LoadScenario("11节正常通过", Normal11);
+            station.LoadScenario(scenario.Name, scenario.Rfids, scenario.DelayBeforeRfidIndex, scenario.DelayBeforeRfid);
         }
     }
 
-    public static void ApplyOneNormalFiveOffline(IEnumerable<SimulatorStationContext> stations)
+    public static void ApplyOneNormalFiveOffline(IEnumerable<SimulatorStationContext> stations, SimulatorVehicleScenario scenario)
     {
         if (stations is null)
         {
             throw new ArgumentNullException(nameof(stations));
+        }
+        if (scenario is null)
+        {
+            throw new ArgumentNullException(nameof(scenario));
         }
 
         var stationList = stations.ToArray();
@@ -79,7 +83,7 @@ public static class SimulatorStationPresets
         if (stationList.Length > 0)
         {
             stationList[0].Config.Enabled = true;
-            stationList[0].LoadScenario("11节正常通过", Normal11);
+            stationList[0].LoadScenario(scenario.Name, scenario.Rfids, scenario.DelayBeforeRfidIndex, scenario.DelayBeforeRfid);
         }
     }
 

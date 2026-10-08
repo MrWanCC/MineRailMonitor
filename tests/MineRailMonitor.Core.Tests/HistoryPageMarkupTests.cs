@@ -105,6 +105,24 @@ public sealed class HistoryPageMarkupTests
     }
 
     [Fact]
+    public void Date_picker_calendar_parts_override_the_global_form_button_theme()
+    {
+        var styles = File.ReadAllText(Locate("src", "MineRailMonitor", "Styles", "Cards.xaml"));
+
+        Assert.Contains("HmiCalendarNavigationButtonStyle", styles, StringComparison.Ordinal);
+        Assert.Contains("HmiCalendarDayButtonStyle", styles, StringComparison.Ordinal);
+        Assert.Contains("HmiCalendarButtonStyle", styles, StringComparison.Ordinal);
+        Assert.Contains("HmiCalendarItemStyle", styles, StringComparison.Ordinal);
+        Assert.Contains("Property=\"CalendarDayButtonStyle\" Value=\"{StaticResource HmiCalendarDayButtonStyle}\"", styles, StringComparison.Ordinal);
+        Assert.Contains("Property=\"CalendarButtonStyle\" Value=\"{StaticResource HmiCalendarButtonStyle}\"", styles, StringComparison.Ordinal);
+        Assert.Contains("Property=\"CalendarItemStyle\" Value=\"{StaticResource HmiCalendarItemStyle}\"", styles, StringComparison.Ordinal);
+        Assert.Contains("<Style TargetType=\"{x:Type Button}\" BasedOn=\"{StaticResource HmiCalendarNavigationButtonStyle}\" />",
+            styles, StringComparison.Ordinal);
+        Assert.Contains("Background=\"#041B31\"", styles, StringComparison.Ordinal);
+        Assert.Contains("Property=\"Foreground\" Value=\"{StaticResource TextPrimaryBrush}\"", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Date_picker_defers_opening_until_the_click_event_has_finished()
     {
         var historyCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "HistoryPage.xaml.cs"));

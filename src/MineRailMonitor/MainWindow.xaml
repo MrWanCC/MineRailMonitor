@@ -231,7 +231,7 @@
                 </Grid>
             </Border>
 
-            <ContentControl x:Name="PageContent" Grid.Column="1" />
+            <ContentControl x:Name="PageContent" Grid.Column="1" FocusVisualStyle="{x:Null}" />
         </Grid>
     </Grid>
 </Window>

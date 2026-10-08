@@ -198,6 +198,155 @@
         </Setter>
     </Style>
 
+    <Style x:Key="HmiCalendarNavigationButtonStyle" TargetType="{x:Type Button}">
+        <Setter Property="MinWidth" Value="28" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="4,0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Border x:Name="NavigationButtonBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="2">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          TextElement.Foreground="{TemplateBinding Foreground}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="NavigationButtonBorder" Property="Background" Value="#0B314C" />
+                            <Setter TargetName="NavigationButtonBorder" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="NavigationButtonBorder" Property="Background" Value="#15506B" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="NavigationButtonBorder" Property="Opacity" Value="0.4" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="HmiCalendarDayButtonStyle" TargetType="{x:Type CalendarDayButton}">
+        <Setter Property="MinWidth" Value="25" />
+        <Setter Property="MinHeight" Value="25" />
+        <Setter Property="Margin" Value="1" />
+        <Setter Property="Padding" Value="1" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type CalendarDayButton}">
+                    <Border x:Name="DayButtonBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="2">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          TextElement.Foreground="{TemplateBinding Foreground}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsInactive" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsToday" Value="True">
+                            <Setter TargetName="DayButtonBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="DayButtonBorder" Property="Background" Value="#0B314C" />
+                            <Setter TargetName="DayButtonBorder" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="DayButtonBorder" Property="Background" Value="#087DAF" />
+                            <Setter TargetName="DayButtonBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="HmiCalendarButtonStyle" TargetType="{x:Type CalendarButton}">
+        <Setter Property="MinWidth" Value="30" />
+        <Setter Property="MinHeight" Value="26" />
+        <Setter Property="Margin" Value="1" />
+        <Setter Property="Padding" Value="3,1" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type CalendarButton}">
+                    <Border x:Name="CalendarButtonBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="2">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          TextElement.Foreground="{TemplateBinding Foreground}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="CalendarButtonBorder" Property="Background" Value="#0B314C" />
+                            <Setter TargetName="CalendarButtonBorder" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="CalendarButtonBorder" Property="Background" Value="#15506B" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="HmiCalendarItemStyle" TargetType="{x:Type CalendarItem}">
+        <Setter Property="Background" Value="#041B31" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Style.Resources>
+            <Style TargetType="{x:Type Button}" BasedOn="{StaticResource HmiCalendarNavigationButtonStyle}" />
+        </Style.Resources>
+    </Style>
+
     <Style x:Key="HmiCalendarStyle" TargetType="{x:Type Calendar}">
         <Setter Property="Background" Value="#041B31" />
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
@@ -206,12 +355,17 @@
         <Setter Property="Padding" Value="6" />
         <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
         <Setter Property="FontSize" Value="12" />
+        <Setter Property="CalendarDayButtonStyle" Value="{StaticResource HmiCalendarDayButtonStyle}" />
+        <Setter Property="CalendarButtonStyle" Value="{StaticResource HmiCalendarButtonStyle}" />
+        <Setter Property="CalendarItemStyle" Value="{StaticResource HmiCalendarItemStyle}" />
     </Style>
 
     <Style x:Key="HmiDatePickerTextBoxStyle" TargetType="{x:Type DatePickerTextBox}">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="SelectionBrush" Value="Transparent" />
+        <Setter Property="SelectionTextBrush" Value="{StaticResource TextPrimaryBrush}" />
         <Setter Property="Padding" Value="8,0,38,0" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="HorizontalContentAlignment" Value="Left" />

@@ -116,7 +116,7 @@ public sealed class PassageEventDisplayFormatterTests
             OccurredAt = new DateTimeOffset(2026, 10, 3, 10, 0, 2, TimeSpan.FromHours(8)),
             StationId = "RFID-560-01",
             DetectedCount = 3,
-            Reason = "车辆未匹配，且未配置完整性判断回退节数"
+            Reason = "车头未匹配车辆配置，完整性未判定"
         };
 
         var item = PassageEventDisplayFormatter.Format(passageEvent);
@@ -131,13 +131,13 @@ public sealed class PassageEventDisplayFormatterTests
         Assert.NotNull(details);
         Assert.Equal("RFID-560-01", details!.StationIdText);
         Assert.Equal("完整性未判定", details.CurrentStatusText);
-        Assert.Equal("车辆未匹配，且未配置完整性判断回退节数", details.OutcomeReasonText);
+        Assert.Equal("车头未匹配车辆配置，完整性未判定", details.OutcomeReasonText);
         Assert.Equal("3节", details.ActualCountText);
         Assert.Equal(new[]
         {
             "已识别: 3个唯一RFID",
             "结果: 完整性未判定",
-            "原因: 车辆未匹配，且未配置完整性判断回退节数"
+            "原因: 车头未匹配车辆配置，完整性未判定"
         }, details.Timeline[0].Details);
     }
 

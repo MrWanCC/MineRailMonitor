@@ -56,7 +56,6 @@ public static class RfidStationConfigurationChangeRules
             previous.YardId?.Trim(),
             candidate.YardId?.Trim(),
             StringComparison.OrdinalIgnoreCase) &&
-        previous.ExpectedVehicleCount == candidate.ExpectedVehicleCount &&
         previous.Enabled == candidate.Enabled &&
         previous.Mode == candidate.Mode &&
         previous.CrcHigh == candidate.CrcHigh &&

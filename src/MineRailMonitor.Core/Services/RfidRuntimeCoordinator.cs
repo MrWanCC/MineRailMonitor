@@ -59,17 +59,6 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
         {
             throw new ArgumentException(string.Join(Environment.NewLine, duplicateCommunicationKeys), nameof(stations));
         }
-        var invalidVehicleCountStations = enabledStations
-            .Where(station => station.ExpectedVehicleCount is < 1 or > 14)
-            .Select(station => station.StationId)
-            .ToArray();
-        if (invalidVehicleCountStations.Length > 0)
-        {
-            throw new ArgumentException(
-                $"Expected vehicle count must be between 1 and 14 for: {string.Join(", ", invalidVehicleCountStations)}.",
-                nameof(stations));
-        }
-
         _bindings = enabledStations
             .Select((station, index) => new RfidStationBinding(
                 station,
@@ -78,7 +67,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
                     station.StationId,
                     station.Name,
                     station.ProtocolAddress,
-                    station.ExpectedVehicleCount ?? _defaults.ExpectedVehicleCount,
+                    _defaults.ExpectedVehicleCount,
                     _defaults.EmptyRfidValue)))
             .ToArray();
         _vehicleMatchProject = new ProjectConfig
@@ -829,7 +818,7 @@ public sealed class RfidRuntimeCoordinator : IRfidPollCommandProvider, IRfidEndp
                     state,
                     session,
                     completedAt,
-                    reason: "车辆未匹配，且未配置完整性判断回退节数"));
+                    reason: "车头未匹配车辆配置，完整性未判定"));
             }
         }
 

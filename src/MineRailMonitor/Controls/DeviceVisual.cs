@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
+using System.Windows.Controls.Primitives;
 using MineRailMonitor.Converters;
 using MineRailMonitor.Core.Models;
 
@@ -15,17 +16,20 @@ public sealed class DeviceVisual : Button
 {
     private const double RfidMarkerAnchorX = 13;
     private const double RfidMarkerAnchorY = 18;
+    private readonly Canvas _marker;
     private readonly Ellipse _stateIndicator;
     private readonly Ellipse _stateRing;
     private readonly Border _labelBorder;
     private readonly TextBlock _labelText;
     private readonly DeviceStateToBrushConverter _brushConverter = new();
+    private readonly RfidStationConfig? _stationConfiguration;
     private bool _isAnnotationEditMode;
 
-    public DeviceVisual(DeviceConfig device, string? displayName = null)
+    public DeviceVisual(DeviceConfig device, string? displayName = null, RfidStationConfig? stationConfiguration = null)
     {
         Device = device;
         DisplayName = string.IsNullOrWhiteSpace(displayName) ? device.Name : displayName!;
+        _stationConfiguration = stationConfiguration;
         Width = 112;
         Height = 36;
         Background = Brushes.Transparent;
@@ -35,22 +39,27 @@ public sealed class DeviceVisual : Button
         Cursor = Cursors.Hand;
         FocusVisualStyle = null;
         Template = CreateTransparentButtonTemplate();
-        ToolTip = $"{DisplayName}  CAD ({device.CadX:0.####}, {device.CadY:0.####})";
+        UpdateToolTip();
 
         var content = new Grid
         {
             Background = Brushes.Transparent,
-            VerticalAlignment = VerticalAlignment.Center
+            Width = Width,
+            Height = Height,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
         };
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        var marker = new Grid
+        _marker = new Canvas
         {
             Width = 26,
             Height = 26,
             HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Center
+            VerticalAlignment = VerticalAlignment.Center,
+            UseLayoutRounding = false,
+            SnapsToDevicePixels = false
         };
         _stateRing = new Ellipse
         {
@@ -58,19 +67,23 @@ public sealed class DeviceVisual : Button
             Height = 24,
             Fill = GetBrush("DeviceMarkerBackgroundBrush", Brushes.Transparent),
             StrokeThickness = 2,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
+            UseLayoutRounding = false,
+            SnapsToDevicePixels = false
         };
         _stateIndicator = new Ellipse
         {
             Width = 9,
             Height = 9,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
+            UseLayoutRounding = false,
+            SnapsToDevicePixels = false
         };
-        marker.Children.Add(_stateRing);
-        marker.Children.Add(_stateIndicator);
-        content.Children.Add(marker);
+        Canvas.SetLeft(_stateRing, (26 - 24) / 2d);
+        Canvas.SetTop(_stateRing, (26 - 24) / 2d);
+        Canvas.SetLeft(_stateIndicator, (26 - 9) / 2d);
+        Canvas.SetTop(_stateIndicator, (26 - 9) / 2d);
+        _marker.Children.Add(_stateRing);
+        _marker.Children.Add(_stateIndicator);
+        content.Children.Add(_marker);
 
         _labelBorder = new Border
         {
@@ -95,7 +108,6 @@ public sealed class DeviceVisual : Button
         content.Children.Add(_labelBorder);
         Content = content;
 
-        SetViewportScale(1);
         SetStatus(DeviceStatus.Normal);
     }
 
@@ -115,8 +127,212 @@ public sealed class DeviceVisual : Button
     public void SetDisplayName(string displayName)
     {
         DisplayName = string.IsNullOrWhiteSpace(displayName) ? Device.Name : displayName;
-        ToolTip = $"{DisplayName}  CAD ({Device.CadX:0.####}, {Device.CadY:0.####})";
+        UpdateToolTip();
         _labelText.Text = DisplayName;
+    }
+
+    private void UpdateToolTip()
+    {
+        var hasEndpoint = false;
+        var ipText = "未配置";
+        var portText = "—";
+        if (_stationConfiguration is not null && _stationConfiguration.TryResolveEndpoint(out var resolvedEndpoint))
+        {
+            hasEndpoint = true;
+            ipText = resolvedEndpoint.Address.ToString();
+            portText = resolvedEndpoint.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        var statusBrush = hasEndpoint && _stationConfiguration is { Enabled: true }
+            ? GetBrush("SuccessBrush", Brushes.LimeGreen)
+            : GetBrush("WarningBrush", Brushes.Gold);
+        var stationId = string.IsNullOrWhiteSpace(Device.RfidStationId)
+            ? "未绑定RFID基站"
+            : Device.RfidStationId!;
+        var stationName = _stationConfiguration?.Name;
+        if (string.IsNullOrWhiteSpace(stationName))
+        {
+            stationName = null;
+        }
+
+        var cardBackground = GetBrush("CardBackgroundBrush", new SolidColorBrush(Color.FromRgb(4, 27, 49)));
+        var accentBrush = GetBrush("HeaderAccentBrush", Brushes.DeepSkyBlue);
+        const double calloutWidth = 360;
+        const double calloutHeight = 96;
+        const double calloutPointerY = calloutHeight / 2;
+        var callout = new Grid
+        {
+            Width = calloutWidth,
+            Height = calloutHeight
+        };
+        var outline = new Path
+        {
+            Data = Geometry.Parse(
+                "M 36,1 H 350 Q 359,1 359,10 V 86 Q 359,95 350,95 H 36 Q 26,95 26,85 V 57 L 13,48 L 26,39 V 11 Q 26,1 36,1 Z"),
+            Fill = cardBackground,
+            Stroke = accentBrush,
+            StrokeThickness = 1.25,
+            Stretch = Stretch.Fill,
+            Effect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 10,
+                ShadowDepth = 1,
+                Opacity = 0.32
+            }
+        };
+        callout.Children.Add(outline);
+
+        var content = new Grid
+        {
+            Margin = new Thickness(36, 8, 12, 8)
+        };
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1) });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var heading = new TextBlock
+        {
+            Text = stationName is null ? DisplayName : $"{stationName}  ·  {DisplayName}",
+            Foreground = GetBrush("TextPrimaryBrush", Brushes.White),
+            FontSize = 16,
+            FontWeight = FontWeights.Bold,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        content.Children.Add(heading);
+
+        var identityChip = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(36, 0, 196, 224)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(74, 0, 196, 224)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(6, 2, 6, 2),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0)
+        };
+        var identityContent = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        identityContent.Children.Add(new Ellipse
+        {
+            Width = 5,
+            Height = 5,
+            Fill = statusBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 5, 0)
+        });
+        var identity = new TextBlock
+        {
+            Text = stationId,
+            Foreground = accentBrush,
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 10,
+            FontWeight = FontWeights.Medium,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        identityContent.Children.Add(identity);
+        identityChip.Child = identityContent;
+        Grid.SetColumn(identityChip, 1);
+        content.Children.Add(identityChip);
+
+        var divider = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(75, 64, 171, 199)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Height = 1
+        };
+        Grid.SetRow(divider, 1);
+        Grid.SetColumnSpan(divider, 2);
+        content.Children.Add(divider);
+
+        var address = new Grid
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 4, 0, 0)
+        };
+        address.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        address.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
+        address.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        address.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var addressLabelBrush = GetBrush("MutedTextBrush", Brushes.LightSteelBlue);
+        var addressValueBrush = hasEndpoint ? accentBrush : GetBrush("WarningBrush", Brushes.Gold);
+        var ipLabel = new TextBlock
+        {
+            Text = hasEndpoint ? "IP 地址" : "通信地址",
+            Foreground = addressLabelBrush,
+            FontSize = 10,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        address.Children.Add(ipLabel);
+        if (hasEndpoint)
+        {
+            var portLabel = new TextBlock
+            {
+                Text = "端口",
+                Foreground = addressLabelBrush,
+                FontSize = 10,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(portLabel, 1);
+            address.Children.Add(portLabel);
+        }
+
+        var addressText = new TextBlock
+        {
+            Text = hasEndpoint ? ipText : "未配置",
+            Foreground = addressValueBrush,
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 15,
+            FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        Grid.SetRow(addressText, 1);
+        address.Children.Add(addressText);
+        if (hasEndpoint)
+        {
+            var portTextBlock = new TextBlock
+            {
+                Text = portText,
+                Foreground = addressValueBrush,
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 15,
+                FontWeight = FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(portTextBlock, 1);
+            Grid.SetRow(portTextBlock, 1);
+            address.Children.Add(portTextBlock);
+        }
+
+        Grid.SetRow(address, 2);
+        Grid.SetColumnSpan(address, 2);
+        content.Children.Add(address);
+        callout.Children.Add(content);
+
+        var toolTip = new ToolTip
+        {
+            Content = callout,
+            Background = Brushes.Transparent,
+            BorderBrush = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            HasDropShadow = false,
+            Placement = PlacementMode.Right,
+            PlacementTarget = this,
+            PlacementRectangle = new Rect(RfidMarkerAnchorX, RfidMarkerAnchorY, 0, 0),
+            HorizontalOffset = 0,
+            VerticalOffset = -calloutPointerY
+        };
+        ToolTip = toolTip;
+        ToolTipService.SetInitialShowDelay(this, 250);
+        ToolTipService.SetShowDuration(this, 10000);
     }
 
     public void SetStatus(DeviceStatus status)
@@ -212,17 +428,6 @@ public sealed class DeviceVisual : Button
         };
         _labelText.Text = $"{DisplayName}（{statusText}）";
         AutomationProperties.SetHelpText(this, $"{DisplayName} {statusText}");
-    }
-
-    public void SetViewportScale(double scale)
-    {
-        if (scale <= 0)
-        {
-            return;
-        }
-
-        RenderTransformOrigin = new Point(RfidMarkerAnchorX / Width, RfidMarkerAnchorY / Height);
-        RenderTransform = new ScaleTransform(1 / scale, 1 / scale);
     }
 
     public void SetAnnotationEditMode(bool enabled)

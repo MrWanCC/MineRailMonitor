@@ -49,7 +49,7 @@ public sealed class VehicleMatchRuntimeIntegrationTests
     }
 
     [Fact]
-    public void Uses_station_count_when_head_tag_does_not_match_a_vehicle()
+    public void Ignores_station_count_when_head_tag_does_not_match_a_vehicle()
     {
         var station = CreateStation(expectedVehicleCount: 6);
         var vehicle = CreateVehicle(headRfid: 1, name: "矿车001", sectionCount: 4);
@@ -60,11 +60,11 @@ public sealed class VehicleMatchRuntimeIntegrationTests
         var session = coordinator.ProcessFrame(CreateFrame(station, 2, 17, 18));
 
         Assert.NotNull(session);
-        Assert.Equal(6, session!.ExpectedVehicleCount);
+        Assert.Equal(11, session!.ExpectedVehicleCount);
         Assert.NotNull(publishedMatch);
         Assert.False(publishedMatch!.IsMatched);
-        Assert.Equal(6, publishedMatch.ExpectedCount);
-        Assert.Equal(VehicleMatchSource.StationConfiguration, publishedMatch.Source);
+        Assert.Equal(11, publishedMatch.ExpectedCount);
+        Assert.Equal(VehicleMatchSource.GlobalConfiguration, publishedMatch.Source);
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public sealed class VehicleMatchRuntimeIntegrationTests
         Assert.Equal(station.StationId, unverifiedEvent.StationId);
         Assert.Null(unverifiedEvent.ExpectedCount);
         Assert.Equal(3, unverifiedEvent.DetectedCount);
-        Assert.Equal("车辆未匹配，且未配置完整性判断回退节数", unverifiedEvent.Reason);
+        Assert.Equal("车头未匹配车辆配置，完整性未判定", unverifiedEvent.Reason);
         Assert.DoesNotContain(store.Query(new PassageQuery { IncludeWarnings = true }).Items, item => item.PassageId == passage.PassageId);
     }
 

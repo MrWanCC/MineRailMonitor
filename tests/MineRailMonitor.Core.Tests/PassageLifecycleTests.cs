@@ -194,7 +194,7 @@ public sealed class PassageLifecycleTests
     }
 
     [Fact]
-    public void Stations_use_independent_expected_vehicle_counts_with_global_fallback()
+    public void Stations_ignore_station_expected_count_and_use_global_fallback()
     {
         var store = new InMemoryPassageRecordStore();
         var stations = new[]
@@ -231,9 +231,10 @@ public sealed class PassageLifecycleTests
         Assert.Equal(11, coordinator.States[0x01].ExpectedVehicleCount);
         Assert.Equal(6, coordinator.States[0x01].DetectedVehicleCount);
         Assert.Equal(PassageLifecycleState.Recognizing, coordinator.States[0x01].LifecycleState);
-        Assert.Equal(6, coordinator.States[0x02].ExpectedVehicleCount);
-        Assert.Equal(PassageLifecycleState.Completed, coordinator.States[0x02].LifecycleState);
-        Assert.Equal(6, Assert.Single(store.Records).ExpectedVehicleCount);
+        Assert.Equal(11, coordinator.States[0x02].ExpectedVehicleCount);
+        Assert.Equal(6, coordinator.States[0x02].DetectedVehicleCount);
+        Assert.Equal(PassageLifecycleState.Recognizing, coordinator.States[0x02].LifecycleState);
+        Assert.Empty(store.Records);
     }
 
     [Fact]

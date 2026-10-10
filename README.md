@@ -53,7 +53,13 @@ MineRailMonitor.sln
 ├─ src/MineRailMonitor.Simulator/        人工 Simulator 与自动场景执行器
 ├─ src/MineRailMonitor/                  WPF 上位机
 ├─ tests/                                Core / Infrastructure 测试
-├─ scripts/                              自动验收脚本
+├─ scripts/
+│  ├─ 打包工具/                          一键打包、构建与校验脚本
+│  ├─ 验收工具/                          Loopback 自动验收脚本与场景清单
+│  └─ 打包结果/
+│     ├─ 正式包/                         正式部署 ZIP 与解压目录
+│     ├─ 测试包/                         测试部署 ZIP 与解压目录
+│     └─ 暂存/                           每次打包的临时 staging
 └─ Projects/Example/                     脱敏示例配置
 ```
 
@@ -105,7 +111,7 @@ dotnet run --project src/MineRailMonitor.Simulator/MineRailMonitor.Simulator.csp
 由 PowerShell 统一调度上位机和 Simulator：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-rfid-acceptance.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\验收工具\run-rfid-acceptance.ps1
 ```
 
 自动验收包含：
@@ -121,13 +127,13 @@ MultipleHeads
 NoHead
 ```
 
-Acceptance 模式强制使用 `127.0.0.1` 和测试 UDP 端口，不读取或访问正式 RFID 基站地址。每次运行使用独立的 SQLite、Runtime 快照、Simulator 日志和结果目录；生成物位于 `artifacts/`，不会进入 Git。
+Acceptance 模式强制使用 `127.0.0.1` 和测试 UDP 端口，不读取或访问正式 RFID 基站地址。每次运行使用独立的 SQLite、Runtime 快照、Simulator 日志和结果目录；验收生成物位于 `artifacts/`。一键打包输出位于 `scripts/打包结果/正式包/` 或 `scripts/打包结果/测试包/`，不会进入 Git。
 
 可选参数示例：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-rfid-acceptance.ps1 -Scenario Normal11,SparseSlots
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-rfid-acceptance.ps1 -Configuration Debug -KeepSuccessfulArtifacts
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\验收工具\run-rfid-acceptance.ps1 -Scenario Normal11,SparseSlots
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\验收工具\run-rfid-acceptance.ps1 -Configuration Debug -KeepSuccessfulArtifacts
 ```
 
 ## 管理员模式

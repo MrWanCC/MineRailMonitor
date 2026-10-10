@@ -20,6 +20,7 @@
         <GradientStop Color="#0A2236" Offset="0.48" />
         <GradientStop Color="#061725" Offset="1" />
     </LinearGradientBrush>
+    <SolidColorBrush x:Key="MapImageBackdropBrush" Color="#0D1012" />
     <SolidColorBrush x:Key="UnconnectedBackgroundBrush" Color="#172A32" />
     <SolidColorBrush x:Key="UnconnectedBorderBrush" Color="#2A4E4A" />
     <SolidColorBrush x:Key="TextBrush" Color="#EAF6FF" />

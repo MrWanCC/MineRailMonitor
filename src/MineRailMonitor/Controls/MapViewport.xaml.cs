@@ -82,6 +82,12 @@ public partial class MapViewport : UserControl
         _station = station;
         BackgroundImage.Source = imageSource;
         EmptyImageNotice.Visibility = imageSource is null ? Visibility.Visible : Visibility.Collapsed;
+        var backdropBrush = imageSource is null
+            ? TryFindResource("MapBackdropBrush") as Brush
+            : CreateMapBackdropBrush(imageSource);
+        backdropBrush ??= imageSource is null ? Brushes.DarkSlateGray : Brushes.Black;
+        ViewportRoot.Background = backdropBrush;
+        MapWorld.Background = backdropBrush;
 
         if (imageSource is BitmapSource bitmapSource && bitmapSource.PixelWidth > 0 && bitmapSource.PixelHeight > 0)
         {
@@ -104,6 +110,64 @@ public partial class MapViewport : UserControl
         ClearCalibrationPreview();
         _hasView = false;
         ResetView();
+    }
+
+    private Brush? CreateMapBackdropBrush(ImageSource imageSource)
+    {
+        var fallback = TryFindResource("MapImageBackdropBrush") as Brush;
+        if (imageSource is not BitmapSource bitmapSource || bitmapSource.PixelWidth <= 0 || bitmapSource.PixelHeight <= 0)
+        {
+            return fallback;
+        }
+
+        var converted = new FormatConvertedBitmap(bitmapSource, PixelFormats.Bgra32, null, 0);
+        const int sampleSide = 4;
+        var side = Math.Min(sampleSide, Math.Min(converted.PixelWidth, converted.PixelHeight));
+        var stride = side * 4;
+        var pixels = new byte[stride * side];
+        var right = converted.PixelWidth - side;
+        var bottom = converted.PixelHeight - side;
+        var corners = new[]
+        {
+            new Int32Rect(0, 0, side, side),
+            new Int32Rect(right, 0, side, side),
+            new Int32Rect(0, bottom, side, side),
+            new Int32Rect(right, bottom, side, side)
+        };
+
+        long red = 0;
+        long green = 0;
+        long blue = 0;
+        var sampledPixelCount = 0;
+        foreach (var corner in corners)
+        {
+            converted.CopyPixels(corner, pixels, stride, 0);
+            for (var offset = 0; offset < pixels.Length; offset += 4)
+            {
+                if (pixels[offset + 3] < 240)
+                {
+                    continue;
+                }
+
+                blue += pixels[offset];
+                green += pixels[offset + 1];
+                red += pixels[offset + 2];
+                sampledPixelCount++;
+            }
+        }
+
+        if (sampledPixelCount == 0)
+        {
+            return fallback;
+        }
+
+        var color = Color.FromRgb(
+            (byte)(red / sampledPixelCount),
+            (byte)(green / sampledPixelCount),
+            (byte)(blue / sampledPixelCount));
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
     }
 
     public void SetRfidStations(IEnumerable<RfidStationConfig> stations) =>
@@ -443,15 +507,13 @@ public partial class MapViewport : UserControl
 
     private void ApplyTransform()
     {
-        // MapWorld owns geographic position. Layer inverse scales below are visual-size
-        // compensation only; they must never be used to calculate map-local coordinates.
+        // Keep map geometry and point markers in one coordinate space; only text overlays
+        // that need a fixed screen size compensate for the viewport zoom.
         MapScaleTransform.ScaleX = _scale;
         MapScaleTransform.ScaleY = _scale;
         MapTranslateTransform.X = _offsetX;
         MapTranslateTransform.Y = _offsetY;
         MapLabelLayerControl.SetViewportScale(_scale);
-        MapPointLayerControl.SetViewportScale(_scale);
-        DeviceLayerControl.SetViewportScale(_scale);
         if (_calibrationPreview is not null)
         {
             _calibrationPreview.RenderTransform = new ScaleTransform(1 / _scale, 1 / _scale);

@@ -11,6 +11,7 @@ publish/
 # Runtime data, diagnostics, and generated acceptance output
 artifacts/
 **/artifacts/
+scripts/打包结果/
 Data/
 **/Data/
 Logs/

@@ -14,7 +14,7 @@
     <Prefer32Bit>false</Prefer32Bit>
     <UseWPF>true</UseWPF>
     <EnableDefaultApplicationDefinition>true</EnableDefaultApplicationDefinition>
-    <ApplicationIcon />
+    <ApplicationIcon>Assets\Icons\app-logo.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\Icons\app-logo.png" />
+    <Resource Include="Assets\Icons\app-logo.ico" />
     <Resource Include="Assets\Icons\rfid-station.png" />
   </ItemGroup>
 

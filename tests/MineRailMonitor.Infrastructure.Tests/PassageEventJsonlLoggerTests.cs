@@ -69,7 +69,7 @@ public sealed class PassageEventJsonlLoggerTests
                 OccurredAt = occurredAt,
                 StationId = "RFID-560-01",
                 DetectedCount = 3,
-                Reason = "车辆未匹配，且未配置完整性判断回退节数"
+                Reason = "车头未匹配车辆配置，完整性未判定"
             });
 
             var path = Path.Combine(logsDirectory, "Passage", "passage-event-20261003.jsonl");
@@ -79,7 +79,7 @@ public sealed class PassageEventJsonlLoggerTests
             Assert.Equal("RFID-560-01", document.RootElement.GetProperty("StationId").GetString());
             Assert.True(document.RootElement.GetProperty("ExpectedCount").ValueKind == JsonValueKind.Null);
             Assert.Equal(3, document.RootElement.GetProperty("DetectedCount").GetInt32());
-            Assert.Equal("车辆未匹配，且未配置完整性判断回退节数", document.RootElement.GetProperty("Reason").GetString());
+            Assert.Equal("车头未匹配车辆配置，完整性未判定", document.RootElement.GetProperty("Reason").GetString());
         }
         finally
         {

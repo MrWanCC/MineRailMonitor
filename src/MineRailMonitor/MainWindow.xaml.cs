@@ -642,7 +642,7 @@ public partial class MainWindow : Window
         _yardRfidStationResolver = new YardRfidStationResolver(_loadedProject.Stations, _loadedProject.RfidStations);
         _runLogPage.SetRfidStations(_loadedProject.RfidStations);
         _statisticsPage?.SetRfidStations(_loadedProject.RfidStations);
-        ApplyCurrentYardDisplayScope();
+        ApplyCurrentYardDisplayScope(updateSettingsPage: false);
         _communicationPage.ConfigureStations(_loadedProject.RfidStations, SendCommunicationTestAsync);
         _historyPage?.SetRfidStations(_loadedProject.RfidStations);
         _alarmHistoryPage?.SetRfidStations(_loadedProject.RfidStations);
@@ -2072,7 +2072,7 @@ public partial class MainWindow : Window
         UpdateRfidRuntimeUi();
     }
 
-    private void ApplyCurrentYardDisplayScope()
+    private void ApplyCurrentYardDisplayScope(bool updateSettingsPage = true)
     {
         if (_monitorPage is null || _yardRfidStationResolver is null)
         {
@@ -2092,7 +2092,10 @@ public partial class MainWindow : Window
             FilterCurrentYardPollingStatuses(GetAllPollingStatuses()));
         var stationIds = scope.IsGlobal ? null : scope.RfidStationIds;
         var selectedYardId = scope.IsGlobal ? null : scope.YardId;
-        _settingsPage?.SetSelectedYard(selectedYardId);
+        if (updateSettingsPage)
+        {
+            _settingsPage?.SetSelectedYard(selectedYardId);
+        }
         _communicationPage.SetDisplayScope(stationIds, selectedYardId);
         _runLogPage.SetDisplayScope(stationIds, selectedYardId);
         _historyPage?.SetDisplayScope(stationIds, selectedYardId);

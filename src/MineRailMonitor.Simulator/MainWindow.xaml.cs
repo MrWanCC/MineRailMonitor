@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private readonly List<Ellipse> _rfidIndicators = new();
     private readonly ObservableCollection<SimulatorStationContext> _stations = new();
     private readonly ObservableCollection<ProjectVehicleChoice> _projectVehicleChoices = new();
+    private int? _projectExpectedVehicleCount;
     private readonly DispatcherTimer _slotHighlightTimer;
     private readonly DispatcherTimer _scenarioPlaybackTimer;
     private readonly string _stationPersistencePath;
@@ -37,7 +38,6 @@ public partial class MainWindow : Window
     private SimulatorStationContext? _selectedStation;
     private SimulatorStationContext? _stationDeleteTarget;
     private string _selectedYardId = "560";
-    private int? _projectExpectedVehicleCount;
     private bool _loadingStation;
     private bool _loaded;
     private Process? _acceptanceRunnerProcess;
@@ -440,7 +440,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        var repositoryRoot = System.IO.Path.GetDirectoryName(System.IO.Path.GetDirectoryName(scriptPath));
+        var repositoryRoot = System.IO.Path.GetDirectoryName(
+            System.IO.Path.GetDirectoryName(System.IO.Path.GetDirectoryName(scriptPath)));
         if (string.IsNullOrWhiteSpace(repositoryRoot))
         {
             StatusTextBlock.Text = "无法定位 MineRailMonitor 工作区。";
@@ -491,7 +492,7 @@ public partial class MainWindow : Window
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var candidate = System.IO.Path.Combine(directory.FullName, "scripts", "run-rfid-acceptance.ps1");
+            var candidate = System.IO.Path.Combine(directory.FullName, "scripts", "验收工具", "run-rfid-acceptance.ps1");
             if (File.Exists(candidate))
             {
                 return candidate;

@@ -1530,18 +1530,6 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
                 errors.Add($"RFID基站端口无效：{row.StationId}。");
                 continue;
             }
-            int? expectedVehicleCount = null;
-            if (!string.IsNullOrWhiteSpace(row.ExpectedVehicleCount))
-            {
-                if (!int.TryParse(row.ExpectedVehicleCount, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) || count is < 1 or > 14)
-                {
-                    errors.Add($"RFID基站标准列车节数必须为空或在1到14之间：{row.StationId}。");
-                    continue;
-                }
-
-                expectedVehicleCount = count;
-            }
-
             stations.Add(new RfidStationConfig
             {
                 StationId = row.StationId.Trim(),
@@ -1550,7 +1538,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
                 IpAddress = row.IpAddress.Trim(),
                 Port = port,
                 ProtocolAddress = protocolAddress,
-                ExpectedVehicleCount = expectedVehicleCount,
+                ExpectedVehicleCount = null,
                 Enabled = true,
                 Mode = 0x04,
                 CommandBytes = new byte[4],
@@ -1980,7 +1968,6 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             string ipAddress,
             string port,
             string protocolAddress,
-            string expectedVehicleCount,
             string yardId,
             bool enabled)
         {
@@ -1989,7 +1976,6 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             IpAddress = ipAddress;
             Port = port;
             ProtocolAddress = protocolAddress;
-            ExpectedVehicleCount = expectedVehicleCount;
             YardId = yardId;
             Enabled = enabled;
         }
@@ -2004,8 +1990,6 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
         public string ProtocolAddress { get; }
 
-        public string ExpectedVehicleCount { get; }
-
         public string YardId { get; }
 
         public bool Enabled { get; }
@@ -2016,7 +2000,6 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             row.IpAddress,
             row.Port,
             row.ProtocolAddress,
-            row.ExpectedVehicleCount,
             row.YardId,
             row.Enabled);
 
@@ -2033,7 +2016,6 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             IpAddress = IpAddress,
             Port = Port,
             ProtocolAddress = ProtocolAddress,
-            ExpectedVehicleCount = ExpectedVehicleCount,
             YardId = YardId,
             Enabled = Enabled
         };
@@ -2044,7 +2026,6 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             string.Equals(IpAddress, other.IpAddress, StringComparison.Ordinal) &&
             string.Equals(Port, other.Port, StringComparison.Ordinal) &&
             string.Equals(ProtocolAddress, other.ProtocolAddress, StringComparison.Ordinal) &&
-            string.Equals(ExpectedVehicleCount, other.ExpectedVehicleCount, StringComparison.Ordinal) &&
             string.Equals(YardId, other.YardId, StringComparison.Ordinal) &&
             Enabled == other.Enabled;
     }
@@ -2140,16 +2121,6 @@ public sealed class RfidStationEditorRow
 
     public string ProtocolAddress { get; set; } = string.Empty;
 
-    public string ExpectedVehicleCount { get; set; } = string.Empty;
-
-    public string ExpectedVehicleCountDisplay => int.TryParse(
-        ExpectedVehicleCount,
-        NumberStyles.Integer,
-        CultureInfo.InvariantCulture,
-        out var count)
-        ? $"标准节数 {count}"
-        : "标准节数 跟随全局";
-
     public string YardId { get; set; } = string.Empty;
 
     public string YardDisplayName { get; set; } = "未归属";
@@ -2188,7 +2159,6 @@ public sealed class RfidStationEditorRow
         IpAddress = station.IpAddress,
         Port = station.Port > 0 ? station.Port.ToString(CultureInfo.InvariantCulture) : string.Empty,
         ProtocolAddress = station.ProtocolAddress.ToString("X2"),
-        ExpectedVehicleCount = station.ExpectedVehicleCount?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
         Enabled = station.Enabled,
         BindingDisplay = "未绑定"
     };
@@ -2203,7 +2173,6 @@ public sealed class RfidStationEditorRow
         IpAddress = IpAddress.Trim(),
         Port = int.TryParse(Port, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) ? port : 0,
         ProtocolAddress = byte.TryParse(NormalizeProtocolText(ProtocolAddress), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var protocolAddress) ? protocolAddress : (byte)0,
-        ExpectedVehicleCount = int.TryParse(ExpectedVehicleCount, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) ? count : null,
         Enabled = false,
         Mode = 0x04,
         CommandBytes = new byte[4],

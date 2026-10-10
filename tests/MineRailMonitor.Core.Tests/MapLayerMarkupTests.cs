@@ -30,7 +30,9 @@ public sealed class MapLayerMarkupTests
         var viewport = File.ReadAllText(Locate("src", "MineRailMonitor", "Controls", "MapViewport.xaml.cs"));
 
         Assert.Contains("public Point MapAnchor", deviceVisual);
-        Assert.Contains("RfidMarkerAnchorX / Width", deviceVisual);
+        Assert.Contains("private const double RfidMarkerAnchorX = 13", deviceVisual);
+        Assert.Contains("private const double RfidMarkerAnchorY = 18", deviceVisual);
+        Assert.Contains("public Point MapAnchor => new(RfidMarkerAnchorX, RfidMarkerAnchorY)", deviceVisual);
         Assert.Contains("mapPoint.X - visual.MapAnchor.X", deviceLayer);
         Assert.Contains("deviceVisual.MapAnchor", viewport);
     }

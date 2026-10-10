@@ -266,17 +266,17 @@ public sealed class RfidStationEndpointTests
     [Theory]
     [InlineData(0)]
     [InlineData(15)]
-    public void Runtime_rejects_out_of_range_station_expected_vehicle_count(int count)
+    public void Runtime_ignores_legacy_station_expected_vehicle_count(int count)
     {
         var station = CreateStation("RFID-01", "一号站", 0x01, 62301);
         station.ExpectedVehicleCount = count;
 
-        var error = Assert.Throws<ArgumentException>(() => new RfidRuntimeCoordinator(
+        var coordinator = new RfidRuntimeCoordinator(
             new[] { station },
             new RfidSettings { ExpectedVehicleCount = 11, InterVehicleTimeoutSeconds = 30 },
-            new InMemoryPassageRecordStore()));
+            new InMemoryPassageRecordStore());
 
-        Assert.Contains("between 1 and 14", error.Message, StringComparison.Ordinal);
+        Assert.Equal(11, coordinator.States[station.ProtocolAddress].ExpectedVehicleCount);
     }
 
     [Fact]

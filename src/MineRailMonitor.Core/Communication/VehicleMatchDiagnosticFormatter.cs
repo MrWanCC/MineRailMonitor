@@ -17,7 +17,7 @@ public static class VehicleMatchDiagnosticFormatter
             VehicleMatchSource.VehicleConfiguration => "车辆配置",
             VehicleMatchSource.StationConfiguration => "基站配置",
             VehicleMatchSource.GlobalConfiguration => "全局配置",
-            _ => "未配置回退节数"
+            _ => "未配置车辆节数"
         };
 
         if (!result.IsMatched)

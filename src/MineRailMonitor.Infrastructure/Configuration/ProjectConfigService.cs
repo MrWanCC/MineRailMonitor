@@ -77,7 +77,6 @@ public sealed class ProjectConfigService : IProjectConfigService
             .Select(item => item.ToConfig())
             .ToArray();
         ValidateUniqueRfidStationIds(rfidStations, errors);
-        ValidateStationExpectedVehicleCounts(rfidStations, errors);
         errors.AddRange(VehicleConfigurationRules.Validate(vehicles));
         if (errors.Count > 0)
         {
@@ -702,10 +701,6 @@ public sealed class ProjectConfigService : IProjectConfigService
             {
                 errors.Add($"RFID基站协议地址不能为00：{station.StationId}。");
             }
-            if (station.ExpectedVehicleCount is < 1 or > 14)
-            {
-                errors.Add($"RFID基站标准列车节数必须在1到14之间：{station.StationId}。");
-            }
         }
     }
 
@@ -716,19 +711,6 @@ public sealed class ProjectConfigService : IProjectConfigService
         foreach (var stationId in RfidStationConfigurationRules.FindDuplicateStationIds(stations))
         {
             errors.Add($"RFID基站编号重复：{stationId}。");
-        }
-    }
-
-    private static void ValidateStationExpectedVehicleCounts(
-        IEnumerable<RfidStationConfig> stations,
-        ICollection<string> errors)
-    {
-        foreach (var station in stations.Where(item => item is not null && item.Enabled))
-        {
-            if (station.ExpectedVehicleCount is < 1 or > 14)
-            {
-                errors.Add($"RFID基站标准列车节数必须在1到14之间：{station.StationId}。");
-            }
         }
     }
 
@@ -840,11 +822,6 @@ public sealed class ProjectConfigService : IProjectConfigService
         {
             result["YardId"] = station.YardId!.Trim();
         }
-        if (station.ExpectedVehicleCount.HasValue)
-        {
-            result["ExpectedVehicleCount"] = station.ExpectedVehicleCount.Value;
-        }
-
         return result;
     }
 
@@ -1053,8 +1030,6 @@ public sealed class ProjectConfigService : IProjectConfigService
         public string IpAddress { get; set; } = string.Empty;
         public int Port { get; set; }
         public byte ProtocolAddress { get; set; }
-        public int? ExpectedVehicleCount { get; set; }
-
         // Legacy fields remain readable for existing project manifests.
         public byte Address { get; set; }
         public bool Enabled { get; set; } = true;
@@ -1084,7 +1059,6 @@ public sealed class ProjectConfigService : IProjectConfigService
                 IpAddress = ipAddress,
                 Port = port,
                 ProtocolAddress = protocolAddress,
-                ExpectedVehicleCount = ExpectedVehicleCount,
                 Enabled = Enabled,
                 Mode = Mode,
                 CommandBytes = CommandBytes,

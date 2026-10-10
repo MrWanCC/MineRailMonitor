@@ -388,7 +388,9 @@ public sealed class SettingsPageMarkupTests
         Assert.Contains("Padding=\"0,0,0,8\"", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("<ScrollViewer VerticalScrollBarVisibility=\"Visible\"", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("<ScrollViewer Grid.Row=\"1\" VerticalScrollBarVisibility=\"Auto\"", markup, StringComparison.Ordinal);
-        Assert.Contains("<Border Grid.Row=\"1\" MinHeight=\"340\" MaxHeight=\"420\"", markup, StringComparison.Ordinal);
+        Assert.Contains("<Border Grid.Row=\"1\" VerticalAlignment=\"Stretch\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("MinHeight=\"340\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("MaxHeight=\"420\"", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("<Border Grid.Row=\"1\" Height=\"300\"", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("MinHeight=\"220\"", markup, StringComparison.Ordinal);
         Assert.Contains("<RowDefinition Height=\"*\" />", markup, StringComparison.Ordinal);
@@ -602,7 +604,7 @@ public sealed class SettingsPageMarkupTests
     {
         var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
 
-        Assert.Contains("Text=\"轮询、标准节数、车辆超时。\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Text=\"轮询与车辆识别超时。\"", markup, StringComparison.Ordinal);
         Assert.Contains("Text=\"当前配置可用\"", markup, StringComparison.Ordinal);
         Assert.Contains("Text=\"保存后参数立即生效。\"", markup, StringComparison.Ordinal);
         Assert.Contains("<Setter Property=\"Height\" Value=\"24\" />", markup, StringComparison.Ordinal);
@@ -781,17 +783,16 @@ public sealed class SettingsPageMarkupTests
     }
 
     [Fact]
-    public void Station_editor_exposes_optional_expected_vehicle_count_with_global_fallback()
+    public void Station_editor_does_not_expose_station_specific_vehicle_count()
     {
         var model = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor.Core", "Models", "RfidStationConfig.cs"));
         var markup = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml"));
         var code = File.ReadAllText(LocateSourceFile("src", "MineRailMonitor", "Pages", "SettingsPage.xaml.cs"));
 
         Assert.Contains("public int? ExpectedVehicleCount { get; set; }", model, StringComparison.Ordinal);
-        Assert.Contains("Text=\"{Binding ExpectedVehicleCount, UpdateSourceTrigger=PropertyChanged}\"", markup, StringComparison.Ordinal);
-        Assert.Contains("留空使用全局标准值", markup, StringComparison.Ordinal);
-        Assert.Contains("count is < 1 or > 14", code, StringComparison.Ordinal);
-        Assert.Contains("ExpectedVehicleCount = expectedVehicleCount", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"{Binding ExpectedVehicleCount, UpdateSourceTrigger=PropertyChanged}\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("本站标准列车节数", markup, StringComparison.Ordinal);
+        Assert.Contains("ExpectedVehicleCount = null", code, StringComparison.Ordinal);
     }
 
     private static string LocateSourceFile(params string[] segments)

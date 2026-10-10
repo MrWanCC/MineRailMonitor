@@ -29,7 +29,7 @@ public sealed class RfidStationConfigurationTests
     }
 
     [Fact]
-    public async Task Save_and_load_preserves_station_expected_vehicle_count()
+    public async Task Save_and_load_drops_legacy_station_expected_vehicle_count()
     {
         using var project = TemporaryProject.Create();
         var service = new ProjectConfigService(new FileLogger(Path.Combine(project.Path, "test-logs")));
@@ -40,13 +40,14 @@ public sealed class RfidStationConfigurationTests
         var loaded = await service.LoadAsync(project.Path);
 
         Assert.True(save.Succeeded, string.Join(Environment.NewLine, save.Errors));
-        Assert.Equal(6, Assert.Single(loaded.Project!.RfidStations).ExpectedVehicleCount);
+        Assert.Null(Assert.Single(loaded.Project!.RfidStations).ExpectedVehicleCount);
+        Assert.DoesNotContain("ExpectedVehicleCount", File.ReadAllText(Path.Combine(project.Path, "project.json")));
     }
 
     [Theory]
     [InlineData(0)]
     [InlineData(15)]
-    public async Task Save_rejects_out_of_range_station_expected_vehicle_count(int count)
+    public async Task Save_ignores_legacy_out_of_range_station_expected_vehicle_count(int count)
     {
         using var project = TemporaryProject.Create();
         var service = new ProjectConfigService(new FileLogger(Path.Combine(project.Path, "test-logs")));
@@ -55,12 +56,11 @@ public sealed class RfidStationConfigurationTests
 
         var save = await service.SaveRfidStationsAsync(project.Path, new[] { station });
 
-        Assert.False(save.Succeeded);
-        Assert.Contains(save.Errors, error => error.IndexOf("标准列车节数", StringComparison.Ordinal) >= 0);
+        Assert.True(save.Succeeded, string.Join(Environment.NewLine, save.Errors));
     }
 
     [Fact]
-    public async Task Load_rejects_out_of_range_station_expected_vehicle_count()
+    public async Task Load_ignores_legacy_out_of_range_station_expected_vehicle_count()
     {
         using var project = TemporaryProject.Create("""
             {
@@ -76,8 +76,8 @@ public sealed class RfidStationConfigurationTests
 
         var result = await service.LoadAsync(project.Path);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains(result.Errors, error => error.IndexOf("标准列车节数", StringComparison.Ordinal) >= 0);
+        Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Errors));
+        Assert.Null(Assert.Single(result.Project!.RfidStations).ExpectedVehicleCount);
     }
 
     [Fact]

@@ -9,7 +9,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $mainBinaryDirectory = Join-Path $repoRoot "src\MineRailMonitor\bin\$Configuration\net48"
 $simulatorBinaryDirectory = Join-Path $repoRoot "src\MineRailMonitor.Simulator\bin\$Configuration\net48"
 $mainExecutable = Join-Path $mainBinaryDirectory 'MineRailMonitor.exe'

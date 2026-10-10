@@ -42,7 +42,7 @@ public sealed class VehicleMatchResolverTests
     }
 
     [Fact]
-    public void Uses_station_expected_count_when_head_tag_has_no_vehicle_configuration()
+    public void Ignores_station_expected_count_when_head_tag_has_no_vehicle_configuration()
     {
         var station = CreateStation(0x01, "127.0.0.1", 62001, 6);
         var project = CreateProject(Array.Empty<VehicleConfig>(), new[] { station }, 11);
@@ -54,8 +54,8 @@ public sealed class VehicleMatchResolverTests
         Assert.Equal(string.Empty, result.VehicleNo);
         Assert.Equal((ushort)2, result.HeadRfid);
         Assert.Equal(string.Empty, result.VehicleName);
-        Assert.Equal(6, result.ExpectedVehicleCount);
-        Assert.Equal(VehicleMatchSource.StationConfiguration, result.Source);
+        Assert.Equal(11, result.ExpectedVehicleCount);
+        Assert.Equal(VehicleMatchSource.GlobalConfiguration, result.Source);
     }
 
     [Fact]
@@ -102,8 +102,8 @@ public sealed class VehicleMatchResolverTests
 
         Assert.False(result.IsMatched);
         Assert.Null(result.HeadRfid);
-        Assert.Equal(6, result.ExpectedVehicleCount);
-        Assert.Equal(VehicleMatchSource.StationConfiguration, result.Source);
+        Assert.Equal(11, result.ExpectedVehicleCount);
+        Assert.Equal(VehicleMatchSource.GlobalConfiguration, result.Source);
     }
 
     private static ProjectConfig CreateProject(

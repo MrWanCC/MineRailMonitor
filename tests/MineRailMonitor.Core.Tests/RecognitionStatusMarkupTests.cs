@@ -20,7 +20,7 @@ public sealed class RecognitionStatusMarkupTests
         var communicationCode = File.ReadAllText(Locate("src", "MineRailMonitor", "Pages", "CommunicationPage.xaml.cs"));
 
         Assert.Contains("全局回退节数（含车头，可选）", settingsMarkup);
-        Assert.Contains("留空且基站未配置时，未知车辆不做完整性报警", settingsMarkup);
+        Assert.Contains("未匹配车辆按此值判定，留空则完整性未判定", settingsMarkup);
         Assert.Contains("ExpectedVehicleCount", settingsCode);
         Assert.Contains("InterVehicleTimeoutSeconds", settingsCode);
         Assert.Contains("RecognitionNotice", monitorMarkup);

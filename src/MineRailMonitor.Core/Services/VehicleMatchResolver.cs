@@ -1,4 +1,3 @@
-using System.Net;
 using MineRailMonitor.Core.Models;
 
 namespace MineRailMonitor.Core.Services;
@@ -27,7 +26,7 @@ public sealed class VehicleMatchResolver
             ? _vehicleConfigurationService.FindByHeadRfid(headRfid.Value)
             : null;
 
-        return CreateResult(headRfid, vehicle, FindStation(frame));
+        return CreateResult(headRfid, vehicle);
     }
 
     public VehicleMatchResult Resolve(RfidStationFrame frame, StationRuntimeState state)
@@ -40,18 +39,10 @@ public sealed class VehicleMatchResolver
             ? _vehicleConfigurationService.FindByHeadRfid(headRfid.Value)
             : null;
 
-        var station = (_project.RfidStations ?? Array.Empty<RfidStationConfig>())
-            .Where(item => item is not null && item.Enabled && item.ProtocolAddress == state.StationAddress)
-            .FirstOrDefault(item => string.Equals(
-                item.StationId,
-                state.StationId,
-                StringComparison.OrdinalIgnoreCase));
-        station ??= FindStation(frame);
-
-        return CreateResult(headRfid, vehicle, station);
+        return CreateResult(headRfid, vehicle);
     }
 
-    private VehicleMatchResult CreateResult(ushort? headRfid, VehicleConfig? vehicle, RfidStationConfig? station)
+    private VehicleMatchResult CreateResult(ushort? headRfid, VehicleConfig? vehicle)
     {
         if (vehicle is not null)
         {
@@ -63,17 +54,6 @@ public sealed class VehicleMatchResolver
                 VehicleName = vehicle.VehicleName,
                 ExpectedVehicleCount = vehicle.TotalSectionCount,
                 Source = VehicleMatchSource.VehicleConfiguration
-            };
-        }
-
-        if (station?.ExpectedVehicleCount is int stationExpectedCount)
-        {
-            return new VehicleMatchResult
-            {
-                IsMatched = false,
-                HeadRfid = headRfid,
-                ExpectedVehicleCount = stationExpectedCount,
-                Source = VehicleMatchSource.StationConfiguration
             };
         }
 
@@ -100,42 +80,4 @@ public sealed class VehicleMatchResolver
         return rfid == 0 ? null : rfid;
     }
 
-    private RfidStationConfig? FindStation(RfidStationFrame frame)
-    {
-        var candidates = (_project.RfidStations ?? Array.Empty<RfidStationConfig>())
-            .Where(station => station is not null &&
-                              station.Enabled &&
-                              station.ProtocolAddress == frame.StationAddress)
-            .ToArray();
-
-        if (IsUsableEndpoint(frame.SourceEndpoint))
-        {
-            var endpointMatches = candidates
-                .Where(station => station.TryResolveEndpoint(out var endpoint) &&
-                                  endpoint.Equals(frame.SourceEndpoint))
-                .ToArray();
-            if (endpointMatches.Length == 1)
-            {
-                return endpointMatches[0];
-            }
-
-            if (endpointMatches.Length > 1 ||
-                candidates.Length != 1 ||
-                candidates.Any(station => station.TryResolveEndpoint(out _)))
-            {
-                return null;
-            }
-
-            return candidates[0];
-        }
-
-        return candidates.Length == 1 ? candidates[0] : null;
-    }
-
-    private static bool IsUsableEndpoint(IPEndPoint? endpoint) =>
-        endpoint is not null &&
-        endpoint.Port is >= 1 and <= 65535 &&
-        !IPAddress.None.Equals(endpoint.Address) &&
-        !IPAddress.Any.Equals(endpoint.Address) &&
-        !IPAddress.IPv6Any.Equals(endpoint.Address);
 }

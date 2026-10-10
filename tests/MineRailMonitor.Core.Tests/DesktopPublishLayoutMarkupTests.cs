@@ -14,7 +14,7 @@ public sealed class DesktopPublishLayoutMarkupTests
     [Fact]
     public void Package_script_uses_only_the_Example_projects_whitelist()
     {
-        var script = ReadSource("scripts", "build-desktop-package.ps1");
+        var script = ReadSource("scripts", "打包工具", "build-desktop-package.ps1");
 
         Assert.Contains("dotnet publish", script, StringComparison.Ordinal);
         Assert.Contains("desktop-package", script, StringComparison.Ordinal);
@@ -33,7 +33,7 @@ public sealed class DesktopPublishLayoutMarkupTests
     [Fact]
     public void Package_script_rejects_projects_nested_under_App()
     {
-        var script = ReadSource("scripts", "build-desktop-package.ps1");
+        var script = ReadSource("scripts", "打包工具", "build-desktop-package.ps1");
 
         Assert.Contains("$publishedProjects = Join-Path $appDirectory \"Projects\"", script, StringComparison.Ordinal);
         Assert.Contains("if (Test-Path $publishedProjects)", script, StringComparison.Ordinal);
@@ -43,7 +43,7 @@ public sealed class DesktopPublishLayoutMarkupTests
     [Fact]
     public void Package_script_enumerates_and_copies_only_tracked_Example_files()
     {
-        var script = ReadSource("scripts", "build-desktop-package.ps1");
+        var script = ReadSource("scripts", "打包工具", "build-desktop-package.ps1");
 
         Assert.Contains("git -C $repoRoot ls-files -- \"Projects/Example\"", script, StringComparison.Ordinal);
         Assert.Contains("$trackedExampleFiles", script, StringComparison.Ordinal);
@@ -57,7 +57,7 @@ public sealed class DesktopPublishLayoutMarkupTests
     [Fact]
     public void Package_script_rejects_uncommitted_tracked_Example_changes()
     {
-        var script = ReadSource("scripts", "build-desktop-package.ps1");
+        var script = ReadSource("scripts", "打包工具", "build-desktop-package.ps1");
 
         Assert.Contains("git -C $repoRoot diff --quiet -- \"Projects/Example\"", script, StringComparison.Ordinal);
         Assert.Contains("git -C $repoRoot diff --cached --quiet -- \"Projects/Example\"", script, StringComparison.Ordinal);

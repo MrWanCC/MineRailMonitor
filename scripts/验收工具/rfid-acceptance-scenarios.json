@@ -12,7 +12,7 @@
   { "name": "UdpU03LateEleventhCompletes", "displayName": "U03 · 延迟补读完成" },
   { "name": "UdpU04RepeatedTagsTimeout", "displayName": "U04 · 重复标签超时" },
   { "name": "UdpU05HeadAppearsLate", "displayName": "U05 · 车头后到" },
-  { "name": "UdpU06UnknownHeadFallback", "displayName": "U06 · 未知车辆回退（预期未配置）" },
+  { "name": "UdpU06UnknownHeadFallback", "displayName": "U06 · 未知车头全局节数回退" },
   { "name": "UdpU07ConsecutiveAfterClear", "displayName": "U07 · 清场后连续通过" },
   { "name": "UdpU08ImmediateConsecutive", "displayName": "U08 · 立即连续通过" },
   { "name": "U09_11CarMissingFive", "displayName": "TEST-11 · 11节缺5节" },

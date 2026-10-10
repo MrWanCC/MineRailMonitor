@@ -15,6 +15,7 @@ namespace MineRailMonitor.Pages;
 public partial class AlarmHistoryPage : UserControl
 {
     private const int PageSize = 20;
+    private const int DefaultRangeDays = 30;
     private readonly IPassageRecordStore _recordStore;
     private readonly Action<Guid, DateTimeOffset>? _acknowledgeAlarmRequested;
     private IReadOnlyList<RfidStationConfig> _stations;
@@ -356,7 +357,7 @@ public partial class AlarmHistoryPage : UserControl
         _isUpdatingDateRange = true;
         try
         {
-            FromDatePicker.SelectedDate = date.Date;
+            FromDatePicker.SelectedDate = date.Date.AddDays(-(DefaultRangeDays - 1));
             ToDatePicker.SelectedDate = date.Date;
         }
         finally

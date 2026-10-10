@@ -55,7 +55,7 @@ public partial class PassageDetailsDialog : Window
         AlarmValue.Text = record.Outcome == PassageOutcome.UncouplingAlarm
             ? PassageAlarmDisplayFormatter.FormatDetails(record)
             : record.Outcome == PassageOutcome.Unverified
-                ? "车辆未匹配，且未配置完整性判断回退节数"
+                ? "车头未匹配车辆配置，完整性未判定"
                 : record.AlarmMessage ?? "-";
         WarningValue.Text = record.WarningMessages.Count == 0 ? "-" : string.Join("；", record.WarningMessages);
 

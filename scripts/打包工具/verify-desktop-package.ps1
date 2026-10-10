@@ -78,7 +78,7 @@ if ($projectDirectories.Count -ne 1 -or $projectDirectories[0].Name -cne 'Exampl
     throw 'Clean staging must contain exactly one project directory named Example'
 }
 
-$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $trackedProjectFiles = @(& git -C $repoRoot ls-files -- 'Projects/Example')
 if ($LASTEXITCODE -ne 0) {
     throw 'Unable to read tracked Projects/Example files from Git'

@@ -270,7 +270,7 @@ public static class PassageEventDisplayFormatter
     {
         var value = reason?.Trim();
         return value is null || value.Length == 0
-            ? "车辆未匹配，且未配置完整性判断回退节数"
+            ? "车头未匹配车辆配置，完整性未判定"
             : value;
     }
 }

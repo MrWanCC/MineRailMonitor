@@ -335,11 +335,6 @@ public static class ConfigurationOperationRecordFormatter
             "协议地址",
             before.ProtocolAddress.ToString("X2", CultureInfo.InvariantCulture),
             after.ProtocolAddress.ToString("X2", CultureInfo.InvariantCulture));
-        AddChange(
-            changedFields,
-            "标准列车节数",
-            before.ExpectedVehicleCount?.ToString(CultureInfo.InvariantCulture) ?? "全局默认",
-            after.ExpectedVehicleCount?.ToString(CultureInfo.InvariantCulture) ?? "全局默认");
         AddChange(changedFields, "状态", FormatEnabled(before.Enabled), FormatEnabled(after.Enabled));
         return changedFields;
     }
@@ -361,7 +356,6 @@ public static class ConfigurationOperationRecordFormatter
         $"IP地址: {station.IpAddress}",
         $"端口: {station.Port.ToString(CultureInfo.InvariantCulture)}",
         $"协议地址: {station.ProtocolAddress.ToString("X2", CultureInfo.InvariantCulture)}",
-        $"标准列车节数: {station.ExpectedVehicleCount?.ToString(CultureInfo.InvariantCulture) ?? "全局默认"}",
         $"状态: {FormatEnabled(station.Enabled)}"
     });
 

@@ -14,6 +14,7 @@ namespace MineRailMonitor.Pages;
 public partial class HistoryPage : UserControl
 {
     private const int PageSize = 20;
+    private const int DefaultRangeDays = 30;
     private readonly IPassageRecordStore _recordStore;
     private IReadOnlyList<RfidStationConfig> _stations;
     private IReadOnlyDictionary<string, string> _stationNames;
@@ -314,8 +315,9 @@ public partial class HistoryPage : UserControl
 
     private void SetDefaultDateTimeFilter()
     {
-        FromDatePicker.SelectedDate = DateTime.Today;
-        ToDatePicker.SelectedDate = DateTime.Today;
+        var today = DateTime.Today;
+        FromDatePicker.SelectedDate = today.AddDays(-(DefaultRangeDays - 1));
+        ToDatePicker.SelectedDate = today;
     }
 
     private void OnDatePickerPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

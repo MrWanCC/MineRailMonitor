@@ -1,10 +1,10 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
-    [string]$OutputRoot = (Join-Path $PSScriptRoot "..\artifacts\desktop-package")
+    [string]$OutputRoot = (Join-Path $PSScriptRoot "..\打包结果\暂存\desktop-package")
 )
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $stagingRoot = [IO.Path]::GetFullPath($OutputRoot)
 $appDirectory = Join-Path $stagingRoot "App"
 $projectsDirectory = Join-Path $stagingRoot "Projects"

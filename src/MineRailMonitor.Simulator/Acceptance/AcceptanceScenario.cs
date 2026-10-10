@@ -189,7 +189,8 @@ public static class AcceptanceScenario
             }),
         new AcceptanceScenarioDefinition(
             "UdpU06UnknownHeadFallback",
-            new[] { Train(0x01, StandardVehicle(0x2001, 0x2101)) }),
+            new[] { Train(0x01, StandardVehicle(0x2001, 0x2101)) },
+            displayName: "未知车头全局节数回退"),
         new AcceptanceScenarioDefinition(
             "UdpU07ConsecutiveAfterClear",
             new[]
@@ -235,7 +236,7 @@ public static class AcceptanceScenario
         new AcceptanceScenarioDefinition(
             "U14_UnverifiedNoFallback",
             new[] { Train(0x01, new ushort[] { 0xC001, 0xC101, 0xC102, 0xC103 }) },
-            displayName: "未知车辆 · 无回退未判定")
+            displayName: "未知车辆 · 完整性未判定")
     };
 
     public static AcceptanceScenarioDefinition Parse(string name)

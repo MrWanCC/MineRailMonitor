@@ -10,14 +10,13 @@ namespace MineRailMonitor.Controls;
 
 public partial class MapPointLayer : UserControl
 {
-    private const double MarkerAnchorX = 7;
-    private const double MarkerAnchorY = 15;
+    private const double MarkerAnchorX = 5;
+    private const double MarkerAnchorY = 11;
     private readonly ICoordinateTransformService _coordinateTransformService = new CoordinateTransformService();
     private readonly Dictionary<string, FrameworkElement> _visuals = new(StringComparer.OrdinalIgnoreCase);
     private StationConfig? _station;
     private double _mapWidth;
     private double _mapHeight;
-    private double _viewportScale = 1;
     private bool _isAnnotationEditMode;
 
     public MapPointLayer()
@@ -45,7 +44,6 @@ public partial class MapPointLayer : UserControl
         }
 
         ArrangePoints();
-        SetViewportScale(_viewportScale);
         SetAnnotationEditMode(_isAnnotationEditMode);
     }
 
@@ -80,20 +78,6 @@ public partial class MapPointLayer : UserControl
         Canvas.SetTop(visual, mapPoint.Y - MarkerAnchorY);
     }
 
-    public void SetViewportScale(double scale)
-    {
-        if (scale <= 0)
-        {
-            return;
-        }
-
-        _viewportScale = scale;
-        foreach (var visual in _visuals.Values)
-        {
-            visual.RenderTransform = new ScaleTransform(1 / scale, 1 / scale);
-        }
-    }
-
     private static FrameworkElement CreateVisual(MapPoint point)
     {
         const double anchorX = MarkerAnchorX;
@@ -105,7 +89,6 @@ public partial class MapPointLayer : UserControl
         {
             Width = width,
             Height = height,
-            RenderTransformOrigin = new Point(anchorX / width, anchorY / height),
             ToolTip = $"{point.Name}  CAD ({point.CadX:0.####}, {point.CadY:0.####})"
         };
         visual.DataContext = new MapAnnotationVisualMetadata(

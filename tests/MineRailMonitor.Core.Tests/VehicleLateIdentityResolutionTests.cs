@@ -12,8 +12,11 @@ public sealed class VehicleLateIdentityResolutionTests
     [Fact]
     public void Later_position_zero_match_fills_identity_without_changing_session_expected_count()
     {
-        var station = CreateStation(expectedVehicleCount: 6);
-        var coordinator = CreateCoordinator(station, new[] { CreateVehicle(0x1001, "K001", "1号矿车", 4) });
+        var station = CreateStation(expectedVehicleCount: null);
+        var coordinator = CreateCoordinator(
+            station,
+            new[] { CreateVehicle(0x1001, "K001", "1号矿车", 4) },
+            globalExpectedCount: 6);
 
         var session = coordinator.ProcessFrame(CreateFrame(station, Start, 0, 0x1101, 0x1102, 0x1001));
 
@@ -62,7 +65,7 @@ public sealed class VehicleLateIdentityResolutionTests
     [Fact]
     public void Session_stays_unmatched_when_no_configured_head_appears()
     {
-        var station = CreateStation(expectedVehicleCount: 6);
+        var station = CreateStation(expectedVehicleCount: null);
         var eventLogger = new RecordingPassageEventLogger();
         var coordinator = CreateCoordinator(
             station,
@@ -82,14 +85,15 @@ public sealed class VehicleLateIdentityResolutionTests
     [Fact]
     public void Late_identity_is_saved_in_passage_snapshot_and_logged_with_passage_id()
     {
-        var station = CreateStation(expectedVehicleCount: 6);
+        var station = CreateStation(expectedVehicleCount: null);
         var store = new InMemoryPassageRecordStore();
         var eventLogger = new RecordingPassageEventLogger();
         var coordinator = CreateCoordinator(
             station,
             new[] { CreateVehicle(0x1001, "K001", "1号矿车", 4) },
             eventLogger,
-            store);
+            store,
+            globalExpectedCount: 6);
 
         var session = coordinator.ProcessFrame(CreateFrame(station, Start, 0, 0x1101, 0x1102, 0x1001));
         var discoveredAt = Start.AddSeconds(1);
@@ -116,9 +120,10 @@ public sealed class VehicleLateIdentityResolutionTests
         RfidStationConfig station,
         IReadOnlyList<VehicleConfig> vehicles,
         RecordingPassageEventLogger? eventLogger = null,
-        InMemoryPassageRecordStore? store = null) => new(
+        InMemoryPassageRecordStore? store = null,
+        int globalExpectedCount = 11) => new(
             new[] { station },
-            new RfidSettings { ExpectedVehicleCount = 11, InterVehicleTimeoutSeconds = 2 },
+            new RfidSettings { ExpectedVehicleCount = globalExpectedCount, InterVehicleTimeoutSeconds = 2 },
             store ?? new InMemoryPassageRecordStore(),
             new RfidRuntimePolicy(TimeSpan.FromSeconds(10)),
             vehicles,

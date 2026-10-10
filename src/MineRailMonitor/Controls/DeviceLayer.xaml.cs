@@ -53,7 +53,7 @@ public partial class DeviceLayer : UserControl
         {
             var binding = RfidMapBindingResolver.Resolve(device, _rfidStations.Values);
             var displayName = string.IsNullOrWhiteSpace(device.Name) ? binding.EffectiveName : device.Name;
-            var visual = new DeviceVisual(device, displayName);
+            var visual = new DeviceVisual(device, displayName, binding.Configuration);
             visual.Click += OnDeviceClicked;
             visual.SetAnnotationEditMode(_isAnnotationEditMode);
             _visuals[device.Id] = visual;
@@ -131,19 +131,6 @@ public partial class DeviceLayer : UserControl
 
         Canvas.SetLeft(visual, mapPoint.X - visual.MapAnchor.X);
         Canvas.SetTop(visual, mapPoint.Y - visual.MapAnchor.Y);
-    }
-
-    public void SetViewportScale(double scale)
-    {
-        if (scale <= 0)
-        {
-            return;
-        }
-
-        foreach (var visual in _visuals.Values)
-        {
-            visual.SetViewportScale(scale);
-        }
     }
 
     private void OnDeviceClicked(object sender, RoutedEventArgs e)

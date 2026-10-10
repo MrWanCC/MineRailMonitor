@@ -128,12 +128,13 @@ public sealed class SimulatorVehicleScenarioIntegrationTests
     public void Vehicle_head_in_position_zero_on_a_later_frame_supplements_identity_without_creating_another_passage()
     {
         var plan = AcceptanceScenario.Parse("VehicleHeadAppearsLate7").Trains.Single();
-        var station = CreateStation(expectedVehicleCount: 7);
+        var station = CreateStation(expectedVehicleCount: null);
         var store = new InMemoryPassageRecordStore();
         var coordinator = CreateCoordinator(
             station,
             store,
-            new[] { CreateVehicle(0x1001, "K001", "矿车001", plan.VehicleRfids) });
+            new[] { CreateVehicle(0x1001, "K001", "矿车001", plan.VehicleRfids) },
+            globalExpectedCount: 7);
 
         var firstSession = coordinator.ProcessFrame(CreateFrameFromPlan(station, Start, plan, includeHead: false));
         Assert.NotNull(firstSession);
@@ -159,9 +160,9 @@ public sealed class SimulatorVehicleScenarioIntegrationTests
     public void Repeated_reads_do_not_increase_detected_count_or_extend_new_tag_timeout()
     {
         var plan = AcceptanceScenario.Parse("VehicleRepeatedTagReads").Trains.Single();
-        var station = CreateStation(expectedVehicleCount: 7);
+        var station = CreateStation(expectedVehicleCount: null);
         var store = new InMemoryPassageRecordStore();
-        var coordinator = CreateCoordinator(station, store, Array.Empty<VehicleConfig>());
+        var coordinator = CreateCoordinator(station, store, Array.Empty<VehicleConfig>(), globalExpectedCount: 7);
         var session = coordinator.ProcessFrame(CreateFrame(station, Start, plan.VehicleRfids));
 
         Assert.NotNull(session);
@@ -184,13 +185,11 @@ public sealed class SimulatorVehicleScenarioIntegrationTests
     }
 
     [Theory]
-    [InlineData(6, 11, VehicleMatchSource.StationConfiguration, 6)]
-    [InlineData(null, 11, VehicleMatchSource.GlobalConfiguration, 11)]
-    public void Unknown_head_scenario_keeps_station_or_global_expected_count(
+    [InlineData(6, 11)]
+    [InlineData(null, 11)]
+    public void Unknown_head_scenario_ignores_station_count_and_uses_global_count(
         int? stationExpectedCount,
-        int globalExpectedCount,
-        VehicleMatchSource expectedSource,
-        int expectedCount)
+        int globalExpectedCount)
     {
         var plan = AcceptanceScenario.Parse("VehicleUnconfiguredFallback").Trains.Single();
         var station = CreateStation(stationExpectedCount);
@@ -206,15 +205,15 @@ public sealed class SimulatorVehicleScenarioIntegrationTests
         var session = coordinator.ProcessFrame(CreateFrame(station, Start, plan.VehicleRfids));
 
         Assert.NotNull(session);
-        Assert.Equal(expectedCount, session!.ExpectedVehicleCount);
+        Assert.Equal(globalExpectedCount, session!.ExpectedVehicleCount);
         Assert.NotNull(matchResult);
         Assert.False(matchResult!.IsMatched);
-        Assert.Equal(expectedSource, matchResult.Source);
-        Assert.Equal(expectedCount, matchResult.ExpectedVehicleCount);
+        Assert.Equal(VehicleMatchSource.GlobalConfiguration, matchResult.Source);
+        Assert.Equal(globalExpectedCount, matchResult.ExpectedVehicleCount);
         Assert.Null(session.VehicleNo);
         Assert.Null(session.VehicleName);
         Assert.Null(session.VehicleHeadRfid);
-        if (expectedCount == plan.VehicleRfids.Count)
+        if (globalExpectedCount == plan.VehicleRfids.Count)
         {
             var record = Assert.Single(store.Records);
             Assert.Null(record.VehicleNo);
